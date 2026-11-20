@@ -1275,7 +1275,7 @@ fn export_dialog(root : @view.View) -> Unit {
 /// one line while it is being saved or where it failed.
 fn saved_note(parent : @view.View) -> Unit {
   parent.box(fn(o) {
-    o.over(Is(true)).lines_up(Is(Some(End))).lies_along(Is(Start)).padding(Is((16.0, 16.0, 16.0, 16.0))).presses(Is(false)) |> ignore
+    o.over(Is(true)).lines_up(Is(Some(End))).lies_along(Is(Start)).padding(Is((16.0, 16.0, 16.0, 16.0))).takes(fn(_, _, _) { [] }) |> ignore
     let way = @motion.NodeWay::new(0.0)
     // (what it says kept while it fades out)
     let kept : Ref[(String, String)] = Ref(("", ""))

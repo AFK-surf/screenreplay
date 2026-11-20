@@ -62,6 +62,7 @@ fn put_away() -> Unit {
     close_clip_player()
   }
   clipping.set(false)
+  clear_windows()
   saved.set("")
   if full_screen.untracked() {
     set_full_screen(false)
@@ -76,7 +77,6 @@ fn as_opened() -> Unit {
   app_names.clear()
   app_icons_found.clear()
   load()
-  load_windows()
   status_rev.set(status_rev.untracked() + 1)
   if rp_take_request(cstr(root_dir() + "\\settings.request")) != 0 {
     load_settings()

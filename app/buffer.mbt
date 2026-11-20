@@ -115,7 +115,14 @@ fn purge_now() -> Unit {
   }
   segs.clear()
   marks.clear()
+  marks_read.val = 0.0
+  marks_tail.val = ""
+  marks_head.val = ""
   apps.clear()
+  apps_read.val = 0.0
+  apps_tail.val = ""
+  apps_head.val = ""
+  clear_windows()
   current.val = -1
   data_changed()
 }
@@ -125,8 +132,26 @@ fn purge_now() -> Unit {
 let marks : Array[Double] = []
 
 ///|
+let marks_read : Ref[Double] = Ref(0.0)
+
+///|
+let marks_tail : Ref[String] = Ref("")
+
+///|
+let marks_head : Ref[String] = Ref("")
+
+///|
 /// The app in front from each time on: (ms since the epoch, its process name).
 let apps : Array[(Double, String)] = []
+
+///|
+let apps_read : Ref[Double] = Ref(0.0)
+
+///|
+let apps_tail : Ref[String] = Ref("")
+
+///|
+let apps_head : Ref[String] = Ref("")
 
 ///|
 fn digits(s : String, from : Int, n : Int) -> Int? {
@@ -315,31 +340,106 @@ fn load() -> Unit {
       @ui.log("REPLAY_REFRESH segments=\{segs.length()} from=\{view_from.untracked()} current=\{current.val}")
     }
   }
-  let new_marks : Array[Double] = []
-  for line in read_text(root_dir() + "\\markers.jsonl").split("\n") {
-    match parse(line.to_owned()) {
-      Some({ "at": Number(at, ..), .. }) if at >= purged_before.val => new_marks.push(at)
-      _ => ()
-    }
-  }
-  new_marks.sort()
-  let new_apps : Array[(Double, String)] = []
-  for line in read_text(root_dir() + "\\apps.jsonl").split("\n") {
-    match parse(line.to_owned()) {
-      Some({ "at": Number(at, ..), "app": String(app), .. }) if at >= purged_before.val => new_apps.push((at, app))
-      _ => ()
-    }
-  }
-  if new_marks != marks || new_apps != apps {
+  if load_marks_incremental() {
     changed = true
-    marks.clear()
-    marks.append(new_marks)
-    apps.clear()
-    apps.append(new_apps)
+  }
+  if load_apps_incremental() {
+    changed = true
   }
   if changed {
     data_changed()
   }
+}
+
+///|
+/// Incrementally reads appended lines from `markers.jsonl` (re-reading from scratch if pruned/rewritten).
+fn load_marks_incremental() -> Bool {
+  let path = root_dir() + "\\markers.jsonl"
+  let size = rp_size(cstr(path))
+  if size <= 0.0 {
+    let had = !marks.is_empty()
+    marks.clear()
+    marks_read.val = 0.0
+    marks_tail.val = ""
+    marks_head.val = ""
+    return had
+  }
+  let head = @utf8.decode_lossy(rp_read(cstr(path), 0.0, @cmp.minimum(48, size.to_int()))[:])
+  let mut reset = false
+  if size < marks_read.val || (marks_head.val != "" && head != marks_head.val) {
+    marks.clear()
+    marks_read.val = 0.0
+    marks_tail.val = ""
+    reset = true
+  }
+  marks_head.val = head
+  if size <= marks_read.val {
+    return reset
+  }
+  let n = (size - marks_read.val).to_int()
+  let text = marks_tail.val + @utf8.decode_lossy(rp_read(cstr(path), marks_read.val, n)[:])
+  marks_read.val = size
+  let lines : Array[String] = []
+  for l in text.split("\n") {
+    lines.push(l.to_owned())
+  }
+  marks_tail.val = lines[lines.length() - 1]
+  let had = marks.length()
+  for i in 0..<(lines.length() - 1) {
+    match parse(lines[i]) {
+      Some({ "at": Number(at, ..), .. }) if at >= purged_before.val => marks.push(at)
+      _ => ()
+    }
+  }
+  if marks.length() != had || reset {
+    marks.sort()
+    true
+  } else {
+    false
+  }
+}
+
+///|
+/// Incrementally reads appended lines from `apps.jsonl` (re-reading from scratch if pruned/rewritten).
+fn load_apps_incremental() -> Bool {
+  let path = root_dir() + "\\apps.jsonl"
+  let size = rp_size(cstr(path))
+  if size <= 0.0 {
+    let had = !apps.is_empty()
+    apps.clear()
+    apps_read.val = 0.0
+    apps_tail.val = ""
+    apps_head.val = ""
+    return had
+  }
+  let head = @utf8.decode_lossy(rp_read(cstr(path), 0.0, @cmp.minimum(48, size.to_int()))[:])
+  let mut reset = false
+  if size < apps_read.val || (apps_head.val != "" && head != apps_head.val) {
+    apps.clear()
+    apps_read.val = 0.0
+    apps_tail.val = ""
+    reset = true
+  }
+  apps_head.val = head
+  if size <= apps_read.val {
+    return reset
+  }
+  let n = (size - apps_read.val).to_int()
+  let text = apps_tail.val + @utf8.decode_lossy(rp_read(cstr(path), apps_read.val, n)[:])
+  apps_read.val = size
+  let lines : Array[String] = []
+  for l in text.split("\n") {
+    lines.push(l.to_owned())
+  }
+  apps_tail.val = lines[lines.length() - 1]
+  let had = apps.length()
+  for i in 0..<(lines.length() - 1) {
+    match parse(lines[i]) {
+      Some({ "at": Number(at, ..), "app": String(app), .. }) if at >= purged_before.val => apps.push((at, app))
+      _ => ()
+    }
+  }
+  apps.length() != had || reset
 }
 
 ///|

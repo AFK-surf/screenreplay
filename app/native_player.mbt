@@ -143,6 +143,10 @@ struct Deck {
   mut warm : Double
   mut warm_pos : Double
   mut warm_since : Double
+  /// frames handed to the hardware decoder whose `shown` callback has not arrived yet (bounded during playback so a busy GPU cannot accumulate multi-second lag)
+  in_flight : Array[Double]
+  mut in_flight_at : Double
+  mut stalled_pump : Bool
   mut later : Double?
   /// a still frame asked for while the one before it still decodes (where and `near`): asked for once that one is shown
   mut step_to : (Double, Bool)?
@@ -196,6 +200,9 @@ fn Deck::new(
     warm: -1.0,
     warm_pos: 0.0,
     warm_since: 0.0,
+    in_flight: [],
+    in_flight_at: 0.0,
+    stalled_pump: false,
     later: None,
     step_to: None,
     sound: Sound::new(),
@@ -218,6 +225,19 @@ fn Deck::stream(self : Deck) -> @ui.Stream {
       let d = self
       let s = @ui.Stream::new(
         shown=fn(ts) {
+          // Settle this frame and any older frames from the same flush epoch.
+          for i in 0..<d.in_flight.length() {
+            if (d.in_flight[i] - ts).abs() < 1.0 {
+              let left : Array[Double] = []
+              for j in (i + 1)..<d.in_flight.length() {
+                left.push(d.in_flight[j])
+              }
+              d.in_flight.clear()
+              d.in_flight.append(left)
+              d.in_flight_at = now()
+              break
+            }
+          }
           // (a drag's key frame decoded or let go: the move that waited for it now)
           if ts == d.waiting {
             d.waiting = -1.0
@@ -233,9 +253,24 @@ fn Deck::stream(self : Deck) -> @ui.Stream {
               _ => ()
             }
           }
+          // A seek's target frame just finished decoding: release the held clock and start audio in sync.
+          if d.warm >= 0.0 && (ts - d.warm).abs() < 1.0 {
+            d.warm = -1.0
+            if (d.wants)() && !(d.held)() {
+              d.play.set({ ..d.play.untracked(), pos: d.warm_pos, at: now() })
+              d.sound_start(d.warm_pos)
+              d.pump()
+            }
+          } else if d.stalled_pump && d.in_flight.length() < 8 {
+            d.stalled_pump = false
+            d.pump()
+          }
         },
         broken=fn() {
           // (its decoder lost its state: on from the next key frame, as `Stream::frame` lets go till one)
+          d.in_flight.clear()
+          d.stalled_pump = false
+          d.warm = -1.0
           ntrace("broken")
         },
       )
@@ -455,6 +490,8 @@ fn Deck::hand(self : Deck, t : Mp4Track, k : Int, show? : Bool = true) -> Double
     return ts
   }
   let data = rp_play_read(cstr(self.path), x.at, x.size)
+  self.in_flight.push(ts)
+  self.in_flight_at = now()
   self.stream().frame(data, x.key, ts, show~)
   if show {
     self.shown_path = self.path
@@ -536,6 +573,8 @@ fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
   // last frame given it till another comes)
   let s = self.stream()
   s.flush()
+  self.in_flight.clear()
+  self.stalled_pump = false
   self.waiting = -1.0
   for j in key..=last {
     let ts = self.hand(t, j, show=j == last)
@@ -555,7 +594,7 @@ fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
     rp_play_warm(cstr(self.path))
     // (the clock and the sound held at the frame after the one asked for, handed over now, till it is shown: going on
     // at once, the picture stood on the frame shown before for the ~100 ms the decoder took over the frames from the
-    // key frame, then leapt (the user, 2026-11-15: 「跳帧后还是会复读那么100毫秒」); `pump` lets them go. That frame,
+    // key frame, then leapt (the user, 2026-11-15: 「跳帧后还是会复读那么100毫秒」); `shown` and `pump` let them go. That frame,
     // not the one asked for: a still frame's seek shows that one already, from the decoding before)
     if last + 1 < t.samples.length() {
       self.warm = self.hand(t, last + 1)
@@ -575,6 +614,8 @@ fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
 /// the frame itself once the hand rests.
 fn Deck::scrub(self : Deck, at : Double) -> Unit {
   self.step_to = None
+  self.warm = -1.0
+  self.stalled_pump = false
   self.cancel()
   self.sound_stop()
   let p = self.play.untracked()
@@ -620,6 +661,8 @@ fn Deck::show_near(self : Deck, at : Double) -> Unit {
   }
   let s = self.stream()
   s.flush()
+  self.in_flight.clear()
+  self.stalled_pump = false
   self.waiting = self.hand(t, key)
   self.waited_at = now()
   s.flush(drain=true)
@@ -639,10 +682,9 @@ fn Deck::pump(self : Deck) -> Unit {
   }
   self.seg = i
   if self.warm >= 0.0 {
-    // (the frame asked for not shown yet, 400 ms at most: the clock held there, looked at again in 4 ms)
-    let shown = self.stream().shown_at().unwrap_or(-1.0)
+    // (the frame asked for not shown yet, 400 ms at most: the clock held there until `shown` clears `self.warm`)
     self.play.set({ ..self.play.untracked(), pos: self.warm_pos, at: now() })
-    if shown < self.warm - 1.0 && now() - self.warm_since < 400.0 {
+    if now() - self.warm_since < 400.0 {
       match the_root.val {
         Some(r) => self.due = Some(r.at_moment(now() + 4.0, fn() { self.pump() }, later=true))
         None => ()
@@ -657,39 +699,63 @@ fn Deck::pump(self : Deck) -> Unit {
   if (self.stops)(p) {
     return
   }
-  // (half a millisecond's slack: the clock's ms and a sample's, worked out of different units, meet a hair apart)
-  let inside = p - base + 0.5
-  let reached = sample_at(t, inside)
-  if reached >= self.next {
-    // (a key frame further on than the next sample, passed already: on from it)
-    let key = key_before(t, reached)
-    if key > self.next {
-      self.next = key
-    }
-    for j in self.next..=reached {
-      self.hand(t, j) |> ignore
-    }
-    self.next = reached + 1
-  }
-  (self.went)()
-  let n = t.samples.length()
   let root = match the_root.val {
     Some(r) => r
     None => return
   }
   let rate = @cmp.maximum(0.01, self.play.untracked().rate)
   let end = base + (self.dur)(i)
+  if self.in_flight.length() >= 8 && now() - self.in_flight_at > 500.0 {
+    ntrace("in_flight timeout (\{self.in_flight.length()}), clearing")
+    self.in_flight.clear()
+  }
+  // (half a millisecond's slack: the clock's ms and a sample's, worked out of different units, meet a hair apart)
+  let inside = p - base + 0.5
+  let reached = sample_at(t, inside)
+  let n = t.samples.length()
+  let mut backed_up = false
+  if reached >= self.next {
+    // (a key frame further on than the next sample, passed already: flush backed-up work and jump straight to it)
+    let key = key_before(t, reached)
+    if key > self.next {
+      if !self.in_flight.is_empty() {
+        self.stream().flush()
+        self.in_flight.clear()
+        self.stalled_pump = false
+      }
+      self.next = key
+      for j in key..=reached {
+        self.hand(t, j, show=j == reached) |> ignore
+      }
+      self.next = reached + 1
+    } else {
+      let room = 8 - self.in_flight.length()
+      if room <= 0 {
+        backed_up = true
+      } else {
+        let last = @cmp.minimum(reached, self.next + room - 1)
+        for j in self.next..=last {
+          self.hand(t, j, show=j == last) |> ignore
+        }
+        self.next = last + 1
+        if last < reached {
+          backed_up = true
+        }
+      }
+    }
+  }
+  (self.went)()
   // (the next piece opened ahead, a few seconds before it plays)
   if i + 1 < (self.count)() && end - p < 3000.0 * rate {
     rp_play_warm(cstr((self.file)(i + 1)))
   }
-  if self.next < n {
-    let wait = (sample_ms(t, self.next) - (p - base)) / rate
-    self.due = Some(root.at_moment(now() + @cmp.maximum(1.0, wait), fn() { self.pump() }, later=true))
-  } else if p < end - 1.0 {
-    self.due = Some(root.at_moment(now() + @cmp.maximum(1.0, (end - p) / rate), fn() { self.pump() }, later=true))
-  } else if i + 1 < (self.count)() {
+  if p >= end - 1.0 && i + 1 < (self.count)() {
     // the piece's end: on into the next (at once where it starts later: the gap skipped)
+    if backed_up && !self.in_flight.is_empty() {
+      self.stream().flush()
+      self.in_flight.clear()
+    }
+    self.stalled_pump = false
     let next_at = (self.start)(i + 1)
     if next_at > p {
       self.play.set({ ..self.play.untracked(), pos: next_at, at: now() })
@@ -702,6 +768,14 @@ fn Deck::pump(self : Deck) -> Unit {
       }
       self.pump()
     }
+  } else if backed_up {
+    self.stalled_pump = true
+    self.due = Some(root.at_moment(now() + 10.0, fn() { self.pump() }, later=true))
+  } else if self.next < n {
+    let wait = (sample_ms(t, self.next) - (p - base)) / rate
+    self.due = Some(root.at_moment(now() + @cmp.maximum(1.0, wait), fn() { self.pump() }, later=true))
+  } else if p < end - 1.0 {
+    self.due = Some(root.at_moment(now() + @cmp.maximum(1.0, (end - p) / rate), fn() { self.pump() }, later=true))
   } else {
     (self.ended)()
   }
@@ -725,6 +799,8 @@ fn Deck::set_playing(self : Deck, on : Bool) -> Unit {
       self.pump()
     }
   } else {
+    self.warm = -1.0
+    self.stalled_pump = false
     self.cancel()
     self.sound_stop()
   }
@@ -747,6 +823,9 @@ fn Deck::set_rate(self : Deck, r : Double) -> Unit {
 ///|
 /// Let go of all it holds (a saved clip's player closed).
 fn Deck::close(self : Deck) -> Unit {
+  self.warm = -1.0
+  self.stalled_pump = false
+  self.in_flight.clear()
   self.cancel()
   self.cancel_rest()
   self.sound_stop()
@@ -918,8 +997,9 @@ fn Deck::sound_pos(self : Deck) -> Double? {
     self.sound_stop()
     return None
   }
-  // (what the stream has played not moving on for 500 ms while there is sound queued: nothing plays it)
-  if played != s.seen {
+  // (what the stream has played not moving on by at least 1 ms for 500 ms while there is sound queued: nothing plays it;
+  // requiring +48 samples prevents +/-2 sample output-latency jitter on a stopped voice from resetting the watchdog)
+  if played > s.seen + 48.0 {
     s.seen = played
     s.seen_at = now()
   } else if now() - s.seen_at > 500.0 {
@@ -943,6 +1023,9 @@ fn Deck::shifted(self : Deck, by : Double) -> Unit {
   if self.step_to is Some((at, near)) {
     self.step_to = Some((at + by, near))
   }
+  if self.warm >= 0.0 {
+    self.warm_pos = self.warm_pos + by
+  }
   let s = self.sound
   for i in 0..<s.anchors.length() {
     let (from, at) = s.anchors[i]
@@ -951,11 +1034,12 @@ fn Deck::shifted(self : Deck, by : Double) -> Unit {
 }
 
 ///|
-/// Every 40 ms while it sounds: kept 160 ms ahead of what has played, or as much as the host wants queued before it
+/// Every 40 ms while it sounds: kept at least 160 ms queued, and 40 ms past what the host wants queued before it
 /// starts (`Stream::audio_wanted`: Windows' reserve, which a gap between two packets raises to 300 ms and calm brings
-/// back; mbui #6344), and the clock brought to it. Before, a stall of the window's thread raised the reserve past the
-/// 160 ms handed over and every replay after it was silent (the owner, 2026-11-15: 「有时候播放没有声音」). 15 packets
-/// at most queued: the host lets a queue go as a stall from its reserve and 10 more.
+/// back; mbui #6344), and the clock brought to it. Checking `audio_queued()` directly ensures the voice always receives
+/// enough packets to restart even though `audio_played()` subtracts output device latency (~40-100 ms); previously
+/// `s.sent - played` hit the 300 ms cap at 280 ms queued (1 packet short of reserve), deadlocking audio forever after a
+/// UI stall.
 fn Deck::sound_tick(self : Deck) -> Unit {
   let s = self.sound
   s.due = None
@@ -963,9 +1047,10 @@ fn Deck::sound_tick(self : Deck) -> Unit {
     return
   }
   let st = self.stream()
-  let ahead = 48.0 * @cmp.maximum(160.0, st.audio_wanted())
+  let want_ms = @cmp.maximum(160.0, st.audio_wanted() + 40.0)
+  let max_ahead = 48.0 * (want_ms + 120.0)
   let mut n = 0
-  while s.ends < 0.0 && s.sent - (st.audio_played() - s.zero) < ahead && n < 16 {
+  while s.ends < 0.0 && st.audio_queued() < want_ms && s.sent - (st.audio_played() - s.zero) < max_ahead && n < 24 {
     if !self.sound_more() {
       self.sound_put(b"", pad=true)
       s.ends = s.sent
@@ -980,7 +1065,7 @@ fn Deck::sound_tick(self : Deck) -> Unit {
         let off = heard - ours
         if now() - s.told_at >= 1000.0 {
           s.told_at = now()
-          ntrace("sound off=\{off} rate=\{p.rate} queued=\{st.audio_queued()}")
+          ntrace("sound off=\{off} rate=\{p.rate} queued=\{st.audio_queued()} inflight=\{self.in_flight.length()}")
         }
         if off.abs() > 150.0 {
           ntrace("sound: clock put at \{heard} (was \{ours})")

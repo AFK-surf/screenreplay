@@ -165,7 +165,7 @@ fn note_body(
   // what can be done with it: three buttons sharing the card's width
   parent.box(fn(acts) {
     acts.row(Is(true)).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
-    let even = fn(b : @view.View) { b.grow(Is(1.0)).basis(Is(Some(0.0))).lies_along(Is(Middle)) |> ignore }
+    let even = fn(b : @view.View) { b.grow(Is(1.0)).lies_along(Is(Middle)) |> ignore }
     even(text_button(acts, fn() { t("播放") }, play, icon="play", small=true))
     even(
       text_button(acts, fn() { if note_copied.get() == path { t("已复制") } else { t("复制") } }, fn() {

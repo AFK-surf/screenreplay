@@ -30,6 +30,8 @@ internal sealed unsafe class AudioSource : IDisposable
     private const uint StreamEventCallback = 0x00040000;
     private const uint StreamAutoConvertPcm = 0x80000000;
     private const uint StreamSrcDefaultQuality = 0x08000000;
+    private const uint SessionDisplayHide = 0x20000000;
+    private const uint SessionDisplayHideWhenExpired = 0x40000000;
     private const uint BufferSilent = 0x2;
 
     [StructLayout(LayoutKind.Sequential, Pack = 2)]
@@ -150,7 +152,8 @@ internal sealed unsafe class AudioSource : IDisposable
             client = IntPtr.Zero;
             try
             {
-                source.Initialize(kind == AudioKind.System ? StreamLoopback : 0);
+                // Hide the loopback capture session from the Windows Volume Mixer so only the viewer's playback session appears.
+                source.Initialize(kind == AudioKind.System ? (StreamLoopback | SessionDisplayHide | SessionDisplayHideWhenExpired) : 0);
                 return source;
             }
             catch

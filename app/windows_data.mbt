@@ -43,6 +43,15 @@ let snaps_tail : Ref[String] = Ref("")
 let snaps_head : Ref[String] = Ref("")
 
 ///|
+/// Drops the loaded window snapshots (hidden in the background, or buffer purged) so they are only held while clipping.
+fn clear_windows() -> Unit {
+  snaps.clear()
+  snaps_read.val = 0.0
+  snaps_tail.val = ""
+  snaps_head.val = ""
+}
+
+///|
 fn num_at(a : Array[Json], i : Int) -> Double {
   match a.get(i) {
     Some(Number(v, ..)) => v

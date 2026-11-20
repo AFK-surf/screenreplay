@@ -191,6 +191,7 @@ fn start_clip() -> Unit {
   if clipping.untracked() {
     return
   }
+  load_windows()
   clipping.set(true)
   // (a clip is the whole screen (整屏) until a window is picked or a region dragged out again)
   pick_window(None)

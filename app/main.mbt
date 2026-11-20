@@ -27,7 +27,9 @@ let key_w : Double = 46.0
 /// first time, the recorder asked to close what it is writing and the playhead put 30 s before the end.
 fn refresh(root : @view.View, first : Bool) -> Unit {
   load()
-  load_windows()
+  if clipping.untracked() {
+    load_windows()
+  }
   status_rev.set(status_rev.untracked() + 1)
   if rp_take_request(cstr(root_dir() + "\\settings.request")) != 0 {
     load_settings()
