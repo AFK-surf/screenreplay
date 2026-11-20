@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.12):** Fixed playback A/V desync (audio queue recovery after stalls, bounded GPU decode backlog with keyframe catch-up, backward-seek audio sync), reduced replay viewer idle CPU and memory, hid the background recorder from Windows Volume Mixer so ScreenReplay no longer appears twice, and fixed clicks and button spacing on the saved-clip card.
+**What's new in this version (0.1.13):** Clip mode: click an end of the clip to put the playhead exactly there (dragging it still resizes the clip), the playhead snaps to the clip's ends, and Home / End jump to the clip's start and end. Also from 0.1.12: fixed playback A/V desync (audio queue recovery after stalls, bounded GPU decode backlog with keyframe catch-up, backward-seek audio sync), reduced replay viewer idle CPU and memory, hid the background recorder from Windows Volume Mixer so ScreenReplay no longer appears twice, and fixed clicks and button spacing on the saved-clip card.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.12）：** 修复回放声画不同步（卡顿后音频队列恢复、高 GPU 负载下限制硬解堆积并自动跳关键帧追齐、往回跳转等待目标帧后再起音）；窗口记录改为剪辑模式懒加载、日志增量读取，大幅降低回放窗口空闲 CPU 与内存占用；隐藏后台录制进程的 Windows 音量混合器条目；修复回放窗口右上角保存卡片无法点击及「打开位置」按钮排版。
+**此版本新增内容（0.1.13）：** 剪辑模式：单击剪辑框的左右边，播放头直接跳到剪辑开头或结尾（按住拖仍是调整剪辑），拖动播放头会吸附到剪辑两端，Home / End 跳到剪辑开头和结尾。另含 0.1.12 的改动：修复回放声画不同步（卡顿后音频队列恢复、高 GPU 负载下限制硬解堆积并自动跳关键帧追齐、往回跳转等待目标帧后再起音）；窗口记录改为剪辑模式懒加载、日志增量读取，大幅降低回放窗口空闲 CPU 与内存占用；隐藏后台录制进程的 Windows 音量混合器条目；修复回放窗口右上角保存卡片无法点击及「打开位置」按钮排版。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

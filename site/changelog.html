@@ -51,6 +51,13 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.13</h2><span>2026-11-20</span></div>
+      <ul>
+        <li data-zh="剪辑模式：单击剪辑框的左右边，播放头直接跳到剪辑开头或结尾（按住拖仍是调整剪辑）；拖动播放头会吸附到剪辑两端；Home / End 跳到剪辑开头和结尾。" data-en="Clip mode: click an end of the clip to put the playhead exactly there (dragging it still resizes the clip); the playhead snaps to the clip's ends; Home / End jump to the clip's start and end.">剪辑模式：单击剪辑框的左右边，播放头直接跳到剪辑开头或结尾（按住拖仍是调整剪辑）；拖动播放头会吸附到剪辑两端；Home / End 跳到剪辑开头和结尾。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.12</h2><span>2026-11-20</span></div>
       <ul>
         <li data-zh="修复回放声画不同步：修复卡顿后音频队列死锁导致的 150 ms 反复回弹、高 GPU 负载下硬解队列堆积导致的画面滞后，以及往回跳转时声音先于画面起播的问题。" data-en="Fixed playback A/V desync: resolved an audio queue deadlock after UI stalls, bounded hardware decode backlog with keyframe catch-up under heavy GPU load, and waited for the target frame before resuming audio on backward seeks.">修复回放声画不同步：修复卡顿后音频队列死锁导致的 150 ms 反复回弹、高 GPU 负载下硬解队列堆积导致的画面滞后，以及往回跳转时声音先于画面起播的问题。</li>
