@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScreenReplay — 更新日志 | Changelog</title>
+<link rel="icon" href="img/icon.png">
+<style>
+:root {
+  --bg: #0a0b0e; --card: #16181f; --hair: rgba(255,255,255,0.08); --hair-strong: rgba(255,255,255,0.15);
+  --t1: #f3f4f6; --t2: #a8aeb8; --t3: #6e7480;
+  --font: "Inter","Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --mono: "JetBrains Mono","Cascadia Mono",ui-monospace,Consolas,monospace;
+}
+html[data-theme="light"] {
+  --bg: #f7f8fb; --card: #ffffff; --hair: rgba(15,18,26,0.08); --hair-strong: rgba(15,18,26,0.15);
+  --t1: #111318; --t2: #4c515c; --t3: #787e8c;
+}
+* { box-sizing: border-box; margin: 0; }
+html { background: var(--bg); color: var(--t1); font: 400 16px/1.7 var(--font); -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: 820px; margin: 0 auto; padding: 0 24px; }
+nav { height: 60px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--hair); }
+nav img { width: 26px; height: 26px; border-radius: 7px; }
+.sp { flex: 1; }
+.icon-btn, .lang-btn {
+  height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--hair-strong);
+  background: transparent; color: var(--t2); font: 500 12px/1 var(--font); cursor: pointer;
+}
+.doc { padding: 52px 0 64px; }
+.doc h1 { font-size: 36px; font-weight: 620; letter-spacing: -0.025em; margin-bottom: 24px; }
+.ver-card { margin-top: 18px; padding: 24px 28px; border-radius: 16px; background: var(--card); border: 1px solid var(--hair); }
+.ver-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.ver-head h2 { font: 600 20px/1.2 var(--mono); }
+.ver-head span { font-size: 13px; color: var(--t3); font-family: var(--mono); }
+.ver-card ul { padding-left: 18px; color: var(--t2); display: grid; gap: 6px; font-size: 15px; }
+footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t3); font-size: 13px; display: flex; gap: 16px; align-items: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a href="./" style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px"><img src="img/icon.png" alt=""><span>ScreenReplay</span></a>
+    <span class="sp"></span>
+    <a href="./" style="color:var(--t2);font-size:13.5px;padding:6px 10px" data-zh="返回首页" data-en="Home">返回首页</a>
+    <button class="icon-btn" id="theme-toggle" type="button"></button>
+    <button class="lang-btn" type="button">EN</button>
+  </nav>
+
+  <main class="doc">
+    <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.11</h2><span>2026-11-20</span></div>
+      <ul>
+        <li data-zh="HDR 屏幕：显示器关着时启动录制，录像不再发白，会沿用上次记下的 SDR 内容亮度。" data-en="HDR screens: recordings no longer come out washed out when recording starts while the monitor is off; the last known SDR content brightness is used.">HDR 屏幕：显示器关着时启动录制，录像不再发白，会沿用上次记下的 SDR 内容亮度。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.10</h2><span>2026-11-20</span></div>
+      <ul>
+        <li data-zh="回放时声画同步：回放窗口会扣除声卡的输出延迟，画面不再比声音早约 30 毫秒（用蓝牙耳机时差得更多）。" data-en="Sound and picture in step when playing back: the replay window now allows for the audio device's output delay, so the picture no longer runs some 30 ms ahead of the sound (more with Bluetooth headphones).">回放时声画同步：回放窗口会扣除声卡的输出延迟，画面不再比声音早约 30 毫秒（用蓝牙耳机时差得更多）。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.9</h2><span>2026-11-20</span></div>
+      <ul>
+        <li data-zh="官网独立安装包支持自动更新：内置 ECDSA P-256 发布签名校验与 SHA-256 完整性校验，空闲时在后台静默下载并完成更新；「设置 › 关于」新增检查更新按钮与自动更新开关。" data-en="Standalone installer now supports automatic updates: verifies ECDSA P-256 release signatures and SHA-256 checksums, downloading and updating silently in the background when idle; added Check for updates and an Automatic updates toggle in Settings › About.">官网独立安装包支持自动更新：内置 ECDSA P-256 发布签名校验与 SHA-256 完整性校验，空闲时在后台静默下载并完成更新；「设置 › 关于」新增检查更新按钮与自动更新开关。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.8</h2><span>2026-11-19</span></div>
+      <ul>
+        <li data-zh="画面可以放大查看：在画面上按住 Ctrl 滚动滚轮（或在触控板上双指捏合），以鼠标位置为中心放大，最多 8 倍；放大后拖动画面平移，点右上角的「适应窗口」或按 0 键还原。保存的片段始终是整幅画面。" data-en="Zoom into the picture: Ctrl+wheel (or a touchpad pinch) over it zooms about the pointer up to 8x, drag to pan, and the badge in its top right corner (or the 0 key) fits it back to the window. Saved clips are always the whole frame.">画面可以放大查看：在画面上按住 Ctrl 滚动滚轮（或在触控板上双指捏合），以鼠标位置为中心放大，最多 8 倍；放大后拖动画面平移，点右上角的「适应窗口」或按 0 键还原。保存的片段始终是整幅画面。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.7</h2><span>2026-11-19</span></div>
+      <ul>
+        <li data-zh="ScreenReplay 改为完全免费：不再有试用期，全部功能不限时使用。" data-en="ScreenReplay is now completely free: no trial, every feature with no time limit.">ScreenReplay 改为完全免费：不再有试用期，全部功能不限时使用。</li>
+        <li data-zh="「设置 › 关于」加了赞助入口，打开官网的赞助页。" data-en="Settings › About has a Sponsor link, to the site's support page.">「设置 › 关于」加了赞助入口，打开官网的赞助页。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.6</h2><span>2026-11-19</span></div>
+      <ul>
+        <li data-zh="按应用过滤时，时间线只显示这些应用的片段，首尾相接；两段之间的缝按跳过的时长变宽，鼠标指上去显示跳过了多久。" data-en="Filtering by apps shows only their stretches on the timeline, side by side; the seam between two widens with the time skipped and says how long when pointed at.">按应用过滤时，时间线只显示这些应用的片段，首尾相接；两段之间的缝按跳过的时长变宽，鼠标指上去显示跳过了多久。</li>
+        <li data-zh="没开 ScreenReplay、关掉或暂停录制的时间，在时间线上折成一条细缝（设置 › 外观 › 时间线，默认开启）。" data-en="Time not recorded (ScreenReplay closed, recording off or paused) folds to a thin seam on the timeline (Settings › Appearance › Timeline, on by default).">没开 ScreenReplay、关掉或暂停录制的时间，在时间线上折成一条细缝（设置 › 外观 › 时间线，默认开启）。</li>
+        <li data-zh="剪辑跨过缝时只保存录到的部分，时长也按此计算。" data-en="A clip across a seam saves only what was recorded, and its length says so.">剪辑跨过缝时只保存录到的部分，时长也按此计算。</li>
+        <li data-zh="拖动时间线、滑块和滚动条时，经过的按钮不再亮起或弹出提示。" data-en="Dragging the timeline, a slider or a scrollbar no longer lights up the buttons it passes over.">拖动时间线、滑块和滚动条时，经过的按钮不再亮起或弹出提示。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.5</h2><span>2026-11-18</span></div>
+      <ul>
+        <li data-zh="按 Ctrl+Alt+S 保存最近一段时，托盘旁即刻弹出缩略图快捷卡片（支持播放、复制、打开所在文件夹），回放窗口内保存同样适用。" data-en="Instant tray notification card on saving the last 30 seconds (thumbnail, Play, Copy, Show in Folder).">按 Ctrl+Alt+S 保存最近一段时，托盘旁即刻弹出缩略图快捷卡片（支持播放、复制、打开所在文件夹），回放窗口内保存同样适用。</li>
+        <li data-zh="修复托盘菜单长时间静置后首次呼出的延迟，任何时候点击秒开。" data-en="Tray menu now opens instantaneously regardless of idle time.">修复托盘菜单长时间静置后首次呼出的延迟，任何时候点击秒开。</li>
+        <li data-zh="提升已保存片段列表的缩略图清晰度。" data-en="Sharper thumbnails in the Saved Clips library.">提升已保存片段列表的缩略图清晰度。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.4</h2><span>2026-11-17</span></div>
+      <ul>
+        <li data-zh="新增时间轴键鼠与手柄操作强度热力条，游戏激战与密集输入一目了然。" data-en="Added mouse, keyboard, and controller activity heat strip along the timeline.">新增时间轴键鼠与手柄操作强度热力条，游戏激战与密集输入一目了然。</li>
+        <li data-zh="全链路切换至 D3D11VA 硬件解码与 GPU 裁剪导出，回放器默认排除自身窗口不被录制。" data-en="Full D3D11VA GPU decoding & single-window crop pipeline; replay viewer excludes itself from capture by default.">全链路切换至 D3D11VA 硬件解码与 GPU 裁剪导出，回放器默认排除自身窗口不被录制。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
+      <div class="ver-head"><h2>0.1.0</h2><span>2026-11-14</span></div>
+      <ul>
+        <li data-zh="首个公开版本：后台硬件编码循环录屏、前台应用时间轴、单窗口裁剪导出与 100% 本机存储。" data-en="Initial release: rolling hardware-encoded screen buffer, app timeline, single-window clipping, and 100% local storage.">首个公开版本：后台硬件编码循环录屏、前台应用时间轴、单窗口裁剪导出与 100% 本机存储。</li>
+      </ul>
+    </article>
+  </main>
+
+  <footer>
+    <span>ScreenReplay</span>
+    <span class="sp"></span>
+    <a href="https://github.com/motion-space/screenreplay" target="_blank" rel="noopener">GitHub</a>
+    <a href="privacy" data-zh="隐私政策" data-en="Privacy Policy">隐私政策</a>
+    <span>© 2026 pengx17</span>
+  </footer>
+</div>
+<script src="lang.js"></script>
+</body>
+</html>

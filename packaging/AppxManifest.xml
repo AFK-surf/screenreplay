@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ScreenReplay as an MSIX package for the Microsoft Store (packaging/pack-msix.ps1 fills the $...$ in).
+     The identity's Name, Publisher and PublisherDisplayName are the ones Partner Center gives the reserved name
+     (Product identity); the Store signs the package with them.
+     - runFullTrust: the recorder and the replay window are ordinary desktop programs (a tray icon, global hotkeys,
+       capture and encoding by Media Foundation and Direct3D).
+     - graphicsCaptureProgrammatic: the main screen captured with no picker, the person having turned recording on;
+       graphicsCaptureWithoutBorder: no yellow border round a screen recorded all day. Both are general-use
+       capabilities in uap11 (Microsoft Learn, App capability declarations), not restricted ones: declared as
+       rescap the Store's certification refused them (10.6.3, 2026-11-17).
+     - the startup task: off as installed; turned on by the first-run sheet's or the settings' 开机启动 (recorder/Packaged.cs). -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap11="http://schemas.microsoft.com/appx/manifest/uap/windows10/11"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 uap11 rescap">
+  <Identity Name="$Name$" Publisher="$Publisher$" Version="$Version$" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>ScreenReplay</DisplayName>
+    <PublisherDisplayName>$PublisherDisplayName$</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="zh-cn" />
+  </Resources>
+  <Applications>
+    <Application Id="ScreenReplay" Executable="ScreenReplay.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="ScreenReplay" Description="Keeps recording your screen in the background, so you can rewind and keep what just happened."
+        BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <uap5:Extension Category="windows.startupTask" Executable="ScreenReplay.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="ScreenReplayAtSignIn" Enabled="false" DisplayName="ScreenReplay" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <uap11:Capability Name="graphicsCaptureProgrammatic" />
+    <uap11:Capability Name="graphicsCaptureWithoutBorder" />
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+</Package>

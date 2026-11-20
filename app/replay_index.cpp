@@ -1,0 +1,951 @@
+// The scrub index: for every segment of the buffer, small JPEGs of it. The recorder makes them as it records, one each
+// half second, beside the segment (<segment>.thumbs: Thumbnailer.cs); for a segment without (recorded before it did,
+// or where the GPU could not), each second's key frame is decoded once in the background here, newest segments first,
+// the ones the window looks at before the rest, and kept on disk in the folder given (Thumbs\<segment>.thumbs) so the
+// window opens with every preview ready. Either is read from its file as it is asked for, never all kept in memory.
+// The timeline's filmstrip and the hover preview read only this, so moving over the timeline never waits on a decoder.
+//
+// Threads: three workers decode; the UI thread only asks (rp_idx_*), under one lock, and copies bytes out.
+#include <windows.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <mferror.h>
+#include <wincodec.h>
+#include <codecapi.h>
+#include <d3d11.h>
+#include <d3d10.h>
+#include <strmif.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <string>
+#include <vector>
+#include <map>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
+#include <atomic>
+#include <memory>
+#include "moonbit.h"
+
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "mfuuid.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "strmiids.lib")
+#pragma comment(lib, "d3d11.lib")
+
+namespace {
+
+const int kThumbW = 384;
+const int kThumbH = 216;
+const LONGLONG kStep = 10000000;  // a thumbnail a second (100 ns units)
+
+struct Thumb {
+  int64_t ms;
+  std::vector<uint8_t> jpeg;  // empty: in its segment's file (Seg::file), `len` bytes at `off`
+  int64_t off = 0;
+  uint32_t len = 0;
+};
+
+struct Seg {
+  std::wstring path;
+  std::wstring stem;
+  double dur = 0;
+  int state = 0;  // 0 waiting, 1 being made, 2 ready, -1 could not be read
+  int64_t prefer = 0;
+  int dropped = 0;  // let go while being made: let go as it is done
+  int plain = 0;  // made again with the decoder not in its thumbnail mode (make_thumbs)
+  std::vector<Thumb> thumbs;
+  std::wstring file;  // where its thumbnails are read from ("": in memory, a clip's)
+};
+
+std::mutex mu;
+std::condition_variable work;
+std::map<std::string, Seg> segs;  // by the segment's path (UTF-8), so newest last
+std::wstring cache_dir;
+int64_t prefer_clock = 0;
+bool started = false;
+std::atomic<int> made{0};
+
+std::wstring wide(const char *utf8) {
+  int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+  std::wstring w(n > 0 ? n - 1 : 0, L'\0');
+  if (n > 1) MultiByteToWideChar(CP_UTF8, 0, utf8, -1, &w[0], n);
+  return w;
+}
+
+template <class T> void release(T *&p) {
+  if (p) {
+    p->Release();
+    p = nullptr;
+  }
+}
+
+std::wstring stem_of(const std::wstring &path) {
+  size_t slash = path.find_last_of(L"\\/");
+  std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+  size_t dot = name.find_last_of(L'.');
+  return dot == std::wstring::npos ? name : name.substr(0, dot);
+}
+
+// ---- a thumbnails' file: "RPT1" (made here, of key frames) or "RPT2" (the recorder's, each half second), count, then
+// each: ms (int64), length (uint32), its JPEG ----
+
+// Where each of `file`'s thumbnails is in it (their bytes left there).
+bool load_thumbs(const std::wstring &file, std::vector<Thumb> &out) {
+  FILE *f = _wfopen(file.c_str(), L"rb");
+  if (!f) return false;
+  bool ok = false;
+  char magic[4];
+  uint32_t n = 0;
+  if (fread(magic, 1, 4, f) == 4 && (memcmp(magic, "RPT1", 4) == 0 || memcmp(magic, "RPT2", 4) == 0) &&
+      fread(&n, 4, 1, f) == 1 && n < 100000) {
+    ok = true;
+    for (uint32_t i = 0; i < n && ok; i++) {
+      Thumb t;
+      uint32_t len = 0;
+      if (fread(&t.ms, 8, 1, f) != 1 || fread(&len, 4, 1, f) != 1 || len > (8u << 20)) {
+        ok = false;
+        break;
+      }
+      t.off = _ftelli64(f);
+      t.len = len;
+      if (_fseeki64(f, len, SEEK_CUR) != 0) ok = false;
+      out.push_back(std::move(t));
+    }
+  }
+  fclose(f);
+  if (!ok) out.clear();
+  return ok && !out.empty();
+}
+
+void save_cache(const std::wstring &stem, std::vector<Thumb> &thumbs, std::wstring *saved_as) {
+  if (cache_dir.empty() || stem.empty() || thumbs.empty()) return;
+  CreateDirectoryW(cache_dir.c_str(), nullptr);
+  std::wstring file = cache_dir + L"\\" + stem + L".thumbs";
+  std::wstring tmp = file + L".tmp";
+  FILE *f = _wfopen(tmp.c_str(), L"wb");
+  if (!f) return;
+  uint32_t n = (uint32_t)thumbs.size();
+  fwrite("RPT1", 1, 4, f);
+  fwrite(&n, 4, 1, f);
+  std::vector<int64_t> offs;
+  for (auto &t : thumbs) {
+    uint32_t len = (uint32_t)t.jpeg.size();
+    fwrite(&t.ms, 8, 1, f);
+    fwrite(&len, 4, 1, f);
+    offs.push_back(_ftelli64(f));
+    if (len) fwrite(t.jpeg.data(), 1, len, f);
+  }
+  bool ok = ferror(f) == 0;
+  fclose(f);
+  // (kept, its thumbnails are read from it from now on: their bytes let go here)
+  if (ok && MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    for (size_t k = 0; k < thumbs.size(); k++) {
+      thumbs[k].off = offs[k];
+      thumbs[k].len = (uint32_t)thumbs[k].jpeg.size();
+      std::vector<uint8_t>().swap(thumbs[k].jpeg);
+    }
+    *saved_as = file;
+  } else {
+    DeleteFileW(tmp.c_str());
+  }
+}
+
+// ---- making them ----
+
+// A JPEG of `w` x `h` BGR rows (24 bits).
+std::vector<uint8_t> encode_jpeg(IWICImagingFactory *wic, const std::vector<uint8_t> &bgr, int w, int h) {
+  std::vector<uint8_t> out;
+  IStream *stream = nullptr;
+  IWICBitmapEncoder *enc = nullptr;
+  IWICBitmapFrameEncode *frame = nullptr;
+  IPropertyBag2 *props = nullptr;
+  do {
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) break;
+    if (FAILED(wic->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &enc))) break;
+    if (FAILED(enc->Initialize(stream, WICBitmapEncoderNoCache))) break;
+    if (FAILED(enc->CreateNewFrame(&frame, &props))) break;
+    PROPBAG2 opt = {};
+    opt.pstrName = (LPOLESTR)L"ImageQuality";
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_R4;
+    v.fltVal = 0.82f;
+    props->Write(1, &opt, &v);
+    if (FAILED(frame->Initialize(props))) break;
+    if (FAILED(frame->SetSize(w, h))) break;
+    WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;
+    if (FAILED(frame->SetPixelFormat(&fmt)) || fmt != GUID_WICPixelFormat24bppBGR) break;
+    if (FAILED(frame->WritePixels(h, w * 3, (UINT)bgr.size(), (BYTE *)bgr.data()))) break;
+    if (FAILED(frame->Commit()) || FAILED(enc->Commit())) break;
+    HGLOBAL mem = nullptr;
+    if (FAILED(GetHGlobalFromStream(stream, &mem))) break;
+    STATSTG st = {};
+    stream->Stat(&st, STATFLAG_NONAME);
+    void *p = GlobalLock(mem);
+    if (p) {
+      out.assign((uint8_t *)p, (uint8_t *)p + st.cbSize.LowPart);
+      GlobalUnlock(mem);
+    }
+  } while (false);
+  release(props);
+  release(frame);
+  release(enc);
+  release(stream);
+  return out;
+}
+
+// The picture (the decoder's own NV12: `fw` x `fh` shown of its luma rows, `pitch` apart, then its rows of chroma pairs
+// from row `rows` on) made `w` x `h` BGR by averaging the pixels each covers, BT.709's video range: no video processor
+// turning every 4K frame into RGB first, which held a pool of 33 MB frames of its own.
+std::vector<uint8_t> shrink_nv12(const BYTE *data, LONG pitch, int rows, int fw, int fh, int w, int h) {
+  std::vector<uint8_t> out((size_t)w * h * 3);
+  const BYTE *uv = data + (ptrdiff_t)pitch * rows;
+  auto clamp = [](double v) { return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v + 0.5); };
+  for (int y = 0; y < h; y++) {
+    int y0 = (int)((int64_t)y * fh / h), y1 = (int)((int64_t)(y + 1) * fh / h);
+    if (y1 <= y0) y1 = y0 + 1;
+    for (int x = 0; x < w; x++) {
+      int x0 = (int)((int64_t)x * fw / w), x1 = (int)((int64_t)(x + 1) * fw / w);
+      if (x1 <= x0) x1 = x0 + 1;
+      uint32_t ys = 0, us = 0, vs = 0, n = 0, m = 0;
+      for (int yy = y0; yy < y1; yy += 2) {
+        const BYTE *row = data + (ptrdiff_t)yy * pitch;
+        const BYTE *crow = uv + (ptrdiff_t)(yy / 2) * pitch;
+        for (int xx = x0; xx < x1; xx += 2) {
+          ys += row[xx];
+          n++;
+          us += crow[(xx / 2) * 2];
+          vs += crow[(xx / 2) * 2 + 1];
+          m++;
+        }
+      }
+      double Y = 1.164383 * ((double)ys / n - 16.0), U = (double)us / m - 128.0, V = (double)vs / m - 128.0;
+      uint8_t *o = &out[((size_t)y * w + x) * 3];
+      o[0] = clamp(Y + 2.112402 * U);
+      o[1] = clamp(Y - 0.213249 * U - 0.532909 * V);
+      o[2] = clamp(Y + 1.792741 * V);
+    }
+  }
+  return out;
+}
+
+// (the decoders' room: three of them at once up to 1440p, a 4K one alone. A software HEVC decoder of a 4K picture
+// holds some hundreds of MB and threads of its own; three at once took the window to 2.9 GB while a 4K buffer was
+// indexed)
+std::mutex room_mu;
+std::condition_variable room_cv;
+int room_free = 3;
+
+struct Room {
+  int n;
+  explicit Room(int want) : n(want) {
+    std::unique_lock<std::mutex> lock(room_mu);
+    room_cv.wait(lock, [&] { return room_free >= n; });
+    room_free -= n;
+  }
+  ~Room() {
+    {
+      std::lock_guard<std::mutex> lock(room_mu);
+      room_free += n;
+    }
+    room_cv.notify_all();
+  }
+};
+
+// The reader's decoder told it decodes key frames for thumbnails (only those are asked for: it keeps no reference
+// pictures for the frames between) on two threads of its own, where it takes the telling (the software HEVC and
+// H.264 decoders do; one that does not is left as it is).
+void thumbnail_mode(IMFSourceReader *reader) {
+  IMFSourceReaderEx *ex = nullptr;
+  if (FAILED(reader->QueryInterface(IID_PPV_ARGS(&ex)))) return;
+  for (DWORD i = 0;; i++) {
+    GUID category;
+    IMFTransform *mft = nullptr;
+    if (FAILED(ex->GetTransformForStream((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &category, &mft))) break;
+    if (category == MFT_CATEGORY_VIDEO_DECODER) {
+      ICodecAPI *api = nullptr;
+      if (SUCCEEDED(mft->QueryInterface(IID_PPV_ARGS(&api)))) {
+        VARIANT v;
+        VariantInit(&v);
+        v.vt = VT_UI4;
+        v.ulVal = 1;
+        api->SetValue(&CODECAPI_AVDecVideoThumbnailGenerationMode, &v);
+        v.ulVal = 2;
+        api->SetValue(&CODECAPI_AVDecNumWorkerThreads, &v);
+        api->Release();
+      }
+    }
+    mft->Release();
+  }
+  ex->Release();
+}
+
+// A worker's Direct3D device and video processor for GPU decoding and downscaling: its 4K NV12 pictures stay in the
+// GPU's memory, scaled to w x h (384 x 216) there by ID3D11VideoProcessor so only the small thumbnail is mapped back;
+// kept across consecutive segments in a batch and released once the queue is empty.
+struct GpuIndexer {
+  ID3D11Device *dev = nullptr;
+  ID3D11DeviceContext *ctx = nullptr;
+  ID3D11VideoDevice *vdev = nullptr;
+  ID3D11VideoContext *vctx = nullptr;
+  IMFDXGIDeviceManager *manager = nullptr;
+  ID3D11Texture2D *nv12 = nullptr;
+  UINT32 nv12_w = 0, nv12_h = 0;
+  ID3D11VideoProcessorEnumerator *vpe = nullptr;
+  ID3D11VideoProcessor *vp = nullptr;
+  ID3D11VideoProcessorInputView *in_view = nullptr;
+  ID3D11Texture2D *bgra = nullptr;
+  ID3D11VideoProcessorOutputView *out_view = nullptr;
+  ID3D11Texture2D *staging = nullptr;
+  UINT32 vp_in_w = 0, vp_in_h = 0, vp_out_w = 0, vp_out_h = 0;
+
+  bool ensure() {
+    if (manager) return true;
+    D3D_FEATURE_LEVEL level;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                                 D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                                 D3D11_SDK_VERSION, &dev, &level, &ctx)))
+      return false;
+    ID3D10Multithread *mt = nullptr;
+    if (SUCCEEDED(dev->QueryInterface(IID_PPV_ARGS(&mt)))) {
+      mt->SetMultithreadProtected(TRUE);
+      mt->Release();
+    }
+    UINT token = 0;
+    if (FAILED(dev->QueryInterface(IID_PPV_ARGS(&vdev))) ||
+        FAILED(ctx->QueryInterface(IID_PPV_ARGS(&vctx))) ||
+        FAILED(MFCreateDXGIDeviceManager(&token, &manager)) ||
+        FAILED(manager->ResetDevice(dev, token))) {
+      drop();
+      return false;
+    }
+    return true;
+  }
+
+  bool shrink_gpu(IMFSample *sample, UINT32 fw, UINT32 fh, int bt601, int full, int w, int h, std::vector<uint8_t> &bgr) {
+    if (!vdev || !vctx) return false;
+    IMFMediaBuffer *buf = nullptr;
+    IMFDXGIBuffer *dxgi = nullptr;
+    ID3D11Texture2D *src_tex = nullptr;
+    UINT sub = 0;
+    bool ok = false;
+    do {
+      if (FAILED(sample->GetBufferByIndex(0, &buf)) ||
+          FAILED(buf->QueryInterface(IID_PPV_ARGS(&dxgi))) ||
+          FAILED(dxgi->GetResource(IID_PPV_ARGS(&src_tex))) ||
+          FAILED(dxgi->GetSubresourceIndex(&sub)))
+        break;
+      D3D11_TEXTURE2D_DESC sdesc{};
+      src_tex->GetDesc(&sdesc);
+      UINT32 tw = std::min<UINT32>(fw, sdesc.Width) & ~1u;
+      UINT32 th = std::min<UINT32>(fh, sdesc.Height) & ~1u;
+      if (tw < 2 || th < 2) break;
+      if (!nv12 || nv12_w != tw || nv12_h != th) {
+        release(in_view);
+        release(nv12);
+        D3D11_TEXTURE2D_DESC td{};
+        td.Width = tw;
+        td.Height = th;
+        td.MipLevels = td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_NV12;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_DECODER;
+        if (FAILED(dev->CreateTexture2D(&td, nullptr, &nv12))) break;
+        nv12_w = tw;
+        nv12_h = th;
+      }
+      D3D11_BOX cbox = {0, 0, 0, tw, th, 1};
+      ctx->CopySubresourceRegion(nv12, 0, 0, 0, 0, src_tex, sub, &cbox);
+
+      if (!vp || vp_in_w != tw || vp_in_h != th || vp_out_w != (UINT32)w || vp_out_h != (UINT32)h) {
+        release(in_view);
+        release(out_view);
+        release(bgra);
+        release(staging);
+        release(vp);
+        release(vpe);
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{};
+        cd.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        cd.InputFrameRate = {60, 1};
+        cd.InputWidth = tw;
+        cd.InputHeight = th;
+        cd.OutputFrameRate = {60, 1};
+        cd.OutputWidth = (UINT)w;
+        cd.OutputHeight = (UINT)h;
+        cd.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        if (FAILED(vdev->CreateVideoProcessorEnumerator(&cd, &vpe)) ||
+            FAILED(vdev->CreateVideoProcessor(vpe, 0, &vp))) {
+          release(vpe);
+          break;
+        }
+        D3D11_TEXTURE2D_DESC bdesc{};
+        bdesc.Width = (UINT)w;
+        bdesc.Height = (UINT)h;
+        bdesc.MipLevels = bdesc.ArraySize = 1;
+        bdesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bdesc.SampleDesc.Count = 1;
+        bdesc.Usage = D3D11_USAGE_DEFAULT;
+        bdesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        D3D11_TEXTURE2D_DESC stdesc = bdesc;
+        stdesc.Usage = D3D11_USAGE_STAGING;
+        stdesc.BindFlags = 0;
+        stdesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{};
+        ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+        if (FAILED(dev->CreateTexture2D(&bdesc, nullptr, &bgra)) ||
+            FAILED(vdev->CreateVideoProcessorOutputView(bgra, vpe, &ovd, &out_view)) ||
+            FAILED(dev->CreateTexture2D(&stdesc, nullptr, &staging))) {
+          release(out_view);
+          release(bgra);
+          release(staging);
+          release(vp);
+          release(vpe);
+          break;
+        }
+        vp_in_w = tw;
+        vp_in_h = th;
+        vp_out_w = (UINT32)w;
+        vp_out_h = (UINT32)h;
+      }
+      if (!in_view) {
+        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC ivd{};
+        ivd.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+        if (FAILED(vdev->CreateVideoProcessorInputView(nv12, vpe, &ivd, &in_view))) break;
+      }
+
+      vctx->VideoProcessorSetStreamFrameFormat(vp, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+      vctx->VideoProcessorSetStreamAutoProcessingMode(vp, 0, FALSE);
+      D3D11_VIDEO_PROCESSOR_COLOR_SPACE in_cs{};
+      in_cs.YCbCr_Matrix = bt601 ? 0 : 1;
+      in_cs.Nominal_Range = full ? D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255 : D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+      vctx->VideoProcessorSetStreamColorSpace(vp, 0, &in_cs);
+      D3D11_VIDEO_PROCESSOR_COLOR_SPACE out_cs{};
+      out_cs.RGB_Range = 0;
+      vctx->VideoProcessorSetOutputColorSpace(vp, &out_cs);
+      RECT srect = {0, 0, (LONG)tw, (LONG)th};
+      RECT drect = {0, 0, w, h};
+      vctx->VideoProcessorSetStreamSourceRect(vp, 0, TRUE, &srect);
+      vctx->VideoProcessorSetStreamDestRect(vp, 0, TRUE, &drect);
+      vctx->VideoProcessorSetOutputTargetRect(vp, TRUE, &drect);
+
+      D3D11_VIDEO_PROCESSOR_STREAM st{};
+      st.Enable = TRUE;
+      st.pInputSurface = in_view;
+      if (FAILED(vctx->VideoProcessorBlt(vp, out_view, 0, 1, &st))) break;
+
+      ctx->CopyResource(staging, bgra);
+      D3D11_MAPPED_SUBRESOURCE mapped{};
+      if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) break;
+      bgr.resize((size_t)w * h * 3);
+      for (int y = 0; y < h; y++) {
+        const uint8_t *row = (const uint8_t *)mapped.pData + (size_t)y * mapped.RowPitch;
+        uint8_t *dst = &bgr[(size_t)y * w * 3];
+        for (int x = 0; x < w; x++) {
+          dst[x * 3 + 0] = row[x * 4 + 0];
+          dst[x * 3 + 1] = row[x * 4 + 1];
+          dst[x * 3 + 2] = row[x * 4 + 2];
+        }
+      }
+      ctx->Unmap(staging, 0);
+      ok = true;
+    } while (false);
+    release(src_tex);
+    release(dxgi);
+    release(buf);
+    return ok;
+  }
+
+  void drop() {
+    release(in_view);
+    release(out_view);
+    release(bgra);
+    release(staging);
+    release(vp);
+    release(vpe);
+    release(nv12);
+    nv12_w = nv12_h = vp_in_w = vp_in_h = vp_out_w = vp_out_h = 0;
+    if (ctx) ctx->Flush();
+    release(manager);
+    release(vctx);
+    release(vdev);
+    release(ctx);
+    release(dev);
+  }
+
+  // (a decoder on this device never answered: everything left as it is, never let go, since letting go would wait
+  // on it; the next segment makes a device of its own)
+  void abandon() {
+    dev = nullptr;
+    ctx = nullptr;
+    vdev = nullptr;
+    vctx = nullptr;
+    manager = nullptr;
+    nv12 = nullptr;
+    vpe = nullptr;
+    vp = nullptr;
+    in_view = nullptr;
+    bgra = nullptr;
+    out_view = nullptr;
+    staging = nullptr;
+    nv12_w = nv12_h = vp_in_w = vp_in_h = vp_out_w = vp_out_h = 0;
+  }
+
+  ~GpuIndexer() { drop(); }
+};
+
+// The reader's samples handed over as they come (the reader made asynchronous), so a read can be given up on: the
+// HEVC decoder sometimes never answers one (seen on the user's 4K buffer, 2026-11-16: a ReadSample waited an hour, the
+// two other workers waiting for its room behind it, and no segment after it got a preview).
+struct Reads : IMFSourceReaderCallback {
+  LONG refs = 1;
+  HANDLE ready = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  HRESULT hr = S_OK;
+  DWORD flags = 0;
+  LONGLONG ts = 0;
+  IMFSample *sample = nullptr;
+
+  ~Reads() {
+    release(sample);
+    if (ready) CloseHandle(ready);
+  }
+  STDMETHODIMP QueryInterface(REFIID iid, void **out) override {
+    if (iid == __uuidof(IUnknown) || iid == __uuidof(IMFSourceReaderCallback)) {
+      *out = static_cast<IMFSourceReaderCallback *>(this);
+      AddRef();
+      return S_OK;
+    }
+    *out = nullptr;
+    return E_NOINTERFACE;
+  }
+  STDMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&refs); }
+  STDMETHODIMP_(ULONG) Release() override {
+    LONG n = InterlockedDecrement(&refs);
+    if (n == 0) delete this;
+    return n;
+  }
+  STDMETHODIMP OnReadSample(HRESULT status, DWORD, DWORD f, LONGLONG t, IMFSample *s) override {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      hr = status;
+      flags = f;
+      ts = t;
+      release(sample);
+      sample = s;
+      if (sample) sample->AddRef();
+    }
+    SetEvent(ready);
+    return S_OK;
+  }
+  STDMETHODIMP OnFlush(DWORD) override { return S_OK; }
+  STDMETHODIMP OnEvent(DWORD, IMFMediaEvent *) override { return S_OK; }
+
+  // The next sample of the video stream, waiting `ms` at most: false when it did not come in time (the reader then
+  // left as it is: a read is still out).
+  bool read(IMFSourceReader *reader, DWORD ms, HRESULT &status, DWORD &f, LONGLONG &t, IMFSample *&s) {
+    ResetEvent(ready);
+    status = reader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, nullptr, nullptr, nullptr);
+    if (FAILED(status)) return true;
+    if (WaitForSingleObject(ready, ms) != WAIT_OBJECT_0) return false;
+    std::lock_guard<std::mutex> lock(mu_);
+    status = hr;
+    f = flags;
+    t = ts;
+    s = sample;
+    sample = nullptr;
+    return true;
+  }
+
+ private:
+  std::mutex mu_;
+};
+
+// (a key frame of a 4K segment decodes in some tens of ms; a read not answered in this long never is)
+const DWORD kReadPatience = 8000;
+
+enum Made { kMadeNone = 0, kMadeOk = 1, kMadeStuck = 2 };
+
+// `plain`: the decoder not told to make thumbnails (tried after a read in that mode was never answered).
+Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &path, double dur_ms, bool plain,
+                 std::vector<Thumb> &out) {
+  IMFAttributes *attrs = nullptr;
+  IMFSourceReader *reader = nullptr;
+  IMFMediaType *want = nullptr, *got = nullptr;
+  Reads *reads = new Reads();
+  std::unique_ptr<Room> room;  // (given back once the reader, and its decoder, are let go)
+  bool ok = false;
+  bool stuck = false;
+  do {
+    if (!reads->ready || FAILED(MFCreateAttributes(&attrs, 4))) break;
+    attrs->SetUnknown(MF_SOURCE_READER_ASYNC_CALLBACK, reads);
+    if (gpu && gpu->manager) {
+      attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, gpu->manager);
+      attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+    }
+    if (FAILED(MFCreateSourceReaderFromURL(path.c_str(), attrs, &reader))) break;
+    reader->SetStreamSelection((DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE);
+    reader->SetStreamSelection((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+    if (FAILED(MFCreateMediaType(&want))) break;
+    want->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    want->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
+    if (FAILED(reader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, want))) break;
+    if (!plain) thumbnail_mode(reader);
+    if (FAILED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) break;
+    UINT32 fw = 0, fh = 0;
+    MFGetAttributeSize(got, MF_MT_FRAME_SIZE, &fw, &fh);
+    // (the picture shown, where the coded frame is taller: HEVC's 2160 rows coded as 2176)
+    MFVideoArea area;
+    if (SUCCEEDED(got->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 *)&area, sizeof area, nullptr)) &&
+        area.Area.cx > 0 && area.Area.cy > 0 && (UINT32)area.Area.cx <= fw && (UINT32)area.Area.cy <= fh) {
+      fw = (UINT32)area.Area.cx;
+      fh = (UINT32)area.Area.cy;
+    }
+    UINT32 m = 0, r = 0;
+    int bt601 = SUCCEEDED(got->GetUINT32(MF_MT_YUV_MATRIX, &m)) && m == MFVideoTransferMatrix_BT601;
+    int full = SUCCEEDED(got->GetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, &r)) && r == MFNominalRange_0_255;
+    release(got);
+    if (!fw || !fh) break;
+    room.reset(new Room(!(gpu && gpu->manager) && (uint64_t)fw * fh > 2560ull * 1440ull ? 3 : 1));
+    int w = kThumbW, h = (int)((int64_t)kThumbW * fh / fw);
+    if (h > kThumbH) {
+      h = kThumbH;
+      w = (int)((int64_t)kThumbH * fw / fh);
+    }
+    LONGLONG last = -1;
+    LONGLONG end = (LONGLONG)(dur_ms * 10000.0);
+    std::vector<uint8_t> bgr;
+    for (LONGLONG at = 0; at < end || at == 0; at += kStep) {
+      // (a key frame at most a second before the last one taken is the same picture: no need to seek again)
+      if (last >= 0 && at <= last) continue;
+      PROPVARIANT pos;
+      PropVariantInit(&pos);
+      pos.vt = VT_I8;
+      pos.hVal.QuadPart = at;
+      // (the reader takes a new position only once the last read's callback has returned, a moment after it said
+      // its sample was there)
+      HRESULT moved = reader->SetCurrentPosition(GUID_NULL, pos);
+      for (int wait = 0; moved == MF_E_INVALIDREQUEST && wait < 250; wait++) {
+        Sleep(2);
+        moved = reader->SetCurrentPosition(GUID_NULL, pos);
+      }
+      if (FAILED(moved)) break;
+      IMFSample *sample = nullptr;
+      LONGLONG ts = 0;
+      bool eos = false;
+      for (int tries = 0; tries < 8 && !sample; tries++) {
+        DWORD flags = 0;
+        HRESULT hr = S_OK;
+        if (!reads->read(reader, kReadPatience, hr, flags, ts, sample)) {
+          stuck = true;
+          break;
+        }
+        if (FAILED(hr)) {
+          eos = true;
+          break;
+        }
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+          eos = true;
+          break;
+        }
+      }
+      if (stuck) break;
+      if (!sample) {
+        if (eos) break;
+        continue;
+      }
+      if (ts == last) {
+        release(sample);
+        continue;
+      }
+      if (gpu && gpu->shrink_gpu(sample, fw, fh, bt601, full, w, h, bgr)) {
+        Thumb t;
+        t.ms = ts / 10000;
+        t.jpeg = encode_jpeg(wic, bgr, w, h);
+        if (!t.jpeg.empty()) out.push_back(std::move(t));
+        release(sample);
+        last = ts;
+        continue;
+      }
+      // (its storage may be wider than the picture: the type after the first decode says)
+      UINT32 sw = fw, sh = fh;
+      LONG stride = 0;
+      if (SUCCEEDED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) {
+        MFGetAttributeSize(got, MF_MT_FRAME_SIZE, &sw, &sh);
+        stride = (LONG)MFGetAttributeUINT32(got, MF_MT_DEFAULT_STRIDE, sw);
+        release(got);
+      }
+      IMFMediaBuffer *buffer = nullptr;
+      IMF2DBuffer *surface = nullptr;
+      if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buffer))) {
+        BYTE *data = nullptr;
+        DWORD len = 0;
+        LONG pitch = stride;
+        bool locked2d = SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&surface))) && SUCCEEDED(surface->Lock2D(&data, &pitch));
+        if (!locked2d && SUCCEEDED(buffer->Lock(&data, nullptr, &len))) {
+          if (pitch == 0) pitch = (LONG)sw;
+          // (a bottom-up buffer: its first row last)
+          if (pitch < 0) data += (size_t)(sh - 1) * (size_t)(-pitch);
+        }
+        if (data) {
+          auto sw_bgr = shrink_nv12(data, pitch, (int)sh, (int)fw, (int)fh, w, h);
+          if (locked2d) surface->Unlock2D();
+          else buffer->Unlock();
+          Thumb t;
+          t.ms = ts / 10000;
+          t.jpeg = encode_jpeg(wic, sw_bgr, w, h);
+          if (!t.jpeg.empty()) out.push_back(std::move(t));
+        }
+      }
+      release(surface);
+      release(buffer);
+      release(sample);
+      last = ts;
+    }
+    ok = !stuck && !out.empty();
+  } while (false);
+  release(got);
+  release(want);
+  if (stuck) {
+    // (a read still out: letting the reader go would wait on the decoder that never answered, so it is left, its
+    // decoder's memory with it; the room given back all the same, or every segment after waits on it)
+    reader = nullptr;
+    out.clear();
+  }
+  release(reader);
+  release(attrs);
+  reads->Release();
+  room.reset();
+  return stuck ? kMadeStuck : ok ? kMadeOk : kMadeNone;
+}
+
+void worker() {
+  // (in the background of whatever else the computer is doing: a game, the recorder)
+  SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  MFStartup(MF_VERSION, MFSTARTUP_LITE);
+  IWICImagingFactory *wic = nullptr;
+  CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+  const bool software = getenv("REPLAY_INDEX_SOFTWARE") != nullptr;
+  GpuIndexer gpu;
+  for (;;) {
+    std::string key;
+    std::wstring path, stem;
+    double dur = 0;
+    bool plain = false;
+    {
+      std::unique_lock<std::mutex> lock(mu);
+      for (;;) {
+        // the one asked for last, else the newest
+        Seg *best = nullptr;
+        const std::string *best_key = nullptr;
+        for (auto it = segs.rbegin(); it != segs.rend(); ++it) {
+          Seg &s = it->second;
+          if (s.state != 0) continue;
+          if (!best || s.prefer > best->prefer) {
+            best = &s;
+            best_key = &it->first;
+          }
+        }
+        if (best) {
+          best->state = 1;
+          key = *best_key;
+          path = best->path;
+          stem = best->stem;
+          dur = best->dur;
+          plain = best->plain != 0;
+          break;
+        }
+        // (nothing waiting: let go of the GPU device so no decoder memory stays held while idle)
+        gpu.drop();
+        work.wait(lock);
+      }
+    }
+    std::vector<Thumb> thumbs;
+    std::wstring file;
+    // (the recorder's, beside the segment; else this folder's, made here before)
+    std::wstring beside = path.size() > 4 ? path.substr(0, path.size() - 4) + L".thumbs" : L"";
+    bool cached = !stem.empty() && !beside.empty() && load_thumbs(beside, thumbs);
+    if (cached) {
+      file = beside;
+    } else if (!stem.empty() && !cache_dir.empty()) {
+      std::wstring kept = cache_dir + L"\\" + stem + L".thumbs";
+      thumbs.clear();
+      cached = load_thumbs(kept, thumbs);
+      if (cached) file = kept;
+      else thumbs.clear();
+    }
+    ULONGLONG began = GetTickCount64();
+    GpuIndexer *use_gpu = !cached && !software && gpu.ensure() ? &gpu : nullptr;
+    Made made_as = cached ? kMadeOk : wic ? make_thumbs(wic, use_gpu, path, dur, plain, thumbs) : kMadeNone;
+    bool ok = made_as == kMadeOk;
+    // (stuck: its decoder may still hold the device)
+    if (made_as == kMadeStuck && use_gpu) gpu.abandon();
+    const char *trace = getenv("REPLAY_TRACE");
+    if (trace && strcmp(trace, "1") == 0) {
+      printf("REPLAY_INDEX %s %llu ms %zu thumbs%s%s%s\n", key.c_str(), GetTickCount64() - began, thumbs.size(), cached ? " (disk)" : "",
+             plain ? " (plain)" : "", made_as == kMadeStuck ? " STUCK" : "");
+      fflush(stdout);
+    }
+    // (a read never answered: once more with the decoder not in its thumbnail mode, which it is far less often stuck
+    // in; stuck again, no previews for it)
+    if (made_as == kMadeStuck && !plain) {
+      std::lock_guard<std::mutex> lock(mu);
+      auto it = segs.find(key);
+      if (it != segs.end() && !it->second.dropped) {
+        it->second.plain = 1;
+        it->second.state = 0;
+        continue;
+      }
+    }
+    if (ok && !cached) save_cache(stem, thumbs, &file);
+    {
+      std::lock_guard<std::mutex> lock(mu);
+      auto it = segs.find(key);
+      if (it != segs.end() && it->second.dropped) {
+        if (!cache_dir.empty() && !it->second.stem.empty()) DeleteFileW((cache_dir + L"\\" + it->second.stem + L".thumbs").c_str());
+        segs.erase(it);
+      } else if (it != segs.end()) {
+        it->second.thumbs = std::move(thumbs);
+        it->second.file = file;
+        it->second.state = ok ? 2 : -1;
+      }
+    }
+    made++;
+  }
+}
+
+void start() {
+  if (started) return;
+  started = true;
+  for (int i = 0; i < 3; i++) std::thread(worker).detach();
+}
+
+const Thumb *nearest(const Seg &s, double ms) {
+  const Thumb *best = nullptr;
+  for (auto &t : s.thumbs) {
+    if (t.ms <= ms + 1) best = &t;
+    else break;
+  }
+  if (!best && !s.thumbs.empty()) best = &s.thumbs[0];
+  return best;
+}
+
+}  // namespace
+
+// Where the made thumbnails are kept (a folder; made when first written).
+extern "C" void rp_idx_dir(moonbit_bytes_t dir) {
+  std::lock_guard<std::mutex> lock(mu);
+  cache_dir = wide((const char *)dir);
+}
+
+// A segment of `dur` ms to make thumbnails of (nothing when it is known).
+extern "C" void rp_idx_add(moonbit_bytes_t path, double dur) {
+  std::lock_guard<std::mutex> lock(mu);
+  std::string key((const char *)path);
+  if (segs.count(key)) return;
+  Seg s;
+  s.path = wide(key.c_str());
+  s.stem = stem_of(s.path);
+  s.dur = dur;
+  segs.emplace(key, std::move(s));
+  start();
+  work.notify_all();
+}
+
+// A saved clip of `dur` ms being played (the hover preview over its bar): made before what waits, kept in memory
+// alone (no stem: nothing written beside the buffer's), let go by rp_idx_drop as its player closes.
+extern "C" void rp_idx_add_clip(moonbit_bytes_t path, double dur) {
+  std::lock_guard<std::mutex> lock(mu);
+  std::string key((const char *)path);
+  if (segs.count(key)) return;
+  Seg s;
+  s.path = wide(key.c_str());
+  s.dur = dur;
+  s.prefer = ++prefer_clock;
+  segs.emplace(key, std::move(s));
+  start();
+  work.notify_all();
+}
+
+// A segment gone from the buffer: its thumbnails let go, its file on disk removed.
+extern "C" void rp_idx_drop(moonbit_bytes_t path) {
+  std::lock_guard<std::mutex> lock(mu);
+  auto it = segs.find(std::string((const char *)path));
+  if (it == segs.end()) return;
+  // (one being made: let go as it is done, its thumbnails never shown)
+  if (it->second.state == 1) {
+    it->second.dropped = 1;
+    return;
+  }
+  if (!cache_dir.empty() && !it->second.stem.empty()) DeleteFileW((cache_dir + L"\\" + it->second.stem + L".thumbs").c_str());
+  segs.erase(it);
+}
+
+// The window looks at this segment now: made before the others still waiting.
+extern "C" void rp_idx_prefer(moonbit_bytes_t path) {
+  std::lock_guard<std::mutex> lock(mu);
+  auto it = segs.find(std::string((const char *)path));
+  if (it != segs.end() && it->second.state == 0) it->second.prefer = ++prefer_clock;
+}
+
+// The time (ms into the segment) of the thumbnail shown for `ms`: the last at or before it; -1 none yet, -2 the
+// segment could not be read.
+extern "C" double rp_idx_at(moonbit_bytes_t path, double ms) {
+  std::lock_guard<std::mutex> lock(mu);
+  auto it = segs.find(std::string((const char *)path));
+  if (it == segs.end()) return -1;
+  if (it->second.state == -1) return -2;
+  const Thumb *t = nearest(it->second, ms);
+  return t ? (double)t->ms : -1;
+}
+
+// That thumbnail's JPEG (empty: none).
+extern "C" moonbit_bytes_t rp_idx_jpeg(moonbit_bytes_t path, double ms) {
+  std::vector<uint8_t> bytes;
+  std::wstring file;
+  int64_t off = 0;
+  uint32_t len = 0;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    auto it = segs.find(std::string((const char *)path));
+    const Thumb *t = it == segs.end() ? nullptr : nearest(it->second, ms);
+    if (t && !t->jpeg.empty()) {
+      bytes = t->jpeg;
+    } else if (t && t->len && !it->second.file.empty()) {
+      file = it->second.file;
+      off = t->off;
+      len = t->len;
+    }
+  }
+  // (read from its file outside the lock: some tens of KB, the system's cache's)
+  if (len) {
+    FILE *f = _wfopen(file.c_str(), L"rb");
+    if (f) {
+      bytes.resize(len);
+      if (_fseeki64(f, off, SEEK_SET) != 0 || fread(bytes.data(), 1, len, f) != len) bytes.clear();
+      fclose(f);
+    }
+  }
+  moonbit_bytes_t out = moonbit_make_bytes((int32_t)bytes.size(), 0);
+  if (!bytes.empty()) memcpy(out, bytes.data(), bytes.size());
+  return out;
+}
+
+// How many segments are still waiting or being made.
+extern "C" int32_t rp_idx_pending(void) {
+  std::lock_guard<std::mutex> lock(mu);
+  int32_t n = 0;
+  for (auto &kv : segs)
+    if (kv.second.state == 0 || kv.second.state == 1) n++;
+  return n;
+}
+
+// How many segments have been made (or read from disk) since the start: a frame asks again when it grew.
+extern "C" int32_t rp_idx_made(void) { return made.load(); }

@@ -1,0 +1,7 @@
+{
+  "provider": "posthog",
+  "host": "https://us.i.posthog.com",
+  "projectToken": "phc_vuYrJrBYJ9zdzDQND9MSobpHKEqyBex6E6ReDZKT4fdi",
+  "lib": "screenreplay-windows",
+  "note": "Public write-only project token (PostHog project ScreenReplay, id 733380, US). Analytics stay off until the person turns them on."
+}

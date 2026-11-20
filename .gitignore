@@ -1,0 +1,8 @@
+out/
+bin/
+obj/
+deps/
+vendor/
+.wrangler/
+out-msix/
+out-setup-stage/

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <!-- (no WinForms: the tray, the hotkeys and the timers are Win32's own (MessageWindow.cs, Tray.cs), so that the
+         program can be trimmed) -->
+    <UseWindowsForms>false</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AssemblyName>ScreenReplay</AssemblyName>
+    <RootNamespace>Replay.Recorder</RootNamespace>
+    <ImportDirectoryBuildProps>false</ImportDirectoryBuildProps>
+    <ApplicationIcon>..\assets\ScreenReplay.ico</ApplicationIcon>
+  </PropertyGroup>
+  <!-- Trimmed only where it carries its own .NET runtime (the Store's MSIX: packaging/pack-msix.ps1); the
+       framework-dependent build and publish are as they were. -->
+  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
+    <PublishTrimmed>true</PublishTrimmed>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <TrimMode>full</TrimMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Capture, encoding, sound, the segment store and the joining of clips (recording/: Windows.Graphics.Capture,
+         Direct3D 11 and Media Foundation through Vortice.Windows, WASAPI through the COM tables directly; no built-in COM
+         interop, so trimming needs nothing kept by hand). -->
+    <ProjectReference Include="../recording/Replay.Recording.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\assets\ScreenReplay.ico" Link="ScreenReplay.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\assets\ScreenReplay-32.png" Link="ScreenReplay-32.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\assets\tray-paused.ico" Link="tray-paused.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\assets\tray-off.ico" Link="tray-off.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

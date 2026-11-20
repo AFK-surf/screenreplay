@@ -1,0 +1,31 @@
+// replay.exe's resources: its icon (resource 1, which mbui's Windows host gives its windows), what mbui's host reads as
+// though it were in its environment (MBUI_ENV, NAME=VALUE lines: its compiled shaders kept in the buffer's folder, which
+// the recorder makes: a run after the first takes them from there, 0.6 s to a window, not 3), and its version's words:
+// the taskbar names the program by its FileDescription (ScreenReplay, not the file's name: the user, 2026-11-13).
+1 ICON "ScreenReplay.ico"
+MBUI_ENV RCDATA "mbui_env.txt"
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "Motion Space"
+      VALUE "FileDescription", "ScreenReplay"
+      VALUE "ProductName", "ScreenReplay"
+      VALUE "InternalName", "ScreenReplayViewer"
+      VALUE "OriginalFilename", "ScreenReplayViewer.exe"
+      VALUE "FileVersion", "0.1.0.0"
+      VALUE "ProductVersion", "0.1.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

@@ -1,0 +1,2874 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScreenReplay — 错过的那一秒，其实一直在录 | Instant Replay</title>
+<meta name="description" content="纯显卡硬编的循环回放工具。后台零感常驻，无论是团战五杀高光还是一闪而过的偶现 Bug，按一下快捷键随时倒回逐帧查看、单窗口纯净裁剪。">
+<link rel="icon" href="img/icon.png">
+<style>
+:root {
+  --bg: #060709;
+  --bg-2: #0b0d12;
+  --surface: #111319;
+  --surface-2: #171a22;
+  --hair: rgba(255, 255, 255, 0.08);
+  --hair-strong: rgba(255, 255, 255, 0.15);
+  --spec: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --t1: #f4f5f7;
+  --t2: #9ba2b0;
+  --t3: #636a78;
+  --cta-bg: #f3f4f6;
+  --cta-fg: #090a0d;
+  --rec: #ff4d4d;
+  --rec-soft: rgba(255, 77, 77, 0.14);
+  --shadow-stage: 0 36px 100px -16px rgba(0, 0, 0, 0.82), 0 0 0 1px rgba(255, 255, 255, 0.09);
+  --font: "Inter", "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+}
+
+html[data-theme="light"] {
+  --bg: #f5f6fa;
+  --bg-2: #eceff5;
+  --surface: #ffffff;
+  --surface-2: #f1f3f8;
+  --hair: rgba(15, 18, 28, 0.08);
+  --hair-strong: rgba(15, 18, 28, 0.15);
+  --spec: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --t1: #0e1015;
+  --t2: #4b5262;
+  --t3: #767e8f;
+  --cta-bg: #101217;
+  --cta-fg: #ffffff;
+  --shadow-stage: 0 32px 84px -14px rgba(15, 20, 34, 0.22), 0 0 0 1px rgba(15, 18, 28, 0.12);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+
+html {
+  background: var(--bg);
+  color: var(--t1);
+  font: 400 16px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  min-width: 320px;
+  overflow-x: hidden;
+  position: relative;
+}
+
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+img, video { display: block; max-width: 100%; }
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 2;
+}
+
+/* Atmospheric Top Stage Backdrop */
+.hero-atmo {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 980px;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(58% 42% at 50% 34%, rgba(255, 77, 77, 0.12), transparent 72%),
+    radial-gradient(48% 38% at 68% 24%, rgba(86, 118, 255, 0.08), transparent 70%),
+    linear-gradient(180deg, rgba(255,255,255,0.015) 0%, transparent 100%);
+}
+html[data-theme="light"] .hero-atmo {
+  background:
+    radial-gradient(56% 40% at 50% 30%, rgba(255, 77, 77, 0.07), transparent 72%),
+    radial-gradient(48% 36% at 66% 22%, rgba(79, 108, 245, 0.07), transparent 70%);
+}
+.hero-atmo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--hair) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--hair) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 68% 52% at 50% 24%, rgba(0,0,0,0.42), transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 68% 52% at 50% 24%, rgba(0,0,0,0.42), transparent 78%);
+}
+
+/* Single Clean Sticky Header */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 56px;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  border-bottom: 1px solid var(--hair);
+}
+.nav-inner {
+  max-width: 1180px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+}
+.brand img {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+}
+.ver-tag {
+  font: 500 11px/1 var(--mono);
+  color: var(--t2);
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--hair);
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 12px;
+}
+.nav-links a {
+  font-size: 13.5px;
+  color: var(--t2);
+  padding: 6px 11px;
+  border-radius: 7px;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-links a:hover { color: var(--t1); background: var(--hair); }
+.sp { flex: 1; }
+.icon-btn, .lang-btn {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--hair-strong);
+  color: var(--t2);
+  font: 500 12px/1 var(--font);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.icon-btn:hover, .lang-btn:hover { color: var(--t1); background: var(--hair); }
+.nav-cta {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  background: var(--cta-bg);
+  color: var(--cta-fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.nav-cta:hover { opacity: 0.9; }
+
+/* HERO */
+.hero {
+  padding: 30px 0 28px;
+  text-align: center;
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 27px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  box-shadow: var(--spec);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t2);
+  margin-bottom: 14px;
+}
+.rec-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rec);
+  flex-shrink: 0;
+}
+.rec-dot::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: var(--rec);
+  opacity: 0.55;
+  animation: recPulse 2.1s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+@keyframes recPulse {
+  0% { transform: scale(0.8); opacity: 0.65; }
+  80%, 100% { transform: scale(2.6); opacity: 0; }
+}
+
+.hero h1 {
+  font-size: clamp(32px, 4.4vw, 54px);
+  font-weight: 650;
+  line-height: 1.12;
+  letter-spacing: -0.028em;
+  max-width: 16em;
+  margin: 0 auto;
+  text-wrap: balance;
+}
+html[lang="en"] .hero h1 {
+  letter-spacing: -0.036em;
+  line-height: 1.06;
+  max-width: 15em;
+}
+.hero-sub {
+  margin: 12px auto 0;
+  max-width: 35em;
+  font-size: clamp(14.5px, 1.5vw, 17px);
+  line-height: 1.56;
+  color: var(--t2);
+  text-wrap: balance;
+}
+.hero-actions {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.hero-alt-dl {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--t3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.hero-alt-dl a {
+  color: var(--t2);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: underline;
+  text-decoration-color: var(--hair-strong);
+  text-underline-offset: 3px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.hero-alt-dl a:hover {
+  color: var(--t1);
+  text-decoration-color: var(--t2);
+}
+.btn-primary {
+  height: 42px;
+  padding: 0 19px;
+  border-radius: 9px;
+  background: var(--cta-bg);
+  color: var(--cta-fg);
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s, opacity 0.15s;
+}
+.btn-primary:hover { transform: translateY(-1px); opacity: 0.93; }
+.btn-ghost {
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  box-shadow: var(--spec);
+  color: var(--t1);
+  font-size: 13.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-ghost:hover { background: var(--surface-2); border-color: rgba(255,255,255,0.24); }
+.platform-note {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  color: var(--t3);
+  font-size: 12.5px;
+}
+.platform-note svg { width: 12px; height: 12px; opacity: 0.85; }
+
+/* Scenario Mode Switcher above Flagship Viewer */
+.stage-modes {
+  margin: 20px auto 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  box-shadow: var(--spec);
+  max-width: 100%;
+}
+.mode-pill {
+  height: 31px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t2);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.mode-pill:hover { color: var(--t1); }
+.mode-pill.active {
+  background: #edeef0;
+  color: #111214;
+  font-weight: 600;
+}
+html[data-theme="light"] .mode-pill.active {
+  background: #111318;
+  color: #ffffff;
+}
+.mode-pill img { width: 15px; height: 15px; border-radius: 3px; }
+
+/* ==========================================================================
+   AUTHENTIC MOONBIT SCREENREPLAY VIEWER STAGE (exact app/*.mbt)
+   ========================================================================== */
+.sr-viewer {
+  position: relative;
+  max-width: 940px;
+  margin: 0 auto;
+  text-align: left;
+  background: #1B1C1F;
+  color: #EDEEF0;
+  border-radius: 10px;
+  box-shadow: var(--shadow-stage);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 40px Win11 Native Titlebar (app/main.mbt:123-288) */
+.sr-titlebar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  background: #1B1C1F;
+  font-size: 12px;
+}
+.sr-tb-side {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+}
+.sr-tb-side-end {
+  justify-content: flex-end;
+}
+.sr-tb-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 14px;
+  font-weight: 400;
+  color: #B7BBC2;
+  white-space: nowrap;
+}
+.sr-tb-left img { width: 16px; height: 16px; border-radius: 3.5px; }
+.sr-tb-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #B7BBC2;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sr-tb-when { color: #EDEEF0; font-weight: 500; }
+.sr-tb-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+}
+.sr-rec-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #B7BBC2;
+  white-space: nowrap;
+}
+.sr-rec-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #FF4D4D;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.sr-tb-ico {
+  width: 32px;
+  height: 28px;
+  border-radius: 6px;
+  color: #B7BBC2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-tb-ico:hover { background: #383A40; color: #EDEEF0; }
+.sr-win-btns {
+  display: inline-flex;
+  height: 40px;
+}
+.sr-win-key {
+  width: 46px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #B7BBC2;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-win-key:hover { background: rgba(255, 255, 255, 0.08); color: #EDEEF0; }
+.sr-win-close:hover { background: #C42B1C; color: #FFFFFF; }
+
+/* Video Well (#0F1012, app/main.mbt:294-343) */
+.sr-well {
+  position: relative;
+  background: #0F1012;
+  aspect-ratio: 16 / 9;
+  max-height: 580px;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sr-well video,
+.sr-well .sr-stage-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Authentic Pause Badge (app/play_state.mbt:90-105 — shown ONLY while paused) */
+.sr-pause-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.60);
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 400;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* MoonBit HoverCard (app/band_parts.mbt:550-742: 288px, c_s1 #222327, radius 10, pad 4, hair2 17%) */
+.sr-hovercard {
+  position: absolute;
+  bottom: 4px;
+  width: 288px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #222327;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+  transform: translateX(-50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  z-index: 15;
+}
+.sr-hc-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0F1012;
+}
+.sr-hc-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sr-hc-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 2px 6px 0;
+  font-size: 12px;
+  line-height: 1;
+}
+.sr-hc-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sr-hc-time { color: #EDEEF0; font-weight: 500; }
+.sr-hc-ago { color: #8C9199; }
+.sr-hc-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #B7BBC2;
+  min-width: 0;
+}
+.sr-hc-ico img, .sr-hc-ico svg { width: 16px; height: 16px; object-fit: contain; display: block; }
+.sr-hc-dur { color: #8C9199; }
+
+/* Bottom Timeline Dock (#1B1C1F, app/main.mbt:616-626: 1px hair, 20px side pad, 6px bottom pad) */
+.sr-bottom {
+  position: relative;
+  background: #1B1C1F;
+  padding: 0 20px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+/* 58px = 18px dock_over + 8px heat_h + 32px strip_h (capsule & pins sit inside #1B1C1F dock!) */
+.sr-band-outer {
+  position: relative;
+  height: 58px;
+  cursor: pointer;
+  touch-action: none;
+}
+.sr-band-canvas {
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 100%;
+  height: 40px;
+  display: block;
+}
+.sr-piece-labels {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26px;
+  height: 32px;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sr-piece-label {
+  position: absolute;
+  top: 0;
+  height: 32px;
+  padding: 0 6px 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #EDEEF0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sr-piece-label img, .sr-piece-label svg {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+/* Teardrop Marker Pins (app/timeline_view.mbt:288-309, offset -21.5 above 32px track => top 4.5px) */
+.sr-pin {
+  position: absolute;
+  top: 4.5px;
+  width: 16px;
+  height: 21px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Hover Hairline & Seam Tooltip */
+.sr-hover-line {
+  position: absolute;
+  top: 26px;
+  height: 32px;
+  width: 1px;
+  background: rgba(160, 164, 171, 0.60);
+  pointer-events: none;
+  z-index: 7;
+}
+.sr-seam-tip {
+  position: absolute;
+  top: -4px;
+  transform: translateX(-50%);
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: #222327;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  color: #EDEEF0;
+  font-size: 11.5px;
+  font-weight: 400;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 16;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+}
+
+/* One-Piece Playhead (app/timeline_view.mbt:459-604: squircle capsule + SVG concave neck + 2px stem) */
+.sr-playhead {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 58px;
+  pointer-events: none;
+  z-index: 10;
+}
+.sr-ph-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 58px;
+  overflow: visible;
+  display: block;
+}
+.sr-ph-time {
+  position: absolute;
+  top: 3px;
+  height: 19px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 0.5px;
+  color: #111214;
+  font: 600 11px/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 10px Overview Strip (app/overview.mbt:97-244) */
+.sr-overview {
+  margin-top: 4px;
+  height: 10px;
+  position: relative;
+}
+.sr-ov-canvas {
+  width: 100%;
+  height: 10px;
+  display: block;
+}
+
+/* 32px Three-Column Controls Row (app/main.mbt:358-612 + parts.mbt + app_filter.mbt) */
+.sr-dock {
+  margin-top: 6px;
+  height: 32px;
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.sr-dock-left,
+.sr-dock-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.sr-dock-left { gap: 2px; }
+.sr-dock-right { justify-content: flex-end; gap: 6px; }
+.sr-dock-mid {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.sr-mid-slot {
+  width: 44px;
+  display: flex;
+  align-items: center;
+}
+@media (max-width: 1120px) {
+  .sr-filter-stat { display: none; }
+  .sr-mid-slot { width: auto; }
+}
+.sr-mid-slot-end { justify-content: flex-end; padding-right: 4px; }
+.sr-mid-slot-start { justify-content: flex-start; padding-left: 4px; }
+
+/* Bare 32x28 icon_button (app/parts.mbt:187-218) */
+.sr-ico-btn {
+  width: 32px;
+  height: 28px;
+  border-radius: 6px;
+  color: #B7BBC2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-ico-btn:hover { background: #383A40; color: #EDEEF0; }
+/* Play key 36x32 (app/parts.mbt:330-355) */
+.sr-play-key {
+  width: 36px;
+  height: 32px;
+  border-radius: 6px;
+  color: #B7BBC2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-play-key:hover { background: #383A40; color: #EDEEF0; }
+
+/* Bare ghost dropdown / text keys: speed_key, apps_key (unfiltered), zoom_key, 回到最新 */
+.sr-ghost-key {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: #B7BBC2;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-ghost-key:hover { background: #383A40; color: #EDEEF0; }
+.sr-ghost-key .sr-chev { color: #8C9199; transition: color 0.1s; }
+.sr-ghost-key:hover .sr-chev { color: #B7BBC2; }
+
+/* Active apps_key chip (app/app_filter.mbt:241-320: c_s3 #383A40 ground, ui_text #EDEEF0, NO border!) */
+.sr-apps-key.filtered {
+  background: #383A40;
+  color: #EDEEF0;
+  padding: 0 4px 0 8px;
+}
+.sr-apps-key.filtered:hover { background: #484A51; }
+.sr-apps-key img { width: 16px; height: 16px; object-fit: contain; display: block; }
+.sr-apps-clear {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: #8C9199;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
+}
+.sr-apps-clear:hover { background: #484A51; color: #EDEEF0; }
+
+/* Secondary solid text_button: 剪辑 (app/parts.mbt:224-266: height 32, radius 8, c_s3 #383A40, 13px) */
+.sr-clip-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #383A40;
+  color: #EDEEF0;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+.sr-clip-btn:hover { background: #484A51; }
+.sr-filter-stat {
+  font-size: 12px;
+  color: #8C9199;
+  padding-right: 2px;
+  white-space: nowrap;
+}
+
+/* Authentic 384px Apps Filter Popover (app/app_filter.mbt:456-556) */
+.sr-apps-popover {
+  position: absolute;
+  right: 20px;
+  bottom: 44px;
+  width: min(364px, calc(100% - 24px));
+  padding: 10px 6px 8px;
+  background: #222327;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  z-index: 30;
+}
+.sr-ap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 10px 8px;
+}
+.sr-ap-title { font-size: 13px; font-weight: 600; color: #EDEEF0; }
+.sr-ap-reach { font-size: 12px; color: #8C9199; }
+.sr-ap-row {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  transition: background 0.1s;
+}
+.sr-ap-row:hover { background: #2B2D32; }
+.sr-ap-tick {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid #484A51;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sr-ap-row.ticked .sr-ap-tick {
+  background: #EDEEF0;
+  border-color: #EDEEF0;
+  color: #111214;
+}
+.sr-ap-row img { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; }
+.sr-ap-name { flex: 1; font-size: 13px; color: #EDEEF0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-ap-dur { font-size: 12px; color: #B7BBC2; }
+.sr-ap-share { width: 34px; text-align: right; font-size: 12px; color: #8C9199; }
+.sr-ap-only {
+  display: none;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: #383A40;
+  color: #EDEEF0;
+  font-size: 12px;
+  font-weight: 500;
+  align-items: center;
+}
+.sr-ap-only:hover { background: #484A51; }
+.sr-ap-row:hover .sr-ap-dur,
+.sr-ap-row:hover .sr-ap-share { display: none; }
+.sr-ap-row:hover .sr-ap-only { display: inline-flex; }
+.sr-ap-foot {
+  margin-top: 6px;
+  padding: 8px 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #8C9199;
+}
+.sr-ap-foot button { color: #B7BBC2; font-weight: 500; padding: 2px 6px; border-radius: 5px; }
+.sr-ap-foot button:hover { background: #383A40; color: #EDEEF0; }
+
+.stage-caption {
+  max-width: 940px;
+  margin: 10px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--t3);
+  padding: 0 4px;
+}
+.stage-caption button {
+  color: var(--t2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.stage-caption button:hover { color: var(--t1); }
+
+/* ==========================================================================
+   CINEMATIC FEATURE ACTS (Spacious, Visual-First, Zero Wall-of-Text)
+   ========================================================================== */
+.act {
+  padding: 108px 0 0;
+}
+.act-head {
+  text-align: center;
+  max-width: 820px;
+  margin: 0 auto 36px;
+}
+.eyebrow {
+  display: inline-block;
+  font: 600 11.5px/1 var(--mono);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--t3);
+  margin-bottom: 12px;
+}
+.act-head h2 {
+  font-size: clamp(25px, 3.4vw, 40px);
+  font-weight: 640;
+  line-height: 1.18;
+  letter-spacing: -0.024em;
+  text-wrap: balance;
+}
+.act-head p {
+  margin: 12px auto 0;
+  max-width: 640px;
+  font-size: clamp(15px, 1.5vw, 17px);
+  color: var(--t2);
+  line-height: 1.62;
+  text-wrap: balance;
+}
+
+/* Act 1 & Act 2 Interactive Visual Frames */
+.showcase-frame {
+  max-width: 1040px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  box-shadow: var(--shadow-stage);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.frame-viewport {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #0c0d10;
+  overflow: hidden;
+}
+.frame-viewport img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.16s ease;
+}
+.frame-status {
+  padding: 9px 16px;
+  background: var(--bg-2);
+  border-top: 1px solid var(--hair);
+  color: var(--t2);
+  font: 500 12px/1.35 var(--mono);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.frame-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--t3);
+  flex-shrink: 0;
+}
+.frame-status.alert {
+  color: #ff8080;
+}
+.frame-status.alert::before {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px rgba(255, 77, 77, 0.7);
+}
+
+.frame-bar {
+  padding: 12px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--hair);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.step-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.step-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--hair-strong);
+  background: var(--surface-2);
+  color: var(--t2);
+  font-size: 12.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.14s;
+}
+.step-btn:hover { color: var(--t1); }
+.step-btn.active {
+  background: var(--cta-bg);
+  color: var(--cta-fg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.step-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kbd-btn {
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 7px;
+  border: 1px solid var(--hair-strong);
+  color: var(--t1);
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.kbd-btn:hover { background: var(--surface-2); }
+kbd {
+  font: 600 11px/1 var(--mono);
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--hair-strong);
+}
+html[data-theme="light"] kbd {
+  background: rgba(15, 18, 28, 0.06);
+}
+
+/* Act 3: Dual Architectural Stage (Seam Splice + Zero-Copy GPU) */
+.dual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.arch-card {
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  box-shadow: var(--spec);
+  border-radius: 14px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 22px;
+}
+.arch-card h3 {
+  font-size: 21px;
+  font-weight: 630;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.arch-card p {
+  margin-top: 8px;
+  color: var(--t2);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+/* Seam-Splice Interactive Widget (exact app/band_parts.mbt:425-476 clip_layer) */
+.splice-demo {
+  background: #1B1C1F;
+  border-radius: 10px;
+  padding: 16px 16px 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  color: #EDEEF0;
+}
+.splice-band {
+  position: relative;
+  height: 40px;
+}
+.splice-heat {
+  display: flex;
+  height: 8px;
+}
+.sp-heat-seg {
+  flex: 1;
+  height: 8px;
+  background: linear-gradient(90deg, rgba(255,196,64,0.22), rgba(255,140,40,0.62) 48%, rgba(235,50,50,0.78) 82%, rgba(255,140,40,0.45));
+}
+.sp-heat-seam {
+  width: 22px;
+  flex-shrink: 0;
+}
+.splice-track {
+  position: relative;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.sp-seg {
+  height: 32px;
+  background: #2B2D32;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 400;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sp-seg.sp-seg-cur {
+  background: #484A51;
+}
+.sp-seg img { width: 14px; height: 14px; object-fit: contain; flex-shrink: 0; }
+.sp-seam {
+  width: 22px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex-shrink: 0;
+}
+.sp-seam::after {
+  content: "";
+  width: 1px;
+  height: 14px;
+  background: rgba(255,255,255,0.18);
+}
+/* Real clip_layer: lit stretch fill (no top/bottom frame), 2px vertical end bars, 8x22 rounded grips */
+.sp-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 30%;
+  right: 30%;
+  background: rgba(237, 238, 240, 0.20);
+  border-left: 2px solid #EDEEF0;
+  border-right: 2px solid #EDEEF0;
+  pointer-events: none;
+}
+.sp-selection::before,
+.sp-selection::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 22px;
+  margin-top: -11px;
+  border-radius: 4px;
+  background: #EDEEF0;
+  border: 1px solid rgba(0, 0, 0, 0.40);
+  box-sizing: border-box;
+}
+.sp-selection::before { left: -5px; }
+.sp-selection::after { right: -5px; }
+.splice-caption {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #B7BBC2;
+}
+.splice-out {
+  font-family: var(--mono);
+  color: #EDEEF0;
+  background: #2B2D32;
+  padding: 3px 8px;
+  border-radius: 5px;
+}
+
+/* Zero-Copy Pipeline + Storage Estimator */
+.gpu-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 13px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--hair);
+  font: 500 12px/1.3 var(--mono);
+  overflow-x: auto;
+}
+.gpu-node {
+  white-space: nowrap;
+  color: var(--t1);
+}
+.gpu-arr { color: var(--t3); }
+
+.storage-box {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--hair);
+}
+.st-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--t2);
+}
+.st-pills {
+  display: inline-flex;
+  gap: 4px;
+}
+.st-pill {
+  height: 25px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font: 500 11.5px/1 var(--mono);
+  color: var(--t2);
+  border: 1px solid var(--hair-strong);
+}
+.st-pill.active {
+  background: var(--cta-bg);
+  color: var(--cta-fg);
+  border-color: transparent;
+  font-weight: 600;
+}
+.st-vals {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--t2);
+}
+.st-vals strong {
+  font: 600 17px/1 var(--mono);
+  color: var(--t1);
+  margin-left: 6px;
+}
+
+/* 4 Monumental Telemetry Metrics */
+.metrics-strip {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--hair-strong);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.metric-cell {
+  padding: 24px 22px;
+  border-right: 1px solid var(--hair);
+}
+.metric-cell:last-child { border-right: none; }
+.metric-val {
+  font: 650 clamp(26px, 3vw, 36px)/1.05 var(--mono);
+  letter-spacing: -0.03em;
+  color: var(--t1);
+}
+.metric-lbl {
+  margin-top: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--t2);
+}
+.metric-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--t3);
+}
+
+/* Finale CTA */
+.finale {
+  margin-top: 108px;
+  padding: 64px 24px 72px;
+  text-align: center;
+  border-top: 1px solid var(--hair);
+  background: radial-gradient(50% 60% at 50% 0%, rgba(255, 77, 77, 0.08), transparent 72%);
+}
+.finale-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 15px;
+  margin: 0 auto 18px;
+  box-shadow: 0 16px 36px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.14);
+}
+.finale h2 {
+  font-size: clamp(26px, 3.6vw, 40px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  max-width: 18em;
+  margin: 0 auto;
+  text-wrap: balance;
+}
+.finale p {
+  margin: 12px auto 24px;
+  color: var(--t2);
+  font-size: 15.5px;
+}
+.hotkeys-inline {
+  margin: 28px auto 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--t2);
+}
+.hotkeys-inline span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Footer */
+.site-footer {
+  border-top: 1px solid var(--hair);
+  padding: 24px 0 36px;
+  font-size: 13px;
+  color: var(--t3);
+}
+.footer-inner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.footer-inner a:hover { color: var(--t1); }
+
+/* Cinema Lightbox Modal */
+.cinema-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(4, 5, 8, 0.88);
+  backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.cinema-box {
+  position: relative;
+  width: min(1080px, 100%);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 32px 96px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.14);
+}
+.cinema-box video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+}
+.cinema-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(18, 20, 26, 0.78);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #fff;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+/* ==========================================================================
+   MOBILE & TABLET PRECISION (iPhone 393px First-Screen Fit!)
+   ========================================================================== */
+@media (max-width: 900px) {
+  .dual-grid { grid-template-columns: 1fr; }
+  .metrics-strip { grid-template-columns: 1fr 1fr; }
+  .metric-cell:nth-child(2) { border-right: none; }
+  .metric-cell:nth-child(1), .metric-cell:nth-child(2) { border-bottom: 1px solid var(--hair); }
+}
+
+@media (max-width: 680px) {
+  .wrap, .nav-inner { padding: 0 16px; }
+  .nav-links, .ver-tag, .sr-win-btns, #sr-tb-app, #sr-tb-ago { display: none; }
+  .hero { padding: 18px 0 18px; }
+  .live-badge { margin-bottom: 10px; font-size: 11.5px; height: 25px; }
+  .hero h1 { font-size: 30px; line-height: 1.15; }
+  .hero-sub { font-size: 14px; margin-top: 8px; line-height: 1.48; }
+  .hero-actions { margin-top: 13px; gap: 8px; }
+  .btn-primary, .btn-ghost { height: 38px; padding: 0 13px; font-size: 13px; }
+  .stage-modes { margin: 14px auto 10px; gap: 3px; padding: 3px; }
+  .mode-pill { height: 29px; padding: 0 9px; font-size: 12px; gap: 5px; }
+  .sr-titlebar { height: 36px; }
+  .sr-tb-side { height: 36px; }
+  .sr-tb-left { padding: 0 6px 0 10px; gap: 6px; font-size: 11.5px; }
+  .sr-tb-center { gap: 6px; font-size: 11px; }
+  .sr-tb-tools { padding-right: 6px; gap: 0; }
+  .sr-tb-ico { width: 28px; height: 26px; }
+  #sr-tb-clips { display: none; }
+  .sr-rec-status { padding: 0 6px; font-size: 11px; }
+  .sr-hovercard { display: none; }
+  .sr-bottom { padding: 0 10px 6px; }
+  .sr-dock { gap: 4px; }
+  .sr-ctl-hide-sm, .sr-mid-slot { display: none; }
+  .sr-dock-right { gap: 4px; }
+  .sr-clip-btn { height: 28px; padding: 0 9px; font-size: 12px; border-radius: 6px; gap: 5px; }
+  .stage-caption { font-size: 12px; flex-direction: column; align-items: flex-start; gap: 4px; }
+  .act { padding: 68px 0 0; }
+  .act-head { margin-bottom: 24px; }
+  .frame-status { padding: 8px 12px; font-size: 11px; }
+  .frame-bar { padding: 10px 12px; }
+  .step-btn { height: 30px; padding: 0 9px; font-size: 12px; }
+  .arch-card { padding: 20px 18px; }
+  .sp-selection { left: 32%; right: 32%; }
+  .st-vals { flex-direction: column; gap: 6px; }
+  .metric-cell { padding: 18px 16px; }
+  .finale { margin-top: 72px; padding: 48px 16px 56px; }
+}
+</style>
+</head>
+<body>
+
+<div class="hero-atmo" aria-hidden="true"></div>
+
+<header class="site-header">
+  <div class="nav-inner">
+    <a class="brand" href="./">
+      <img src="img/icon.png" alt="ScreenReplay">
+      <span>ScreenReplay</span>
+    </a>
+    <span class="ver-tag">v0.1.11</span>
+    <nav class="nav-links">
+      <a href="#forensics" data-zh="逐帧取证" data-en="Frame Step">逐帧取证</a>
+      <a href="#window-crop" data-zh="单窗裁剪" data-en="Window Crop">单窗裁剪</a>
+      <a href="#engine" data-zh="零拷贝引擎" data-en="GPU Engine">零拷贝引擎</a>
+      <a href="changelog" data-zh="更新日志" data-en="Changelog">更新日志</a>
+      <a href="support" data-zh="赞助" data-en="Support">赞助</a>
+      <a href="https://github.com/motion-space/screenreplay" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <span class="sp"></span>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle theme"></button>
+    <button class="lang-btn" type="button">EN</button>
+    <a class="nav-cta" href="https://apps.microsoft.com/detail/9PCZQK5BVPC6" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M1.5 1.5h6v6h-6zm7 0h6v6h-6zm-7 7h6v6h-6zm7 0h6v6h-6z"/></svg>
+      <span data-zh="下载" data-en="Download">下载</span>
+    </a>
+  </div>
+</header>
+
+<main>
+  <!-- ====================================================================
+       BEAT 1: CINEMATIC HERO + LIVE INTERACTIVE SCREENREPLAY VIEWER
+       ==================================================================== -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="live-badge">
+        <span class="rec-dot"></span>
+        <span data-zh="后台常驻回放" data-en="Always-on Replay">后台常驻回放</span>
+      </div>
+
+      <h1 data-zh="错过的那一秒，其实一直在录。" data-en="The moment you missed is already recorded.">错过的那一秒，其实一直在录。</h1>
+
+      <p class="hero-sub"
+         data-zh="纯显卡硬编循环回放。无论是团战五杀高光还是一闪而过的偶现报错，按一下快捷键，随时倒回现场。"
+         data-en="Zero-copy GPU replay. From 5K clutches to fleeting runtime crashes, hit one shortcut to rewind any second.">纯显卡硬编循环回放。无论是团战五杀高光还是一闪而过的偶现报错，按一下快捷键，随时倒回现场。</p>
+
+      <div class="hero-actions">
+        <a class="btn-primary" href="https://apps.microsoft.com/detail/9PCZQK5BVPC6" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.5 1.5h6v6h-6zm7 0h6v6h-6zm-7 7h6v6h-6zm7 0h6v6h-6z"/></svg>
+          <span data-zh="前往 Microsoft Store 下载" data-en="Download on Microsoft Store">前往 Microsoft Store 下载</span>
+        </a>
+        <button class="btn-ghost" id="open-film-btn" type="button">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M4 2.8v10.4L13.2 8z"/></svg>
+          <span data-zh="50 秒实录短片" data-en="Watch 50s Film">50 秒实录短片</span>
+        </button>
+      </div>
+      <div class="hero-alt-dl" style="flex-wrap:wrap;gap:8px 10px">
+        <a href="/dl/ScreenReplay-Setup.exe">
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2v7.2M4.3 6.6 7 9.4l2.7-2.8M2.5 11.6h9"/></svg>
+          <span data-zh="直接下载安装包 (.exe · 9.3 MB · 支持自动更新)" data-en="Direct installer (.exe · 9.3 MB · Auto-updates)">直接下载安装包 (.exe · 9.3 MB · 支持自动更新)</span>
+        </a>
+        <span aria-hidden="true">·</span>
+        <span style="display:inline-flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true" style="opacity:0.85"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.72c1.25-.02 2.03-1.13 2.79-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.46-3.71zM14.08 5.85c.64-.77 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.11 1.77-.97 2.82 1.02.08 2.07-.52 2.71-1.28z"/></svg><span data-zh="macOS 版即将推出" data-en="macOS version coming soon">macOS 版即将推出</span></span>
+      </div>
+
+      <!-- Instant Live Mode Tabs -->
+      <div class="stage-modes" role="tablist" aria-label="Replay Scenarios">
+        <button class="mode-pill active" type="button" data-mode="cs2">
+          <img src="img/ico-cs2.png" alt="">
+          <span data-zh="团战五杀回放" data-en="CS2 5K Clutch">团战五杀回放</span>
+        </button>
+        <button class="mode-pill" type="button" data-mode="bug">
+          <img src="img/ico-chrome.png" alt="">
+          <span data-zh="偶现崩溃定格" data-en="Fleeting Crash">偶现崩溃定格</span>
+        </button>
+        <button class="mode-pill" type="button" data-mode="fold">
+          <svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 2.8h10L8.2 7.4V11L5.8 12.2V7.4Z"/></svg>
+          <span data-zh="只看 CS2" data-en="CS2 Only">只看 CS2</span>
+        </button>
+      </div>
+
+      <!-- Authentic MoonBit ScreenReplayViewer Stage -->
+      <div class="sr-viewer" id="sr-viewer">
+        <div class="sr-titlebar">
+          <div class="sr-tb-side">
+            <div class="sr-tb-left">
+              <img src="img/icon.png" alt="">
+              <span>ScreenReplay</span>
+            </div>
+          </div>
+          <div class="sr-tb-center">
+            <span class="sr-tb-when" id="sr-tb-when">今天 21:13:42</span>
+            <span id="sr-tb-ago">刚刚</span>
+            <span id="sr-tb-app">·   Counter-Strike 2</span>
+          </div>
+          <div class="sr-tb-side sr-tb-side-end">
+            <div class="sr-tb-tools">
+              <span class="sr-rec-status"><i></i><span data-zh="录制中" data-en="Recording">录制中</span></span>
+              <a class="sr-tb-ico" href="#window-crop" title="已保存片段" data-title-zh="已保存片段" data-title-en="Saved clips" aria-label="Saved clips">
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"><rect x="4.5" y="2.5" width="9" height="9" rx="1.6"/><path d="M2.5 5.5v6.4a1.6 1.6 0 0 0 1.6 1.6h6.4"/><path d="M8 5.4v3.2l2.5-1.6Z" fill="currentColor" stroke="none"/></svg>
+              </a>
+              <a class="sr-tb-ico" href="#engine" title="设置" data-title-zh="设置" data-title-en="Settings" aria-label="Settings">
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.1"/><path d="M8 2.2v1.4M8 12.4v1.4M2.2 8h1.4M12.4 8h1.4M3.9 3.9l1 1M11.1 11.1l1 1M12.1 3.9l-1 1M4.9 11.1l-1 1"/></svg>
+              </a>
+            </div>
+            <div class="sr-win-btns" aria-hidden="true">
+              <span class="sr-win-key"><svg viewBox="0 0 12 12" width="11" height="11" stroke="currentColor" stroke-width="1.1"><path d="M1.5 6h9"/></svg></span>
+              <span class="sr-win-key"><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></span>
+              <span class="sr-win-key sr-win-close"><svg viewBox="0 0 12 12" width="11" height="11" stroke="currentColor" stroke-width="1.1"><path d="M2 2l8 8M10 2l-8 8"/></svg></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sr-well" id="sr-well">
+          <video id="sr-hero-vid" src="cs2-ace.mp4" poster="img/cs2-ace.jpg" autoplay loop muted playsinline></video>
+          <img class="sr-stage-img" id="sr-stage-img" src="img/cs2-ace.jpg" alt="Replay frame" hidden>
+
+          <div class="sr-pause-badge" id="sr-pause-badge" hidden>
+            <svg viewBox="0 0 10 10" width="10" height="10" fill="currentColor"><path d="M2 1.5h2.1v7H2zM5.9 1.5H8v7H5.9z"/></svg>
+            <span id="sr-pause-txt" data-zh="已暂停" data-en="Paused">已暂停</span>
+          </div>
+
+          <div class="sr-hovercard" id="sr-hovercard">
+            <div class="sr-hc-thumb"><img id="sr-hc-img" src="img/hc-cs2-2.jpg" alt=""></div>
+            <div class="sr-hc-meta">
+              <div class="sr-hc-left">
+                <span class="sr-hc-time" id="sr-hc-time">21:13:42</span>
+                <span class="sr-hc-ago" id="sr-hc-ago" data-zh="刚刚" data-en="Just now">刚刚</span>
+              </div>
+              <div class="sr-hc-right">
+                <span class="sr-hc-ico" id="sr-hc-ico"><img src="img/ico-cs2.png" alt=""></span>
+                <span id="sr-hc-name">Counter-Strike 2</span>
+                <span class="sr-hc-dur" id="sr-hc-dur">11:00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sr-bottom">
+          <div class="sr-band-outer" id="sr-band-wrap">
+            <canvas class="sr-band-canvas" id="sr-band-canvas" height="40"></canvas>
+            <div class="sr-piece-labels" id="sr-piece-labels"></div>
+
+            <!-- Authentic 16x21 Teardrop Marker Pins with #1B1C1F edge halo (app/timeline_view.mbt:290-308) -->
+            <svg class="sr-pin" id="sr-pin-1" viewBox="0 0 16 21"><path d="M8 20.5C8 20.5.75 13.2.75 8a7.25 7.25 0 0 1 14.5 0c0 5.2-7.25 12.5-7.25 12.5z" fill="#EDEEF0" stroke="#1B1C1F" stroke-width="1.25"/><circle cx="8" cy="8" r="2.6" fill="#1B1C1F"/></svg>
+            <svg class="sr-pin" id="sr-pin-2" viewBox="0 0 16 21"><path d="M8 20.5C8 20.5.75 13.2.75 8a7.25 7.25 0 0 1 14.5 0c0 5.2-7.25 12.5-7.25 12.5z" fill="#EDEEF0" stroke="#1B1C1F" stroke-width="1.25"/><circle cx="8" cy="8" r="2.6" fill="#1B1C1F"/></svg>
+
+            <div class="sr-hover-line" id="sr-hover-line" hidden></div>
+            <div class="sr-seam-tip" id="sr-seam-tip" hidden>Skipped 35m · 20:28 – 21:03</div>
+
+            <!-- Authentic One-Piece Playhead: squircle capsule + concave curved neck + 2px stem -->
+            <div class="sr-playhead" id="sr-playhead">
+              <svg class="sr-ph-svg" id="sr-ph-svg"></svg>
+              <div class="sr-ph-time" id="sr-ph-cap">21:13:42</div>
+            </div>
+          </div>
+
+          <div class="sr-overview">
+            <canvas class="sr-ov-canvas" id="sr-ov-canvas" height="10"></canvas>
+          </div>
+
+          <!-- Authentic 384px Front Apps Popover (app/app_filter.mbt:456-556) -->
+          <div class="sr-apps-popover" id="sr-apps-popover" hidden>
+            <div class="sr-ap-head">
+              <span class="sr-ap-title" data-zh="前台应用" data-en="Apps in front">前台应用</span>
+              <span class="sr-ap-reach" data-zh="过去 1 小时 · 共录 60 分" data-en="Last 1 hr · 60m recorded">过去 1 小时 · 共录 60 分</span>
+            </div>
+            <div id="sr-ap-list">
+              <div class="sr-ap-row" data-app="cs2">
+                <span class="sr-ap-tick"><svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.3 5.8l2.2 2.2 4.3-4.6"/></svg></span>
+                <img src="img/ico-cs2.png" alt="">
+                <span class="sr-ap-name">Counter-Strike 2</span>
+                <span class="sr-ap-dur" data-zh="25 分" data-en="25m">25 分</span>
+                <span class="sr-ap-share">42%</span>
+                <span class="sr-ap-only" data-zh="只看它" data-en="Only this">只看它</span>
+              </div>
+              <div class="sr-ap-row" data-app="slack">
+                <span class="sr-ap-tick"></span>
+                <img src="img/ico-slack.png" alt="">
+                <span class="sr-ap-name">Slack</span>
+                <span class="sr-ap-dur" data-zh="13 分" data-en="13m">13 分</span>
+                <span class="sr-ap-share">22%</span>
+                <span class="sr-ap-only" data-zh="只看它" data-en="Only this">只看它</span>
+              </div>
+              <div class="sr-ap-row" data-app="chrome">
+                <span class="sr-ap-tick"></span>
+                <img src="img/ico-chrome.png" alt="">
+                <span class="sr-ap-name">Chrome</span>
+                <span class="sr-ap-dur" data-zh="12 分" data-en="12m">12 分</span>
+                <span class="sr-ap-share">20%</span>
+                <span class="sr-ap-only" data-zh="只看它" data-en="Only this">只看它</span>
+              </div>
+              <div class="sr-ap-row" data-app="vscode">
+                <span class="sr-ap-tick"></span>
+                <img src="img/ico-vscode.png" alt="">
+                <span class="sr-ap-name">VS Code</span>
+                <span class="sr-ap-dur" data-zh="10 分" data-en="10m">10 分</span>
+                <span class="sr-ap-share">17%</span>
+                <span class="sr-ap-only" data-zh="只看它" data-en="Only this">只看它</span>
+              </div>
+            </div>
+            <div class="sr-ap-foot">
+              <span id="sr-ap-foot-txt" data-zh="勾选应用后，只看它们的时段" data-en="Tick apps to view only their stretches">勾选应用后，只看它们的时段</span>
+              <button type="button" id="sr-ap-clear" hidden data-zh="清除" data-en="Clear">清除</button>
+            </div>
+          </div>
+
+          <div class="sr-dock">
+            <div class="sr-dock-left">
+              <button class="sr-ico-btn" type="button" id="sr-pin-jump" title="在当前位置加标记 / 跳到标记" data-title-zh="在当前位置加标记 / 跳到标记" data-title-en="Add / jump to marker">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 14.5C8 14.5 3 9.6 3 6.5a5 5 0 0 1 10 0c0 3.1-5 8-5 8z"/><circle cx="8" cy="6.5" r="1.6"/></svg>
+              </button>
+              <button class="sr-ico-btn sr-ctl-hide-sm" type="button" id="sr-full-btn" title="全屏 (F)" data-title-zh="全屏 (F)" data-title-en="Full screen (F)">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg>
+              </button>
+              <button class="sr-ico-btn sr-ctl-hide-sm" type="button" id="sr-vol-btn" title="静音" data-title-zh="静音" data-title-en="Mute">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2h2.6l3.4-2.8v9.2L5.1 9.8H2.5z"/><path d="M11 5.6a3.4 3.4 0 0 1 0 4.8M12.9 3.9a5.8 5.8 0 0 1 0 8.2"/></svg>
+              </button>
+            </div>
+
+            <div class="sr-dock-mid">
+              <div class="sr-mid-slot sr-mid-slot-end"></div>
+              <button class="sr-ico-btn" type="button" id="sr-back-btn" title="后退 15 秒 (J)" data-title-zh="后退 15 秒 (J)" data-title-en="Back 15 s (J)">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 5.2H2v-2.2"/><path d="M2.4 5A5.8 5.8 0 1 1 2.2 9"/></svg>
+              </button>
+              <button class="sr-play-key" type="button" id="sr-play-btn" title="播放 / 暂停 (Space)" data-title-zh="播放 / 暂停 (空格)" data-title-en="Play / Pause (Space)">
+                <svg id="sr-play-svg" viewBox="0 0 14 14" width="14" height="14" fill="currentColor"><path d="M3.5 2h2.5v10h-2.5zM8 2h2.5v10h-2.5z"/></svg>
+              </button>
+              <button class="sr-ico-btn" type="button" id="sr-fwd-btn" title="前进 15 秒 (L)" data-title-zh="前进 15 秒 (L)" data-title-en="Forward 15 s (L)">
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.8 5.2H14v-2.2"/><path d="M13.6 5A5.8 5.8 0 1 0 13.8 9"/></svg>
+              </button>
+              <div class="sr-mid-slot sr-mid-slot-start">
+                <button class="sr-ghost-key" type="button" id="sr-speed-btn" title="播放倍速" data-title-zh="播放倍速" data-title-en="Playback speed">
+                  <span id="sr-speed-lbl">1×</span>
+                  <svg class="sr-chev" viewBox="0 0 10 10" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M2.5 3.75 5 6.25 7.5 3.75"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="sr-dock-right">
+              <span class="sr-filter-stat sr-ctl-hide-sm" id="sr-filter-summary" hidden>2 stretches · 25m</span>
+              <button class="sr-ghost-key sr-apps-key" type="button" id="tl-fold-toggle" title="按应用统计和过滤" data-title-zh="按应用统计和过滤" data-title-en="Filter by front app">
+                <span id="tl-fold-ico" style="display:inline-flex;align-items:center">
+                  <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 2.8h10L8.2 7.4V11L5.8 12.2V7.4Z"/></svg>
+                </span>
+                <span id="tl-fold-lbl" data-zh="应用" data-en="Apps">应用</span>
+                <span class="sr-apps-clear" id="tl-fold-clear" hidden title="清除过滤" data-title-zh="清除过滤" data-title-en="Clear filter">
+                  <svg viewBox="0 0 10 10" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 2.5l5 5M7.5 2.5l-5 5"/></svg>
+                </span>
+              </button>
+              <button class="sr-ghost-key sr-ctl-hide-sm" type="button" id="sr-zoom-btn" title="时间线缩放 · Ctrl+滚轮" data-title-zh="时间线缩放 · Ctrl+滚轮" data-title-en="Zoom timeline · Ctrl+Scroll">
+                <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="4.2"/><path d="M9.2 9.2 12.5 12.5"/></svg>
+                <span data-zh="1 小时" data-en="1 hr">1 小时</span>
+                <svg class="sr-chev" viewBox="0 0 8 8" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M1.5 3 4 5.5 6.5 3"/></svg>
+              </button>
+              <button class="sr-ghost-key sr-ctl-hide-sm" type="button" id="sr-latest-btn" hidden data-zh="回到最新" data-en="Jump to live">回到最新</button>
+              <a class="sr-clip-btn" href="#window-crop" title="剪辑 · C" data-title-zh="剪辑 · C" data-title-en="Clip · C">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88"/><path d="M14.47 14.48L20 20"/><path d="M8.12 8.12L12 12"/></svg>
+                <span data-zh="剪辑" data-en="Clip">剪辑</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage-caption">
+        <span data-zh="按真实回放器同源几何绘制：上方 8px 键鼠手柄热力条 + 段内响度轮廓。直接在时间轴上滑动试试。"
+              data-en="Rendered with ScreenReplay's authentic timeline geometry: 8px input heatmap + audio contour. Drag or hover along the bar.">按真实回放器同源几何绘制：上方 8px 键鼠手柄热力条 + 段内响度轮廓。直接在时间轴上滑动试试。</span>
+        <button type="button" id="sr-caption-fold" data-zh="一键折叠非游戏杂段 →" data-en="Fold non-game gaps →">一键折叠非游戏杂段 →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================
+       ACT 1: 33MS FRAME-BY-FRAME FORENSICS (Real Runtime Crash Sequence)
+       ==================================================================== -->
+  <section class="act" id="forensics">
+    <div class="wrap">
+      <div class="act-head">
+        <span class="eyebrow" data-zh="33MS 逐帧定格" data-en="33MS FRAME STEP">33MS 逐帧定格</span>
+        <h2 data-zh="只闪了三帧的报错？一帧一帧揪出来。" data-en="Flashed for three frames? Catch the exact millisecond.">只闪了三帧的报错？一帧一帧揪出来。</h2>
+        <p data-zh="偶现崩溃从不等你打开录屏软件。呼出回放，用键盘 , 与 . 逐帧微调到异常弹出的那一刻，右键 Ctrl+C 直接把高清原帧贴进工作群。"
+           data-en="Heisenbugs never wait for you to hit record. Step frame by frame with , and . to isolate the exact crash stack, then Ctrl+C straight into Slack.">偶现崩溃从不等你打开录屏软件。呼出回放，用键盘 , 与 . 逐帧微调到异常弹出的那一刻，右键 Ctrl+C 直接把高清原帧贴进工作群。</p>
+      </div>
+
+      <div class="showcase-frame">
+        <div class="frame-viewport">
+          <img id="bug-frame-img" src="img/bug-f2.jpg" alt="ScreenReplay catching fleeting CurrencyMismatch runtime error">
+        </div>
+        <div class="frame-status alert" id="bug-frame-badge">10:42:16.933 · UNHANDLED RUNTIME ERROR: CurrencyMismatch</div>
+        <div class="frame-bar">
+          <div class="step-tabs" id="bug-step-tabs">
+            <button class="step-btn" type="button" data-step="0" data-zh="16.800 · 正常结算" data-en="16.800 · Normal">16.800 · 正常结算</button>
+            <button class="step-btn" type="button" data-step="1" data-zh="16.866 · 竞态触发" data-en="16.866 · Race">16.866 · 竞态触发</button>
+            <button class="step-btn active" type="button" data-step="2" data-zh="16.933 · 捕获崩溃栈！" data-en="16.933 · Crash Caught!">16.933 · 捕获崩溃栈！</button>
+            <button class="step-btn" type="button" data-step="3" data-zh="右键 · Ctrl+C 复制帧" data-en="Right-Click · Copy Frame">右键 · Ctrl+C 复制帧</button>
+          </div>
+          <div class="step-nav">
+            <button class="kbd-btn" type="button" id="bug-prev-btn"><kbd>,</kbd><span data-zh="上一帧" data-en="Prev">上一帧</span></button>
+            <button class="kbd-btn" type="button" id="bug-next-btn"><span data-zh="下一帧" data-en="Next">下一帧</span><kbd>.</kbd></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================
+       ACT 2: PRIVACY-SAFE SINGLE-WINDOW CLIP & EXPORT
+       ==================================================================== -->
+  <section class="act" id="window-crop">
+    <div class="wrap">
+      <div class="act-head">
+        <span class="eyebrow" data-zh="隐私级单窗口裁剪" data-en="SINGLE-WINDOW CROP">隐私级单窗口裁剪</span>
+        <h2 data-zh="4K 大屏旁边的私聊与代码，一像素都不入镜。" data-en="Share just the window. Never your private desktop.">4K 大屏旁边的私聊与代码，一像素都不入镜。</h2>
+        <p data-zh="录制的是整块屏幕，发出去的只需是目标窗口。点一下「选窗口」，自动按记录下的窗口坐标走显卡硬件裁剪，支持 H.264、HEVC、AV1 与 GIF 秒存秒发。"
+           data-en="Record the whole monitor, export only the window that matters. GPU-accelerated cropping strips surrounding editors and chats automatically.">录制的是整块屏幕，发出去的只需是目标窗口。点一下「选窗口」，自动按记录下的窗口坐标走显卡硬件裁剪，支持 H.264、HEVC、AV1 与 GIF 秒存秒发。</p>
+      </div>
+
+      <div class="showcase-frame">
+        <div class="frame-viewport">
+          <img id="crop-frame-img" src="img/win-crop.jpg" alt="Single window crop in ScreenReplay">
+        </div>
+        <div class="frame-status" id="crop-frame-badge" data-zh="只导出 Chrome 窗口 · 1640×1328 · 自动剥离旁侧终端与编辑器" data-en="Chrome Window Only · 1640×1328 · Surrounding apps stripped">只导出 Chrome 窗口 · 1640×1328 · 自动剥离旁侧终端与编辑器</div>
+        <div class="frame-bar">
+          <div class="step-tabs" id="crop-tabs">
+            <button class="step-btn active" type="button" data-crop="crop" data-zh="&#9986; 只导出目标窗口" data-en="&#9986; Target Window Only">&#9986; 只导出目标窗口</button>
+            <button class="step-btn" type="button" data-crop="export" data-zh="多格式导出面板 (H.264 / AV1 / GIF)" data-en="Export Sheet (H.264 / AV1 / GIF)">多格式导出面板 (H.264 / AV1 / GIF)</button>
+            <button class="step-btn" type="button" data-crop="full" data-zh="对比：原始 4K 整屏画面" data-en="Compare: Raw 4K Full Screen">对比：原始 4K 整屏画面</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================
+       ACT 3: SEAM-SPLICE CLIPPING & ZERO-COPY GPU ENGINE
+       ==================================================================== -->
+  <section class="act" id="engine">
+    <div class="wrap">
+      <div class="act-head">
+        <span class="eyebrow" data-zh="原生架构 · 零拷贝管线" data-en="NATIVE ZERO-COPY ENGINE">原生架构 · 零拷贝管线</span>
+        <h2 data-zh="每一帧都在显存里闭环，不抢游戏一帧算力。" data-en="Every frame stays in VRAM. Zero FPS tax.">每一帧都在显存里闭环，不抢游戏一帧算力。</h2>
+        <p data-zh="告别臃肿浏览器套壳。基于原生 MoonBit / C++ 与 D3D11VA 硬编硬解构建，采集纹理不经 CPU 内存回读，4K 240Hz 高刷屏下依然无感。"
+           data-en="No Electron bloat. Built natively in MoonBit & C++ on D3D11VA hardware pipelines—zero CPU readback even on 4K 240Hz displays.">告别臃肿浏览器套壳。基于原生 MoonBit / C++ 与 D3D11VA 硬编硬解构建，采集纹理不经 CPU 内存回读，4K 240Hz 高刷屏下依然无感。</p>
+      </div>
+
+      <div class="dual-grid">
+        <!-- Left: Seam-Crossing Smart Splice -->
+        <article class="arch-card">
+          <div>
+            <h3 data-zh="跨过细缝框选，成片自动无缝拼接" data-en="Clip across folded seams, splice automatically">跨过细缝框选，成片自动无缝拼接</h3>
+            <p data-zh="打游戏两小时，中间切出去回消息或锁屏离开的空白都会自动折成细缝。剪辑框跨过细缝时，导出器会自动剔除未选中的杂段，把两段高光首尾相接。"
+               data-en="Idle gaps and alt-tabbed apps fold into 1px hairline seams. Drag a clip range across a seam and the exporter splices only the active stretches back-to-back.">打游戏两小时，中间切出去回消息或锁屏离开的空白都会自动折成细缝。剪辑框跨过细缝时，导出器会自动剔除未选中的杂段，把两段高光首尾相接。</p>
+          </div>
+
+          <div class="splice-demo">
+            <div class="splice-band">
+              <div class="splice-heat">
+                <div class="sp-heat-seg"></div>
+                <div class="sp-heat-seam"></div>
+                <div class="sp-heat-seg"></div>
+              </div>
+              <div class="splice-track">
+                <div class="sp-seg"><img src="img/ico-cs2.png" alt=""><span>Counter-Strike 2</span></div>
+                <div class="sp-seam" title="跳过 35 分钟" data-title-zh="跳过 35 分钟" data-title-en="Skipped 35 minutes"></div>
+                <div class="sp-seg sp-seg-cur"><img src="img/ico-cs2.png" alt=""><span>Counter-Strike 2</span></div>
+                <div class="sp-selection"></div>
+              </div>
+            </div>
+            <div class="splice-caption">
+              <span data-zh="中间 35 分钟桌面杂段已折叠剔除" data-en="35m alt-tabbed desktop gap auto-removed">中间 35 分钟桌面杂段已折叠剔除</span>
+              <span class="splice-out" data-zh="导出：0:24 纯享 MP4" data-en="Out: 0:24 Clean MP4">导出：0:24 纯享 MP4</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- Right: VRAM Pipeline + Rolling Buffer Calculator -->
+        <article class="arch-card">
+          <div>
+            <h3 data-zh="纯显卡硬编循环池，永不塞满硬盘" data-en="Rolling HEVC ring buffer. Never fills your SSD.">纯显卡硬编循环池，永不塞满硬盘</h3>
+            <p data-zh="默认走显卡独立媒体单元 H.265 编码，画面静止或锁屏休眠时 0 写入，超出设定回溯时长自动回收最旧分片。"
+               data-en="Hardware HEVC encoding on dedicated GPU media engines. Zero disk writes while idle or locked; oldest segments recycle automatically.">默认走显卡独立媒体单元 H.265 编码，画面静止或锁屏休眠时 0 写入，超出设定回溯时长自动回收最旧分片。</p>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div class="gpu-flow">
+              <span class="gpu-node">WGC Capture</span>
+              <span class="gpu-arr">&rarr;</span>
+              <span class="gpu-node">D3D11 VRAM</span>
+              <span class="gpu-arr">&rarr;</span>
+              <span class="gpu-node">NVENC / AMF / QSV</span>
+              <span class="gpu-arr">&rarr;</span>
+              <span class="gpu-node" data-zh="循环分片" data-en="Ring Buffer">循环分片</span>
+            </div>
+
+            <div class="storage-box">
+              <div class="st-top">
+                <span data-zh="4K 60Hz 保留时长上限" data-en="4K 60Hz Rolling Window">4K 60Hz 保留时长上限</span>
+                <div class="st-pills" id="st-pills">
+                  <button class="st-pill" type="button" data-win="30m">30m</button>
+                  <button class="st-pill" type="button" data-win="1h">1h</button>
+                  <button class="st-pill active" type="button" data-win="2h">2h</button>
+                  <button class="st-pill" type="button" data-win="4h">4h</button>
+                </div>
+              </div>
+              <div class="st-vals">
+                <span><span data-zh="日常桌面办公" data-en="Desktop Work">日常桌面办公</span><strong id="st-desk">~2–4 GB</strong></span>
+                <span><span data-zh="满帧 3D 游戏上限" data-en="Full 3D Gaming">满帧 3D 游戏上限</span><strong id="st-game">&le; 21 GB</strong></span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <!-- 4 Crisp Architectural Metrics -->
+      <div class="metrics-strip">
+        <div class="metric-cell">
+          <div class="metric-val">0.3%</div>
+          <div class="metric-lbl" data-zh="平均 CPU 占用率" data-en="Avg CPU Usage">平均 CPU 占用率</div>
+          <div class="metric-sub" data-zh="4K 60fps 后台常驻实测" data-en="4K 60fps background capture">4K 60fps 后台常驻实测</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-val">1.3%</div>
+          <div class="metric-lbl" data-zh="GPU 独立编码通道" data-en="Dedicated Media Engine">GPU 独立编码通道</div>
+          <div class="metric-sub" data-zh="零抢占 3D 游戏渲染核心" data-en="Zero 3D shader impact">零抢占 3D 游戏渲染核心</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-val">&lt; 45ms</div>
+          <div class="metric-lbl" data-zh="快捷键秒开回放窗" data-en="Instant Wake Latency">快捷键秒开回放窗</div>
+          <div class="metric-sub" data-zh="原生二进制进程，非网页套壳" data-en="Native binary, instant seek">原生二进制进程，非网页套壳</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-val">0 Bytes</div>
+          <div class="metric-lbl" data-zh="云端上传与强制账号" data-en="Cloud Upload &amp; Sign-in">云端上传与强制账号</div>
+          <div class="metric-sub" data-zh="录像与窗口索引全部留在本机" data-en="Stored locally on your machine">录像与窗口索引全部留在本机</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====================================================================
+       FINALE CTA
+       ==================================================================== -->
+  <section class="finale">
+    <div class="wrap">
+      <img class="finale-icon" src="img/icon.png" alt="ScreenReplay">
+      <h2 data-zh="装上就忘掉它——直到你需要倒回刚才那一秒。" data-en="Install once, forget it's running—until you need the last 60 seconds.">装上就忘掉它——直到你需要倒回刚才那一秒。</h2>
+      <p data-zh="免费 · 无广告 · 仅存本机 · Windows 11 (x64) · macOS 版即将推出"
+         data-en="Free · No ads · Local only · Windows 11 (x64) · macOS coming soon">免费 · 无广告 · 仅存本机 · Windows 11 (x64) · macOS 版即将推出</p>
+
+      <div class="hero-actions">
+        <a class="btn-primary" href="https://apps.microsoft.com/detail/9PCZQK5BVPC6" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M1.5 1.5h6v6h-6zm7 0h6v6h-6zm-7 7h6v6h-6zm7 0h6v6h-6z"/></svg>
+          <span data-zh="前往 Microsoft Store 下载" data-en="Download on Microsoft Store">前往 Microsoft Store 下载</span>
+        </a>
+        <a class="btn-ghost" href="/dl/ScreenReplay-Setup.exe">
+          <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2v7.2M4.3 6.6 7 9.4l2.7-2.8M2.5 11.6h9"/></svg>
+          <span data-zh="独立安装包 (.exe)" data-en="Direct Installer (.exe)">独立安装包 (.exe)</span>
+        </a>
+        <a class="btn-ghost" href="changelog" data-zh="更新日志 →" data-en="Changelog →">更新日志 →</a>
+      </div>
+
+      <div class="hotkeys-inline">
+        <span><kbd>Ctrl + Alt + R</kbd><em style="font-style:normal" data-zh="呼出回放" data-en="Open Replay">呼出回放</em></span>
+        <span><kbd>Ctrl + Alt + S</kbd><em style="font-style:normal" data-zh="秒存最近片段" data-en="Quick Save">秒存最近片段</em></span>
+        <span><kbd>,</kbd> <kbd>.</kbd><em style="font-style:normal" data-zh="逐帧微调" data-en="Frame Step">逐帧微调</em></span>
+        <span><kbd>Ctrl + Scroll</kbd><em style="font-style:normal" data-zh="缩放时间轴" data-en="Zoom Timeline">缩放时间轴</em></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <span>ScreenReplay</span>
+    <span class="sp"></span>
+    <a href="https://github.com/motion-space/screenreplay" target="_blank" rel="noopener">GitHub</a>
+    <a href="changelog" data-zh="更新日志" data-en="Changelog">更新日志</a>
+    <a href="support" data-zh="赞助作者" data-en="Support">赞助作者</a>
+    <a href="privacy" data-zh="隐私政策" data-en="Privacy Policy">隐私政策</a>
+    <span>&copy; 2026 pengx17</span>
+  </div>
+</footer>
+
+<!-- Cinema Lightbox for 42s Launch Film -->
+<div class="cinema-modal" id="cinema-modal" hidden>
+  <div class="cinema-box">
+    <button class="cinema-close" id="cinema-close" type="button" aria-label="Close">&times;</button>
+    <video id="cinema-video" controls playsinline preload="none" poster="img/cs2-ace.jpg"></video>
+  </div>
+</div>
+
+<script src="lang.js"></script>
+<script>
+(function () {
+  var curLang = document.documentElement.lang === "en" ? "en" : "zh";
+  window.addEventListener("sr-lang", function (ev) {
+    curLang = ev.detail === "en" ? "en" : "zh";
+    if (modal && !modal.hidden && modalVid) {
+      var nextFilm = curLang === "en" ? "film-en.mp4" : "film.mp4";
+      if (modalVid.getAttribute("src") !== nextFilm) {
+        var wasAt = modalVid.currentTime || 0;
+        modalVid.setAttribute("src", nextFilm);
+        modalVid.currentTime = wasAt;
+        modalVid.play().catch(function () {});
+      }
+    }
+    renderTimeline();
+    syncBugStep();
+    syncCropTab();
+  });
+
+  // 1. Cinema Lightbox Modal
+  var modal = document.getElementById("cinema-modal");
+  var modalVid = document.getElementById("cinema-video");
+  var openFilmBtn = document.getElementById("open-film-btn");
+  var closeFilmBtn = document.getElementById("cinema-close");
+
+  function openCinema() {
+    if (!modal || !modalVid) return;
+    var wantFilm = curLang === "en" ? "film-en.mp4" : "film.mp4";
+    if (modalVid.getAttribute("src") !== wantFilm) modalVid.setAttribute("src", wantFilm);
+    modal.hidden = false;
+    modalVid.currentTime = 0;
+    modalVid.play().catch(function () {});
+  }
+  function closeCinema() {
+    if (!modal || !modalVid) return;
+    modalVid.pause();
+    modal.hidden = true;
+  }
+  if (openFilmBtn) openFilmBtn.addEventListener("click", openCinema);
+  if (closeFilmBtn) closeFilmBtn.addEventListener("click", closeCinema);
+  if (modal) {
+    modal.addEventListener("click", function (e) {
+      if (e.target === modal) closeCinema();
+    });
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && modal && !modal.hidden) closeCinema();
+  });
+
+  // 2. Source-Faithful MoonBit Timeline Renderer (app/timeline_view.mbt + overview.mbt + app_filter.mbt + axis.mbt)
+  var ICO_HTML = {
+    cs2: '<img src="img/ico-cs2.png" alt="">',
+    vscode: '<img src="img/ico-vscode.png" alt="">',
+    chrome: '<img src="img/ico-chrome.png" alt="">',
+    slack: '<img src="img/ico-slack.png" alt="">'
+  };
+  var FUNNEL_SVG = '<svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 2.8h10L8.2 7.4V11L5.8 12.2V7.4Z"/></svg>';
+  var PLAY_PATH = 'M3 1.8v10.4a.6 .6 0 0 0 .9 .5l8.4-5.2a.6 .6 0 0 0 0-1L3.9 1.3a.6 .6 0 0 0-.9 .5z';
+  var PAUSE_PATH = 'M3.5 2h2.5v10h-2.5zM8 2h2.5v10h-2.5z';
+
+  // 1-hour view: 20:14:00 (t=0) .. 21:14:00 (t=3600s)
+  var T_SPAN = 3600;
+  var PIECES = [
+    { from: 0,    to: 840,  app: "cs2",    zh: "Counter-Strike 2", en: "Counter-Strike 2", dur: "14:00", live: false, stage: "img/cs2-mid.jpg",          stageEn: "img/cs2-mid.jpg",          thumb: "img/hc-cs2-0.jpg" },
+    { from: 840,  to: 1440, app: "vscode", zh: "VS Code",          en: "VS Code",          dur: "10:00", live: false, stage: "img/stage-vscode.jpg",     stageEn: "img/stage-vscode.jpg",     thumb: "img/hc-vscode.jpg" },
+    { from: 1440, to: 2160, app: "chrome", zh: "Chrome",           en: "Chrome",           dur: "12:00", live: false, stage: "img/stage-chrome-bug.jpg", stageEn: "img/stage-chrome-bug.jpg", thumb: "img/hc-chrome.jpg" },
+    { from: 2160, to: 2940, app: "slack",  zh: "Slack",            en: "Slack",            dur: "13:00", live: false, stage: "img/stage-slack.jpg",      stageEn: "img/stage-slack-en.jpg",   thumb: "img/hc-slack.jpg" },
+    { from: 2940, to: 3600, app: "cs2",    zh: "Counter-Strike 2", en: "Counter-Strike 2", dur: "11:00", live: true,  stage: "img/cs2-ace.jpg",          stageEn: "img/cs2-ace.jpg",          thumb: "img/hc-cs2-2.jpg" }
+  ];
+
+  var rawIn = new Float64Array(T_SPAN);
+  var rawDb = new Float64Array(T_SPAN);
+  (function buildSignals() {
+    var seed = 4219;
+    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+    // Continuous natural mouse/keyboard/controller activity (warm baseline + combat/coding peaks, zero artificial brick holes)
+    for (var t = 0; t < T_SPAN; t++) {
+      var inCs2 = (t < 840) || (t >= 2940);
+      if (inCs2) {
+        var env = 0.55 + 0.45 * Math.sin(t * 0.017) * Math.cos(t * 0.009);
+        rawIn[t] = 95 + env * 130 + rnd() * 30;
+        var w = 0.5 + 0.5 * Math.sin(t * 0.052) * Math.cos(t * 0.021);
+        rawDb[t] = 82 + w * 135 + rnd() * 34;
+      } else if (t < 1440) {
+        // VS Code typing waves
+        var codeEnv = Math.max(0, Math.sin(t * 0.023) * 0.65 + 0.35);
+        rawIn[t] = 35 + codeEnv * 130 + rnd() * 25;
+        rawDb[t] = rnd() * 20;
+      } else if (t < 2160) {
+        // Chrome checkout repro peak around t=1940
+        var dist = Math.abs(t - 1940);
+        var peak = dist < 140 ? (1 - dist / 140) * 165 : 0;
+        rawIn[t] = 30 + peak + Math.max(0, Math.sin(t * 0.019)) * 75 + rnd() * 22;
+        rawDb[t] = (t >= 1800 && t <= 2080) ? (52 + rnd() * 68) : (rnd() * 18);
+      } else {
+        // Slack chat & review
+        var chatEnv = Math.max(0, Math.sin(t * 0.021) * 0.55 + 0.3);
+        rawIn[t] = 24 + chatEnv * 95 + rnd() * 20;
+        rawDb[t] = rnd() * 22;
+      }
+    }
+  })();
+
+  // Exact double box filter (triangle weights) from timeline_view.mbt:370-388
+  var smoothHeat = (function () {
+    var half = 55, n = T_SPAN;
+    var sum1 = new Float64Array(n + 1);
+    for (var i = 0; i < n; i++) sum1[i + 1] = sum1[i] + rawIn[i];
+    function box(sums, idx) {
+      var lo = Math.max(0, idx - half), hi = Math.min(n - 1, idx + half);
+      return (sums[hi + 1] - sums[lo]) / (hi - lo + 1);
+    }
+    var sum2 = new Float64Array(n + 1);
+    for (var j = 0; j < n; j++) sum2[j + 1] = sum2[j] + box(sum1, j);
+    var steps = new Uint8Array(n);
+    for (var k = 0; k < n; k++) steps[k] = Math.round(Math.min(1, box(sum2, k) / 225) * 32);
+    return steps;
+  })();
+
+  var HEAT_STOPS = [
+    [0.00, 255, 196, 64, 0.000],
+    [0.30, 255, 196, 64, 0.361],
+    [0.65, 255, 140, 40, 0.651],
+    [1.00, 235,  50, 50, 0.851]
+  ];
+  function heatCss(stepIdx, ahead) {
+    var v = stepIdx / 32;
+    var r = 235, g = 50, b = 50, a = 0.851;
+    for (var k = 1; k < HEAT_STOPS.length; k++) {
+      if (v <= HEAT_STOPS[k][0]) {
+        var s0 = HEAT_STOPS[k - 1], s1 = HEAT_STOPS[k];
+        var u = (v - s0[0]) / (s1[0] - s0[0]);
+        r = s0[1] + (s1[1] - s0[1]) * u;
+        g = s0[2] + (s1[2] - s0[2]) * u;
+        b = s0[3] + (s1[3] - s0[3]) * u;
+        a = s0[4] + (s1[4] - s0[4]) * u;
+        break;
+      }
+    }
+    if (ahead) a *= 0.6;
+    return "rgb(" + Math.round(27 + (r - 27) * a) + "," + Math.round(28 + (g - 28) * a) + "," + Math.round(31 + (b - 31) * a) + ")";
+  }
+
+  // Exact squircle SVG path from app/timeline_view.mbt:595-604
+  function squirclePath(x, y, w, h, tl, tr, br, bl) {
+    var lim = Math.min(w, h) / 2;
+    function k(r) { return Math.min(r * 1.5, lim); }
+    var a = k(tl), b = k(tr), c = k(br), d = k(bl), q = 0.36;
+    function f(n) { return (Math.round(n * 100) / 100).toString(); }
+    return "M" + f(x + a) + " " + f(y)
+      + "H" + f(x + w - b)
+      + "C" + f(x + w - b * q) + " " + f(y) + " " + f(x + w) + " " + f(y + b * q) + " " + f(x + w) + " " + f(y + b)
+      + "V" + f(y + h - c)
+      + "C" + f(x + w) + " " + f(y + h - c * q) + " " + f(x + w - c * q) + " " + f(y + h) + " " + f(x + w - c) + " " + f(y + h)
+      + "H" + f(x + d)
+      + "C" + f(x + d * q) + " " + f(y + h) + " " + f(x) + " " + f(y + h - d * q) + " " + f(x) + " " + f(y + h - d)
+      + "V" + f(y + a)
+      + "C" + f(x) + " " + f(y + a * q) + " " + f(x + a * q) + " " + f(y) + " " + f(x + a) + " " + f(y) + "Z";
+  }
+
+  function seamW(skipSec) {
+    var skipMs = skipSec * 1000;
+    return Math.max(5, Math.min(28, 8 + 5.6 * (Math.log(Math.max(1, skipMs) / 300000) / Math.LN2)));
+  }
+  function clampVal(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  var filterApp = null; // null or "cs2" | "slack" | "chrome" | "vscode"
+  var appsMenuOpen = false;
+  var playheadT = 3460;
+  var hoverX = null;
+  var isPlayingLive = true;
+  var speeds = ["1×", "1.5×", "2×", "4×", "0.5×"];
+  var speedIdx = 0;
+
+  var bandWrap = document.getElementById("sr-band-wrap");
+  var bandCanvas = document.getElementById("sr-band-canvas");
+  var ovCanvas = document.getElementById("sr-ov-canvas");
+  var labelsWrap = document.getElementById("sr-piece-labels");
+  var phSvg = document.getElementById("sr-ph-svg");
+  var phCap = document.getElementById("sr-ph-cap");
+  var hoverLine = document.getElementById("sr-hover-line");
+  var hoverCard = document.getElementById("sr-hovercard");
+  var hcImg = document.getElementById("sr-hc-img");
+  var hcTime = document.getElementById("sr-hc-time");
+  var hcAgo = document.getElementById("sr-hc-ago");
+  var hcIco = document.getElementById("sr-hc-ico");
+  var hcName = document.getElementById("sr-hc-name");
+  var hcDur = document.getElementById("sr-hc-dur");
+  var seamTipEl = document.getElementById("sr-seam-tip");
+  var heroVid = document.getElementById("sr-hero-vid");
+  var stageImg = document.getElementById("sr-stage-img");
+  var wellEl = document.getElementById("sr-well");
+  var pauseBadge = document.getElementById("sr-pause-badge");
+  var pauseTxt = document.getElementById("sr-pause-txt");
+  var tbWhen = document.getElementById("sr-tb-when");
+  var tbAgo = document.getElementById("sr-tb-ago");
+  var tbApp = document.getElementById("sr-tb-app");
+  var foldBtn = document.getElementById("tl-fold-toggle");
+  var foldIco = document.getElementById("tl-fold-ico");
+  var foldLbl = document.getElementById("tl-fold-lbl");
+  var foldClear = document.getElementById("tl-fold-clear");
+  var filterSummary = document.getElementById("sr-filter-summary");
+  var latestBtn = document.getElementById("sr-latest-btn");
+  var playBtn = document.getElementById("sr-play-btn");
+  var playSvg = document.getElementById("sr-play-svg");
+  var speedBtn = document.getElementById("sr-speed-btn");
+  var speedLbl = document.getElementById("sr-speed-lbl");
+  var appsPop = document.getElementById("sr-apps-popover");
+  var apRows = document.querySelectorAll("#sr-ap-list .sr-ap-row");
+  var apClear = document.getElementById("sr-ap-clear");
+  var apFootTxt = document.getElementById("sr-ap-foot-txt");
+  var pin1 = document.getElementById("sr-pin-1");
+  var pin2 = document.getElementById("sr-pin-2");
+  var modePills = document.querySelectorAll(".mode-pill");
+
+  function fmtWall(tSec, shortFmt) {
+    var total = 20 * 3600 + 14 * 60 + Math.round(tSec);
+    var hh = Math.floor(total / 3600) % 24;
+    var mm = Math.floor((total % 3600) / 60);
+    var ss = total % 60;
+    var hm = String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+    return shortFmt ? hm : (hm + ":" + String(ss).padStart(2, "0"));
+  }
+  function fmtAgo(tSec) {
+    var diffSec = Math.max(0, Math.round(T_SPAN - tSec));
+    if (diffSec < 90) return curLang === "zh" ? "刚刚" : "Just now";
+    var m = Math.round(diffSec / 60);
+    return curLang === "zh" ? (m + " 分钟前") : (m + "m ago");
+  }
+  function pieceAt(tSec) {
+    for (var i = 0; i < PIECES.length; i++) {
+      if (tSec >= PIECES[i].from && tSec <= PIECES[i].to) return PIECES[i];
+    }
+    return PIECES[PIECES.length - 1];
+  }
+
+  function computeBandLayout(W) {
+    if (!filterApp) {
+      return {
+        stretches: PIECES.map(function (p) {
+          return { p: p, x0: (p.from / T_SPAN) * W, x1: (p.to / T_SPAN) * W };
+        }),
+        seams: [],
+        keptMin: 60
+      };
+    }
+    var kept = PIECES.filter(function (p) { return p.app === filterApp; });
+    var seamsPx = [];
+    var totalSeamPx = 0;
+    for (var i = 1; i < kept.length; i++) {
+      var skip = kept[i].from - kept[i - 1].to;
+      var sw = clampVal(seamW(skip) * (W / 1400), 10, 24);
+      seamsPx.push({ skip: skip, fromT: kept[i - 1].to, toT: kept[i].from, w: sw });
+      totalSeamPx += sw;
+    }
+    var availPx = Math.max(80, W - totalSeamPx);
+    var totalKeptSec = kept.reduce(function (s, p) { return s + (p.to - p.from); }, 0);
+    var stretches = [], seams = [], curX = 0;
+    for (var j = 0; j < kept.length; j++) {
+      if (j > 0) {
+        var sm = seamsPx[j - 1];
+        seams.push({ x0: curX, x1: curX + sm.w, skip: sm.skip, fromT: sm.fromT, toT: sm.toT });
+        curX += sm.w;
+      }
+      var pw = ((kept[j].to - kept[j].from) / totalKeptSec) * availPx;
+      stretches.push({ p: kept[j], x0: curX, x1: curX + pw });
+      curX += pw;
+    }
+    return { stretches: stretches, seams: seams, keptMin: Math.round(totalKeptSec / 60) };
+  }
+
+  function tToX(tSec, layout, W) {
+    for (var i = 0; i < layout.stretches.length; i++) {
+      var st = layout.stretches[i];
+      if (tSec >= st.p.from && tSec <= st.p.to) {
+        return st.x0 + ((tSec - st.p.from) / (st.p.to - st.p.from)) * (st.x1 - st.x0);
+      }
+      if (i + 1 < layout.stretches.length && tSec > st.p.to && tSec < layout.stretches[i + 1].p.from) {
+        var sm = layout.seams[i];
+        return (sm.x0 + sm.x1) * 0.5;
+      }
+    }
+    return clampVal((tSec / T_SPAN) * W, 0, W);
+  }
+
+  function xToT(x, layout) {
+    for (var i = 0; i < layout.seams.length; i++) {
+      var sm = layout.seams[i];
+      if (x >= sm.x0 - 3 && x <= sm.x1 + 3) {
+        return { seam: sm, t: x < (sm.x0 + sm.x1) * 0.5 ? sm.fromT : sm.toT };
+      }
+    }
+    for (var j = 0; j < layout.stretches.length; j++) {
+      var st = layout.stretches[j];
+      if (x >= st.x0 && x <= st.x1) {
+        var frac = (x - st.x0) / Math.max(1, st.x1 - st.x0);
+        return { seam: null, t: st.p.from + frac * (st.p.to - st.p.from) };
+      }
+    }
+    var last = layout.stretches[layout.stretches.length - 1];
+    return { seam: null, t: last ? last.p.to : T_SPAN };
+  }
+
+  function syncViewportMedia(curP) {
+    var showVideo = curP.live && isPlayingLive;
+    if (heroVid && stageImg) {
+      if (showVideo) {
+        heroVid.hidden = false;
+        stageImg.hidden = true;
+        if (heroVid.paused) heroVid.play().catch(function () {});
+      } else {
+        heroVid.hidden = true;
+        stageImg.hidden = false;
+        if (!heroVid.paused) heroVid.pause();
+        var wantStage = curLang === "en" && curP.stageEn ? curP.stageEn : curP.stage;
+        if (stageImg.getAttribute("src") !== wantStage) stageImg.setAttribute("src", wantStage);
+      }
+    }
+    if (playSvg) {
+      playSvg.innerHTML = '<path d="' + (showVideo ? PAUSE_PATH : PLAY_PATH) + '"/>';
+    }
+    // Authentic play_state.mbt: zero overlay while playing; subtle top-left 已暂停 pill only while paused
+    if (pauseBadge) {
+      pauseBadge.hidden = showVideo;
+      if (!showVideo && pauseTxt) {
+        pauseTxt.textContent = curLang === "zh" ? "已暂停" : "Paused";
+      }
+    }
+  }
+
+  function renderOverview(W, dpr, layout, phX) {
+    if (!ovCanvas) return;
+    var H = 10;
+    if (ovCanvas.width !== Math.round(W * dpr) || ovCanvas.height !== Math.round(H * dpr)) {
+      ovCanvas.width = Math.round(W * dpr);
+      ovCanvas.height = Math.round(H * dpr);
+    }
+    var octx = ovCanvas.getContext("2d");
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    octx.clearRect(0, 0, W, H);
+
+    // 1) 4px hatched background at y = 3..7 (app/overview.mbt:172-190)
+    octx.save();
+    octx.beginPath();
+    octx.rect(0, 3, W, 4);
+    octx.clip();
+    octx.strokeStyle = "rgba(255, 255, 255, 0.09)";
+    octx.lineWidth = 1;
+    octx.beginPath();
+    for (var u = -8; u < W + 8; u += 7) {
+      octx.moveTo(u, 7);
+      octx.lineTo(u + 4, 3);
+    }
+    octx.stroke();
+
+    // 2) Solid c_s4 (#484A51) recorded stretches (leaving seams hatched when filtered)
+    octx.fillStyle = "#484A51";
+    if (!filterApp) {
+      octx.fillRect(0, 3, W, 4);
+    } else {
+      layout.stretches.forEach(function (st) {
+        octx.fillRect(st.x0, 3, Math.max(1, st.x1 - st.x0), 4);
+      });
+    }
+    octx.restore();
+
+    // Hairline around 4px band
+    octx.strokeStyle = "rgba(255, 255, 255, 0.10)";
+    octx.lineWidth = 1;
+    octx.strokeRect(0.5, 3.5, W - 1, 3);
+
+    // 3) Viewfinder (1 hr view over 2 hr buffer when unfiltered; full filtered span when filtered)
+    var fx = filterApp ? 0 : Math.round(W * 0.46);
+    var fw = W - fx;
+
+    // Marker dots along overview (app/overview.mbt:244-275)
+    octx.fillStyle = "#B7BBC2";
+    if (!filterApp) {
+      var m1x = fx + (1940 / T_SPAN) * fw;
+      octx.beginPath(); octx.arc(m1x, 5, 2, 0, Math.PI * 2); octx.fill();
+    }
+    if (!filterApp || filterApp === "cs2") {
+      var m2x = fx + (tToX(3440, layout, W) / W) * fw;
+      octx.beginPath(); octx.arc(m2x, 5, 2, 0, Math.PI * 2); octx.fill();
+    }
+
+    // Viewfinder box: 10px high, radius 2.5, rgba(237,238,240,0.12) fill, 1.5px #EDEEF0 edge + dual 2x4 inner handles
+    octx.fillStyle = "rgba(237, 238, 240, 0.12)";
+    octx.strokeStyle = "#EDEEF0";
+    octx.lineWidth = 1.5;
+    octx.beginPath();
+    if (octx.roundRect) {
+      octx.roundRect(fx + 0.75, 0.75, Math.max(22, fw - 1.5), 8.5, 2.5);
+    } else {
+      octx.rect(fx + 0.75, 0.75, Math.max(22, fw - 1.5), 8.5);
+    }
+    octx.fill();
+    octx.stroke();
+
+    // Dual 2x4 inner resize handles (fx + 4 and fx + fw - 6 at y = 3)
+    octx.fillStyle = "#EDEEF0";
+    octx.fillRect(fx + 4, 3, 2, 4);
+    octx.fillRect(fx + fw - 6, 3, 2, 4);
+
+    // Overview 2x10 playhead line
+    var ovPhX = clampVal(fx + (phX / W) * fw, 1, W - 1);
+    octx.fillRect(ovPhX - 1, 0, 2, 10);
+  }
+
+  function renderTimeline() {
+    if (!bandWrap || !bandCanvas) return;
+    var W = Math.max(260, bandWrap.clientWidth);
+    var H = 40;
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (bandCanvas.width !== Math.round(W * dpr) || bandCanvas.height !== Math.round(H * dpr)) {
+      bandCanvas.width = Math.round(W * dpr);
+      bandCanvas.height = Math.round(H * dpr);
+    }
+    var ctx = bandCanvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#1B1C1F";
+    ctx.fillRect(0, 0, W, H);
+
+    var layout = computeBandLayout(W);
+    var phX = clampVal(tToX(playheadT, layout, W), 1, W - 1);
+
+    // 1) 8px Zero-Gap Continuous Heat Lane (continuous across app switches when unfiltered, timeline_view.mbt:391-423)
+    if (!filterApp) {
+      for (var px0 = 0; px0 < W; px0++) {
+        var t0 = Math.min(T_SPAN - 1, Math.floor((px0 / W) * T_SPAN));
+        var s0 = smoothHeat[t0];
+        if (s0 > 0) {
+          ctx.fillStyle = heatCss(s0, px0 > phX);
+          ctx.fillRect(px0, 0, 1.5, 8);
+        }
+      }
+    } else {
+      layout.stretches.forEach(function (st) {
+        var a = Math.round(st.x0);
+        var b = Math.max(a + 1, Math.round(st.x1) - 1);
+        var spanW = b - a;
+        for (var px = 0; px < spanW; px++) {
+          var x = a + px;
+          var tIdx = Math.min(T_SPAN - 1, Math.floor(st.p.from + (px / spanW) * (st.p.to - st.p.from)));
+          var s = smoothHeat[tIdx];
+          if (s > 0) {
+            ctx.fillStyle = heatCss(s, x > phX);
+            ctx.fillRect(x, 0, 1.5, 8);
+          }
+        }
+      });
+    }
+
+    // 2) 32px Square-Cornered Stretches (#2B2D32 / #484A51) + Decibel Loudness Silhouette
+    layout.stretches.forEach(function (st, idx) {
+      var a = Math.round(st.x0);
+      var b = idx === layout.stretches.length - 1 ? W : Math.max(a + 2, Math.round(st.x1) - 1);
+      var w = b - a;
+      var isCur = phX >= st.x0 - 0.5 && phX <= st.x1 + 0.5;
+      ctx.fillStyle = isCur ? "#484A51" : "#2B2D32";
+      ctx.fillRect(a, 8, w, 32);
+
+      var pts = [];
+      for (var px = 0; px <= w; px += 3) {
+        var u = Math.min(1, px / w);
+        var ti = Math.min(T_SPAN - 1, Math.floor(st.p.from + u * (st.p.to - st.p.from)));
+        var s = (rawDb[Math.max(0, ti - 1)] + 4 * rawDb[ti] + rawDb[Math.min(T_SPAN - 1, ti + 1)]) / 6;
+        var y = s >= 26 ? (40 - Math.pow(s / 255, 1.6) * 26) : 40;
+        pts.push([a + Math.min(w, px), y]);
+      }
+      function drawSide(cx0, cw, fill) {
+        if (cw <= 0) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(cx0, 8, cw, 32);
+        ctx.clip();
+        ctx.beginPath();
+        ctx.moveTo(a, 40);
+        for (var k = 0; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+        ctx.lineTo(b, 40);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.restore();
+      }
+      drawSide(a, Math.max(0, Math.min(b, phX) - a), "rgba(237, 238, 240, 0.275)");
+      drawSide(Math.max(a, phX), Math.max(0, b - Math.max(a, phX)), "rgba(237, 238, 240, 0.19)");
+    });
+
+    // 3) 1px Folded Seam Hairline (9px in from top & bottom of 32px track => y=17, h=14)
+    layout.seams.forEach(function (sm) {
+      var mid = Math.round((sm.x0 + sm.x1) * 0.5) + 0.5;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+      ctx.fillRect(mid - 0.5, 17, 1, 14);
+    });
+
+    // 4) Stretch Labels with soft stretch-ground halo (app/band_parts.mbt:237-246: icon >= 30pt, label >= 52pt)
+    if (labelsWrap) {
+      labelsWrap.innerHTML = layout.stretches.map(function (st) {
+        var w = st.x1 - st.x0 - 1;
+        if (w < 30) return "";
+        var isCur = phX >= st.x0 - 0.5 && phX <= st.x1 + 0.5;
+        var halo = isCur ? "#484A51" : "#2B2D32";
+        var nm = (st.p.app === "cs2" && w < 145) ? "CS2" : (curLang === "zh" ? st.p.zh : st.p.en);
+        return '<div class="sr-piece-label" style="left:' + st.x0.toFixed(1) + 'px;width:' + w.toFixed(1) + 'px;text-shadow:0 0 6px ' + halo + ',0 0 6px ' + halo + '">'
+          + ICO_HTML[st.p.app]
+          + (w >= 52 ? ('<span style="overflow:hidden;text-overflow:ellipsis">' + nm + '</span>') : '')
+          + '</div>';
+      }).join("");
+    }
+
+    // 5) Pins
+    if (pin1) {
+      pin1.style.left = tToX(1940, layout, W).toFixed(1) + "px";
+      pin1.hidden = (filterApp !== null && filterApp !== "chrome");
+    }
+    if (pin2) {
+      pin2.style.left = tToX(3440, layout, W).toFixed(1) + "px";
+      pin2.hidden = (filterApp !== null && filterApp !== "cs2");
+    }
+
+    // 6) Authentic One-Piece Playhead SVG (squircle capsule + concave curved neck + 2px stem, timeline_view.mbt:509-585)
+    var curP = pieceAt(playheadT);
+    var phWall = fmtWall(playheadT, false);
+    var cw = 62;
+    var cx = clampVal(phX - cw / 2, 0, Math.max(0, W - cw));
+    var leftDist = phX - 1 - cx;
+    var rightDist = cx + cw - (phX + 1);
+    var bl = leftDist < 4 ? 0 : clampVal(leftDist, 0, 6);
+    var br = rightDist < 4 ? 0 : clampVal(rightDist, 0, 6);
+    var leftNeck = leftDist >= 4;
+    var rightNeck = rightDist >= 4;
+    if (phSvg) {
+      phSvg.setAttribute("viewBox", "0 0 " + W + " 58");
+      var capD = squirclePath(cx, 3, cw, 19, 6, 6, br, bl);
+      var nx = (phX - 5).toFixed(2);
+      var neckPaths = '<path d="M4 0H6V38H4Z"/>';
+      if (leftNeck) neckPaths += '<path d="M0 0H5V6.5H4C4 3.5 3 1.5 0 1.5Z"/>';
+      if (rightNeck) neckPaths += '<path d="M5 0H10V1.5C7 1.5 6 3.5 6 6.5H5Z"/>';
+      phSvg.innerHTML = '<path d="' + capD + '" fill="#EDEEF0"/><g transform="translate(' + nx + ',20)" fill="#EDEEF0">' + neckPaths + '</g>';
+    }
+    if (phCap) {
+      phCap.style.left = cx.toFixed(1) + "px";
+      phCap.style.width = cw + "px";
+      phCap.textContent = phWall;
+    }
+
+    // 7) Authentic 10px Overview Strip
+    renderOverview(W, dpr, layout, phX);
+
+    // 8) Titlebar & Media
+    if (tbWhen) tbWhen.textContent = (curLang === "zh" ? "今天 " : "Today ") + phWall;
+    if (tbAgo) tbAgo.textContent = fmtAgo(playheadT);
+    if (tbApp) tbApp.textContent = "·   " + (curLang === "zh" ? curP.zh : curP.en);
+    if (latestBtn) latestBtn.hidden = playheadT >= 3350;
+    syncViewportMedia(curP);
+
+    // 9) HoverCard & Seam Tooltip
+    if (hoverX !== null && !appsMenuOpen) {
+      var lx = clampVal(hoverX, 0, W);
+      var hit = xToT(lx, layout);
+      if (hoverLine) {
+        hoverLine.hidden = hit.seam !== null;
+        hoverLine.style.left = lx.toFixed(1) + "px";
+      }
+      if (hit.seam) {
+        if (hoverCard) hoverCard.style.opacity = "0";
+        if (seamTipEl) {
+          var skipMin = Math.round(hit.seam.skip / 60);
+          seamTipEl.hidden = false;
+          seamTipEl.textContent = curLang === "zh"
+            ? ("跳过 " + skipMin + " 分 · " + fmtWall(hit.seam.fromT, true) + " – " + fmtWall(hit.seam.toT, true))
+            : ("Skipped " + skipMin + "m · " + fmtWall(hit.seam.fromT, true) + " – " + fmtWall(hit.seam.toT, true));
+          var midX = (hit.seam.x0 + hit.seam.x1) * 0.5;
+          seamTipEl.style.left = clampVal(midX, 95, W - 95).toFixed(1) + "px";
+        }
+      } else {
+        if (seamTipEl) seamTipEl.hidden = true;
+        if (hoverCard) {
+          hoverCard.style.opacity = "1";
+          var hp = pieceAt(hit.t);
+          var padSide = W < 600 ? 12 : 20;
+          hoverCard.style.left = clampVal(lx + padSide, 148, W + padSide * 2 - 148).toFixed(1) + "px";
+          if (hcTime) hcTime.textContent = fmtWall(hit.t, false);
+          if (hcAgo) hcAgo.textContent = fmtAgo(hit.t);
+          if (hcIco) hcIco.innerHTML = ICO_HTML[hp.app];
+          if (hcName) hcName.textContent = hp.app === "cs2" ? "Counter-Strike 2" : hp.zh;
+          if (hcDur) hcDur.textContent = hp.dur;
+          var wantThumb = hp.app === "cs2" && hit.t > 3200 ? "img/hc-cs2-2.jpg" : (hp.app === "cs2" && hit.t > 2940 ? "img/hc-cs2-1.jpg" : hp.thumb);
+          if (hcImg && hcImg.getAttribute("src") !== wantThumb) hcImg.setAttribute("src", wantThumb);
+        }
+      }
+    } else {
+      if (hoverLine) hoverLine.hidden = true;
+      if (seamTipEl) seamTipEl.hidden = true;
+      if (hoverCard) hoverCard.style.opacity = "0";
+    }
+
+    // 10) Authentic apps_key & Front Apps Popover State (app/app_filter.mbt:227-556)
+    var appNames = { cs2: W < 520 ? "CS2" : "Counter-Strike 2", slack: "Slack", chrome: "Chrome", vscode: "VS Code" };
+    if (foldBtn) {
+      foldBtn.classList.toggle("filtered", filterApp !== null);
+      if (filterApp) {
+        foldIco.innerHTML = ICO_HTML[filterApp];
+        foldLbl.textContent = appNames[filterApp] || filterApp;
+        if (foldClear) foldClear.hidden = false;
+      } else {
+        foldIco.innerHTML = FUNNEL_SVG;
+        foldLbl.textContent = curLang === "zh" ? "应用" : "Apps";
+        if (foldClear) foldClear.hidden = true;
+      }
+    }
+    if (filterSummary) {
+      filterSummary.hidden = filterApp === null;
+      if (filterApp) {
+        var nSeg = layout.stretches.length;
+        filterSummary.textContent = curLang === "zh"
+          ? (nSeg + " 段 · 共 " + layout.keptMin + " 分")
+          : (nSeg + (nSeg > 1 ? " stretches · " : " stretch · ") + layout.keptMin + "m");
+      }
+    }
+    apRows.forEach(function (row) {
+      var a = row.getAttribute("data-app");
+      var on = filterApp === a;
+      row.classList.toggle("ticked", on);
+      var tick = row.querySelector(".sr-ap-tick");
+      if (tick) {
+        tick.innerHTML = on ? '<svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.3 5.8l2.2 2.2 4.3-4.6"/></svg>' : '';
+      }
+    });
+    if (apClear) apClear.hidden = filterApp === null;
+    if (apFootTxt) {
+      apFootTxt.textContent = filterApp
+        ? (curLang === "zh" ? "播放和前进/后退 15 秒只经过所选应用" : "Playback & 15s jumps stay within ticked apps")
+        : (curLang === "zh" ? "勾选应用后，只看它们的时段" : "Tick apps to view only their stretches");
+    }
+  }
+
+  function setModePillActive(modeName) {
+    modePills.forEach(function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-mode") === modeName);
+    });
+  }
+
+  function applyFilterApp(appKey) {
+    filterApp = appKey;
+    if (filterApp) {
+      var matchPieces = PIECES.filter(function (p) { return p.app === filterApp; });
+      var lastP = matchPieces[matchPieces.length - 1];
+      if (lastP && pieceAt(playheadT).app !== filterApp) {
+        playheadT = filterApp === "chrome" ? 1940 : Math.min(3460, lastP.to - 60);
+        isPlayingLive = lastP.live;
+      }
+    }
+    setModePillActive(filterApp === "cs2" ? "fold" : (pieceAt(playheadT).app === "chrome" ? "bug" : "cs2"));
+    renderTimeline();
+  }
+
+  modePills.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var m = btn.getAttribute("data-mode");
+      setModePillActive(m);
+      appsMenuOpen = false;
+      if (appsPop) appsPop.hidden = true;
+      hoverX = null;
+      if (m === "cs2") {
+        filterApp = null;
+        playheadT = 3460;
+        isPlayingLive = true;
+      } else if (m === "bug") {
+        filterApp = null;
+        playheadT = 1940;
+        isPlayingLive = false;
+      } else if (m === "fold") {
+        filterApp = "cs2";
+        playheadT = 3460;
+        isPlayingLive = true;
+        var W = bandWrap ? bandWrap.clientWidth : 900;
+        var lay = computeBandLayout(W);
+        if (lay.seams[0]) hoverX = (lay.seams[0].x0 + lay.seams[0].x1) * 0.5;
+      }
+      renderTimeline();
+    });
+  });
+
+  // Sync live video time to subtle playhead movement in last CS2 stretch
+  if (heroVid) {
+    heroVid.addEventListener("timeupdate", function () {
+      if (!isPlayingLive || heroVid.paused || !heroVid.duration) return;
+      if (playheadT >= 2940) {
+        playheadT = 3360 + (heroVid.currentTime / heroVid.duration) * 235;
+        renderTimeline();
+      }
+    });
+  }
+
+  // Pointer & Touch Scrubbing on Timeline
+  var dragging = false;
+  function scrubFromClientX(clientX, commitPlayhead) {
+    if (!bandWrap) return;
+    var rect = bandWrap.getBoundingClientRect();
+    var x = clampVal(clientX - rect.left, 0, rect.width);
+    hoverX = x;
+    if (commitPlayhead) {
+      var layout = computeBandLayout(rect.width);
+      var hit = xToT(x, layout);
+      playheadT = hit.t;
+      isPlayingLive = pieceAt(playheadT).live && hit.seam === null;
+    }
+    renderTimeline();
+  }
+
+  if (bandWrap) {
+    bandWrap.addEventListener("pointerdown", function (e) {
+      appsMenuOpen = false;
+      if (appsPop) appsPop.hidden = true;
+      dragging = true;
+      if (bandWrap.setPointerCapture) bandWrap.setPointerCapture(e.pointerId);
+      scrubFromClientX(e.clientX, true);
+    });
+    bandWrap.addEventListener("pointermove", function (e) {
+      scrubFromClientX(e.clientX, dragging);
+    });
+    bandWrap.addEventListener("pointerup", function () {
+      dragging = false;
+    });
+    bandWrap.addEventListener("pointerleave", function () {
+      if (!dragging) {
+        hoverX = null;
+        renderTimeline();
+      }
+    });
+  }
+
+  // Apps button opens the authentic 384px Front Apps Popover; clicking × clears filter immediately
+  if (foldClear) {
+    foldClear.addEventListener("click", function (e) {
+      e.stopPropagation();
+      appsMenuOpen = false;
+      if (appsPop) appsPop.hidden = true;
+      applyFilterApp(null);
+    });
+  }
+  if (foldBtn) {
+    foldBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      appsMenuOpen = !appsMenuOpen;
+      if (appsPop) appsPop.hidden = !appsMenuOpen;
+      hoverX = null;
+      renderTimeline();
+    });
+  }
+  apRows.forEach(function (row) {
+    row.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var a = row.getAttribute("data-app");
+      var onlyHit = e.target && e.target.classList && e.target.classList.contains("sr-ap-only");
+      applyFilterApp((filterApp === a && !onlyHit) ? null : a);
+      if (onlyHit && appsPop) {
+        appsMenuOpen = false;
+        appsPop.hidden = true;
+      }
+    });
+  });
+  if (apClear) {
+    apClear.addEventListener("click", function (e) {
+      e.stopPropagation();
+      applyFilterApp(null);
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (appsMenuOpen && appsPop && !appsPop.contains(e.target) && e.target !== foldBtn) {
+      appsMenuOpen = false;
+      appsPop.hidden = true;
+      renderTimeline();
+    }
+  });
+
+  var capFold = document.getElementById("sr-caption-fold");
+  if (capFold) {
+    capFold.addEventListener("click", function () {
+      appsMenuOpen = false;
+      if (appsPop) appsPop.hidden = true;
+      if (filterApp === "cs2") {
+        applyFilterApp(null);
+      } else {
+        applyFilterApp("cs2");
+        var W = bandWrap ? bandWrap.clientWidth : 900;
+        var lay = computeBandLayout(W);
+        if (lay.seams[0]) hoverX = (lay.seams[0].x0 + lay.seams[0].x1) * 0.5;
+        renderTimeline();
+      }
+    });
+  }
+
+  function togglePlayState() {
+    if (!pieceAt(playheadT).live) {
+      playheadT = 3460;
+      isPlayingLive = true;
+    } else {
+      isPlayingLive = !isPlayingLive;
+    }
+    renderTimeline();
+  }
+  if (playBtn) playBtn.addEventListener("click", togglePlayState);
+  if (wellEl) wellEl.addEventListener("click", togglePlayState);
+  if (latestBtn) {
+    latestBtn.addEventListener("click", function () {
+      filterApp = null;
+      playheadT = 3460;
+      isPlayingLive = true;
+      setModePillActive("cs2");
+      renderTimeline();
+    });
+  }
+  if (speedBtn && speedLbl) {
+    speedBtn.addEventListener("click", function () {
+      speedIdx = (speedIdx + 1) % speeds.length;
+      speedLbl.textContent = speeds[speedIdx];
+    });
+  }
+
+  var backBtn = document.getElementById("sr-back-btn");
+  var fwdBtn = document.getElementById("sr-fwd-btn");
+  var pinJump = document.getElementById("sr-pin-jump");
+  if (backBtn) backBtn.addEventListener("click", function () { playheadT = clampVal(playheadT - 180, 0, T_SPAN); isPlayingLive = false; renderTimeline(); });
+  if (fwdBtn) fwdBtn.addEventListener("click", function () { playheadT = clampVal(playheadT + 180, 0, T_SPAN); isPlayingLive = pieceAt(playheadT).live; renderTimeline(); });
+  if (pinJump) pinJump.addEventListener("click", function () { filterApp = null; playheadT = 1940; isPlayingLive = false; setModePillActive("bug"); renderTimeline(); });
+
+  window.addEventListener("resize", renderTimeline);
+
+  // 3. Act 1: 33ms Frame-by-Frame Crash Stepper
+  var BUG_FRAMES = [
+    { img: "img/bug-f0.jpg", imgEn: "img/bug-f0-en.jpg", alert: false, zh: "10:42:16.800 (-4 帧) · 页面结算状态正常", en: "10:42:16.800 (-4f) · Checkout state normal" },
+    { img: "img/bug-f1.jpg", imgEn: "img/bug-f1-en.jpg", alert: false, zh: "10:42:16.866 (-2 帧) · 优惠券异步重算触发竞态", en: "10:42:16.866 (-2f) · Async coupon race triggered" },
+    { img: "img/bug-f2.jpg", imgEn: "img/bug-f2-en.jpg", alert: true,  zh: "10:42:16.933 (0ms) · 捕获 CurrencyMismatch 偶现崩溃栈！", en: "10:42:16.933 (0ms) · CurrencyMismatch stack caught!" },
+    { img: "img/bug-f3.jpg", imgEn: "img/bug-f3-en.jpg", alert: false, zh: "右键菜单 · Ctrl+C 复制高清原帧或按 I/O 剪辑片段", en: "Right-Click · Ctrl+C copy frame or I/O mark clip" }
+  ];
+  var bugIdx = 2;
+  var bugImg = document.getElementById("bug-frame-img");
+  var bugBadge = document.getElementById("bug-frame-badge");
+  var bugTabs = document.querySelectorAll("#bug-step-tabs .step-btn");
+
+  function syncBugStep() {
+    var f = BUG_FRAMES[bugIdx];
+    if (bugImg) bugImg.setAttribute("src", curLang === "en" ? f.imgEn : f.img);
+    if (bugBadge) {
+      bugBadge.textContent = curLang === "zh" ? f.zh : f.en;
+      bugBadge.classList.toggle("alert", f.alert);
+    }
+    bugTabs.forEach(function (b, idx) { b.classList.toggle("active", idx === bugIdx); });
+  }
+  bugTabs.forEach(function (b) {
+    b.addEventListener("click", function () {
+      bugIdx = parseInt(b.getAttribute("data-step"), 10) || 0;
+      syncBugStep();
+    });
+  });
+  var bugPrev = document.getElementById("bug-prev-btn");
+  var bugNext = document.getElementById("bug-next-btn");
+  if (bugPrev) bugPrev.addEventListener("click", function () { bugIdx = (bugIdx + BUG_FRAMES.length - 1) % BUG_FRAMES.length; syncBugStep(); });
+  if (bugNext) bugNext.addEventListener("click", function () { bugIdx = (bugIdx + 1) % BUG_FRAMES.length; syncBugStep(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === ",") { bugIdx = (bugIdx + BUG_FRAMES.length - 1) % BUG_FRAMES.length; syncBugStep(); }
+    if (e.key === ".") { bugIdx = (bugIdx + 1) % BUG_FRAMES.length; syncBugStep(); }
+  });
+
+  // 4. Act 2: Single-Window Crop Switcher
+  var CROP_MODES = {
+    crop:   { img: "img/win-crop.jpg",   imgEn: "img/win-crop-en.jpg",   zh: "只导出 Chrome 窗口 · 1640×1328 · 自动剥离旁侧终端与编辑器", en: "Chrome Window Only · 1640×1328 · Surrounding apps stripped" },
+    export: { img: "img/win-export.jpg", imgEn: "img/win-export-en.jpg", zh: "保存片段面板 · 支持 H.264 / H.265 / AV1 / GIF 与一键复制", en: "Save Clip Dialog · H.264 / H.265 / AV1 / GIF & Save+Copy" },
+    full:   { img: "img/win-full.jpg",   imgEn: "img/win-full-en.jpg",   zh: "原始 4K 整屏画面 · 含 VS Code 源码与终端记录", en: "Raw 4K Full Monitor · Contains VS Code source & terminal" }
+  };
+  var curCrop = "crop";
+  var cropImg = document.getElementById("crop-frame-img");
+  var cropBadge = document.getElementById("crop-frame-badge");
+  var cropBtns = document.querySelectorAll("#crop-tabs .step-btn");
+
+  function syncCropTab() {
+    var m = CROP_MODES[curCrop];
+    if (cropImg) cropImg.setAttribute("src", curLang === "en" ? m.imgEn : m.img);
+    if (cropBadge) cropBadge.textContent = curLang === "zh" ? m.zh : m.en;
+    cropBtns.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-crop") === curCrop); });
+  }
+  cropBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      curCrop = b.getAttribute("data-crop") || "crop";
+      syncCropTab();
+    });
+  });
+
+  // 5. Act 3: Rolling Buffer Storage Calculator
+  var ST_DATA = {
+    "30m": { desk: "~0.6–1.2 GB", game: "\u2264 5.5 GB" },
+    "1h":  { desk: "~1.2–2.2 GB", game: "\u2264 11 GB" },
+    "2h":  { desk: "~2–4 GB",     game: "\u2264 21 GB" },
+    "4h":  { desk: "~4–8 GB",     game: "\u2264 42 GB" }
+  };
+  var stDesk = document.getElementById("st-desk");
+  var stGame = document.getElementById("st-game");
+  var stBtns = document.querySelectorAll("#st-pills .st-pill");
+  stBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      var k = b.getAttribute("data-win");
+      var d = ST_DATA[k];
+      if (!d) return;
+      stBtns.forEach(function (x) { x.classList.toggle("active", x === b); });
+      if (stDesk) stDesk.textContent = d.desk;
+      if (stGame) stGame.textContent = d.game;
+    });
+  });
+
+  renderTimeline();
+  syncBugStep();
+  syncCropTab();
+})();
+</script>
+</body>
+</html>

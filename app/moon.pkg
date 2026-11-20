@@ -1,0 +1,26 @@
+import {
+  "mbui/host",
+  "mbui/hostapi",
+  "mbui/ui",
+  "mbui/view",
+  "mbui/signals",
+  "mbui/kit",
+  "mbui/headless",
+  "mbui/pixels",
+  "mbui/motion",
+  "stillfail/sf",
+  "moonbitlang/core/json",
+  "moonbitlang/core/cmp",
+  "moonbitlang/core/math",
+  "moonbitlang/core/encoding/utf8",
+}
+
+options(
+  "is-main": true,
+  link: {
+    "native": {
+      "cc-link-flags": "",
+    },
+  },
+  "native-stub": [ "replay_win.c", "replay_mf.cpp", "replay_index.cpp", "replay_export.cpp", "replay_play.cpp", "replay_gif.cpp" ],
+)

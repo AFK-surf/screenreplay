@@ -1,0 +1,528 @@
+ScreenReplay: licenses
+====================================================================================================
+
+ScreenReplay is free software under the GNU General Public License, version 3 (GPL-3.0), Copyright (c) 2026 pengx17.
+Its source is the program's repository; the license's full text is in LICENSE there and at
+https://www.gnu.org/licenses/gpl-3.0.txt. The name "ScreenReplay" and its icon are not covered by the license: a
+program built from changed source must not be published under them.
+
+ScreenReplay includes the following components, each under its own license, given in full below:
+
+  .NET runtime and libraries ............ MIT License, .NET Foundation and Contributors
+  C#/WinRT (WinRT.Runtime, Microsoft.Windows.SDK.NET) ... MIT License, Microsoft Corporation
+  Vortice.Windows (Vortice.DirectX, Vortice.DXGI, Vortice.Direct3D11, Vortice.MediaFoundation) and
+  Vortice.Mathematics ................... MIT License, Amer Koleci and Contributors
+  SharpGen.Runtime, SharpGen.Runtime.COM  MIT License, Alexandre Mutel, Jeremy Koritzinsky, Amer Koleci
+  still.fail's mbui (the replay window's UI) ............ MIT License, still.fail contributors,
+                                           with the third-party components it includes, listed after it
+  MoonBit core library .................. Apache License 2.0, International Digital Economy Academy
+  Microsoft Edge WebView2 loader ........ Microsoft Software License Terms (redistributable): linked by
+                                           mbui's Windows host, never started by ScreenReplay (it plays video
+                                           with its own decoder)
+
+Windows' own parts it uses (Media Foundation, Windows Graphics Capture, WASAPI, Direct3D) are part of Windows and not
+included.
+
+====================================================================================================
+.NET runtime and libraries
+
+====================================================================================================
+MIT License
+
+Copyright (c) .NET Foundation and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+====================================================================================================
+C#/WinRT (WinRT.Runtime, Microsoft.Windows.SDK.NET)
+
+====================================================================================================
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+====================================================================================================
+Vortice.Windows (Vortice.DirectX, Vortice.DXGI, Vortice.Direct3D11, Vortice.MediaFoundation), Vortice.Mathematics
+(https://github.com/amerkoleci/Vortice.Windows, https://github.com/amerkoleci/Vortice.Mathematics)
+
+====================================================================================================
+MIT License
+
+Copyright (c) Amer Koleci and Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+
+====================================================================================================
+SharpGen.Runtime, SharpGen.Runtime.COM (https://github.com/SharpGenTools/SharpGenTools)
+
+====================================================================================================
+MIT License
+
+Copyright (c) 2010-2017 Alexandre Mutel, 2017-2023 Jeremy Koritzinsky, 2023-2024 Amer Koleci
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+
+====================================================================================================
+still.fail's mbui
+
+====================================================================================================
+MIT License
+
+Copyright (c) 2026 still.fail contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+====================================================================================================
+mbui's third-party notices (as mbui gives them)
+
+====================================================================================================
+# Third-party notices
+
+mbui itself is MIT-licensed (`LICENSE`, Copyright (c) 2026 still.fail
+contributors). It includes, or is derived from, the following works of others,
+which keep their own licences. Where a licence below is MIT, its full text is
+the one in `LICENSE`, with the copyright line given here.
+
+## Unicode Character Database and conformance tests
+
+- What: the property tables in `src/text/tables.mbt` and
+  `src/text/bidi_tables.mbt` (generated by `scripts/gen_unicode.py` and
+  `scripts/gen_bidi.py` from the UCD 18.0.0), and the test data embedded in
+  `src/text/grapheme_conformance_test.mbt` (all of `GraphemeBreakTest.txt`),
+  `src/text/linebreak_conformance_test.mbt` (all of `LineBreakTest.txt`) and
+  `src/text/bidi_conformance_test.mbt` (a sample of `BidiCharacterTest.txt`).
+- From: https://www.unicode.org/Public/18.0.0/ucd, Unicode, Inc.
+- Licence: Unicode License v3 (https://www.unicode.org/license.txt).
+  Copyright © 1991-2025 Unicode, Inc.
+
+## MoonBit core's math (FreeBSD msun, musl)
+
+- What: `src/dmath/` (sin, cos, tan, the inverse functions, exp, ln, pow and
+  their helpers): MoonBit core's own MoonBit ports (its `math` package's
+  non-JS files, moonbit 0.1.20261016), taken whole so that they run on every
+  target, js too, in place of the engine's `Math.*`.
+- From: https://github.com/moonbitlang/core (`math/`), itself after FreeBSD's
+  msun (Sun Microsystems' fdlibm) and musl.
+- Licence: Apache License 2.0 (each file's header). Copyright 2025
+  International Digital Economy Academy; fdlibm: Copyright (C) 1993 by Sun
+  Microsystems, Inc., freely usable with its notice kept.
+
+## Yoga
+
+- What: the flexbox tests `src/flex/yoga_*_test.mbt`, generated by
+  `scripts/gen_yoga_tests.py` from Yoga's generated layout tests
+  (`javascript/tests/generated/YG*Test.test.ts`, commit
+  `52f6d0bd3824296b8e852cb4fcdf3b9821ab2aa5`), and `src/flex/helpers_test.mbt`'s
+  measure function after Yoga's `javascript/tests/tools/utils.ts`.
+- From: https://github.com/facebook/yoga
+- Licence: MIT. Copyright (c) Meta Platforms, Inc. and affiliates.
+
+## Motion
+
+- What: the easing functions, utilities, generators (spring, inertia,
+  keyframes) and transitions in `src/motion` (`easing.mbt`, `utils.mbt`,
+  `generators.mbt`, `transition.mbt`) and their tests
+  (`motion_port_test.mbt`, from Motion at `ce1d082`), ported from Motion's
+  TypeScript.
+- From: https://github.com/motiondivision/motion (motion.dev)
+- Licence: MIT. Copyright (c) 2024 Motion B.V.
+
+## Jetpack Compose and the Android Open Source Project
+
+- What: `src/ui/scroll.mbt` (and the expected values in
+  `src/ui/scroll_wbtest.mbt`, `scripts/scrollplot.py`): Compose's
+  `VelocityTracker1D` (Lsq2, `polyFitLeastSquares`), `FlingCalculator` and
+  `AndroidFlingSpline` (the `OverScroller` spline), `android.widget.EdgeEffect`'s
+  stretch, HWUI's `StretchEffect` and Compose's
+  `AndroidEdgeEffectOverscrollEffect`, reimplemented in MoonBit;
+  `src/motion/spec.mbt` after Compose's `SpringSimulation`,
+  `SpringEstimation.kt` and its easing curves. `scripts/ComposeRef.java` and
+  `scripts/compose_ref.sh` run Compose's own classes from Gradle's cache (not
+  included) to print reference numbers.
+- From: https://android.googlesource.com/platform/frameworks/support and
+  https://android.googlesource.com/platform/frameworks/base
+- Licence: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+  Copyright The Android Open Source Project.
+
+## nanoui's hill-climb benchmark
+
+- What: the scenes of `src/bench` (`scenes.mbt`) and of the Flutter
+  comparison app in `bench/flutter`, which reproduce nanoui's `hillclimb/`
+  scenes, counts and metrics.
+- From: https://github.com/justrach/nanoui
+- Licence: MIT. Copyright (c) 2026 Rach Pradhan.
+
+## mygo
+
+- What: the virtual list tests in `src/ui/list_test.mbt` (ported from mygo's
+  `ui/list_test.go`) and `src/ui/tester.mbt`'s `check_rows` (after mygo's
+  `checkRows`).
+- From: https://github.com/egoist/mygo
+- Licence: MIT. Copyright (c) 2026 MyGo contributors.
+
+## alien-signals and its conformance suite
+
+- What: `src/signals/` (`system.mbt`, `signals.mbt`), a line-for-line MoonBit
+  port of alien-signals 3.2.1's `src/system.ts` and `src/index.ts`; its own
+  tests (`tests/effect.spec.ts`, `effectScope.spec.ts`, `trigger.spec.ts`) in
+  `src/signals/effect_wbtest.mbt`, and cases of the conformance suite it runs
+  (reactive-framework-test-suite 0.0.2) in `src/signals/conformance_*_wbtest.mbt`.
+- From: https://github.com/stackblitz/alien-signals and
+  https://github.com/johnsoncodehk/reactive-framework-test-suite
+- Licence: MIT. Copyright (c) 2024-present Johnson Chu.
+
+## Gradle wrapper
+
+- What: `android/gradlew` and `android/gradle/wrapper/gradle-wrapper.jar`.
+- From: https://gradle.org
+- Licence: Apache License 2.0. Copyright © 2015 the original authors.
+
+## Flutter
+
+- `bench/flutter` is an app of ours written against Flutter
+  (https://flutter.dev, BSD 3-Clause, Copyright 2014 The Flutter Authors);
+  `bench/flutter/macos/Runner/MainFlutterWindow.swift` began as the
+  `flutter create` template. Flutter itself is not included.
+
+## mimalloc
+
+- What: the allocator of MoonBit's runtime in the Android app, compiled from
+  its source release into `libmbui.so` (`scripts/android.sh`, `mimalloc_obj`:
+  downloaded at build time, checked by its SHA-256; not in this repository),
+  by way of `src/host/mimalloc_android.c`, ours, which includes its
+  `src/static.c` unchanged.
+- From: https://github.com/microsoft/mimalloc, v2.1.7.
+- Licence: MIT. Copyright (c) 2018-2021 Microsoft Corporation, Daan Leijen.
+
+## Downloaded at build time, not included
+
+The Android build fetches AndroidX Media3 (Apache-2.0) from Maven Central;
+the web tests install Playwright, pngjs and pixelmatch from npm. Their
+licences apply to those downloads.
+
+## Pictures and screenshots
+
+The pictures in `test/images` and those `scripts/test_images.swift --gallery`
+makes are drawn by that script from shapes (no photographs, no fonts) and
+dedicated to the public domain (CC0 1.0). The screenshots in `goldens/` are
+mbui's own output over made-up data, drawn with the system's fonts.
+
+## tiny-skia
+
+- What: `src/skia` (paths, strokes, dashes, rasterization, the raster pipeline,
+  shaders, masks, pixmaps), ported from tiny-skia, and the reference pictures
+  in `src/skiatest/images` with the tests in `src/skiatest`, from its tests.
+- From: https://github.com/linebender/tiny-skia (itself after Skia)
+- Licence: BSD 3-Clause. Copyright (c) 2011 Google Inc.; Copyright (c) 2020
+  Yevhenii Reizner.
+
+## resvg, usvg, svgtypes, roxmltree, simplecss, kurbo
+
+- What: `src/svg` (the XML reader, the SVG value parsers, CSS, the usvg tree
+  and its conversion, text layout, filters, and resvg's rendering), ported
+  from these crates. The resvg test suite `src/svgtest` runs against is not in
+  this repository.
+- From: https://github.com/linebender/resvg (resvg, usvg),
+  https://github.com/linebender/svgtypes, https://github.com/RazrFalcon/roxmltree,
+  https://github.com/linebender/simplecss, https://github.com/linebender/kurbo
+- Licence: MIT or Apache-2.0. Copyright (c) the Resvg Authors, Yevhenii
+  Reizner, the Kurbo Authors.
+
+## skrifa, read-fonts, font-types, fontdb, unicode-vo
+
+- What: `src/font` (sfnt tables, glyph outlines, color glyphs, variable fonts,
+  font matching) and `src/svg/vo_table.mbt`, ported from these crates.
+- From: https://github.com/googlefonts/fontations (skrifa, read-fonts,
+  font-types), https://github.com/RazrFalcon/fontdb,
+  https://github.com/RazrFalcon/unicode-vo
+- Licence: MIT or Apache-2.0. Copyright (c) the Fontations Authors, Yevhenii
+  Reizner.
+
+## HarfRust (HarfBuzz)
+
+- What: `src/shape` (OpenType shaping: the Unicode property tables, the
+  buffer, GSUB and GPOS, normalization, the default and Arabic shapers),
+  ported from HarfRust, a Rust port of HarfBuzz.
+- From: https://github.com/harfbuzz/harfrust, https://github.com/harfbuzz/harfbuzz
+- Licence: MIT ("Old MIT"). Copyright © the HarfBuzz and HarfRust authors
+  (Behdad Esfahbod, Google, Red Hat, and others).
+
+## zune-jpeg, image-webp
+
+- What: the JPEG and lossless WebP decoders in `src/pixels`.
+- From: https://github.com/etemesi254/zune-image (zune-jpeg),
+  https://github.com/image-rs/image-webp
+- Licence: MIT or Apache-2.0 (zune-jpeg: also Zlib). Copyright (c) Caleb
+  Etemesi; the image-rs developers.
+
+
+====================================================================================================
+MoonBit core library
+
+====================================================================================================
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright 2025 International Digital Economy Academy
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+

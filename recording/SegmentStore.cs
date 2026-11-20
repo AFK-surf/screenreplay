@@ -1,0 +1,166 @@
+using System.Globalization;
+using System.Text.Json;
+
+namespace Replay.Recording;
+
+/// <summary>A recorded segment in the buffer's folder.</summary>
+public sealed record Segment(string Path, DateTimeOffset StartUtc, DateTimeOffset EndUtc, long Bytes, int Width, int Height, double DurationMs);
+
+/// <summary>
+/// The buffer's folder: its segments, <c>yyyyMMdd-HHmmss-fff-&lt;id&gt;.mp4</c> (their start, UTC), each with a
+/// <c>.json</c> saying when it starts, how long it is and its picture's size, a <c>.levels</c> of its sound and an
+/// <c>.input</c> of how busy the mouse, keyboard and game controllers were.
+/// </summary>
+public sealed class SegmentStore(string folder)
+{
+    /// <summary>The files beside a segment's <c>.mp4</c>, by their extension: gone with it.</summary>
+    public static readonly string[] Sidecars = [".json", ".levels", ".input", ".thumbs"];
+
+    public string Folder { get; } = folder;
+
+    // (the segments read before, by their path: a complete segment does not change, and reading each one's .json and
+    // size again on every listing, 761 of them, took 1.3 % of a core, 2026-11-15)
+    private readonly Dictionary<string, Segment> read = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The complete segments, oldest first (one being written is not among them).</summary>
+    public IReadOnlyList<Segment> List()
+    {
+        var found = new List<Segment>();
+        if (!Directory.Exists(Folder))
+        {
+            return found;
+        }
+
+        lock (read)
+        {
+            var there = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mp4 in Directory.EnumerateFiles(Folder, "*.mp4"))
+            {
+                if (!string.Equals(System.IO.Path.GetExtension(mp4), ".mp4", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                there.Add(mp4);
+                if (!read.TryGetValue(mp4, out var segment))
+                {
+                    if (Read(mp4) is not { } now)
+                    {
+                        continue;
+                    }
+
+                    read[mp4] = segment = now;
+                }
+
+                found.Add(segment);
+            }
+
+            foreach (var gone in read.Keys.Where(k => !there.Contains(k)).ToList())
+            {
+                read.Remove(gone);
+            }
+        }
+
+        found.Sort((a, b) => a.StartUtc.CompareTo(b.StartUtc));
+        return found;
+    }
+
+    private static Segment? Read(string mp4)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(System.IO.Path.ChangeExtension(mp4, ".json")));
+            var root = doc.RootElement;
+            var duration = root.GetProperty("durationMs").GetDouble();
+            DateTimeOffset start;
+            if (root.TryGetProperty("startUtc", out var s) && s.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(s.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
+            {
+                start = parsed;
+            }
+            else if (!TryStartOfName(System.IO.Path.GetFileName(mp4), out start))
+            {
+                return null;
+            }
+
+            var w = root.TryGetProperty("width", out var wv) && wv.TryGetInt32(out var wi) ? wi : 0;
+            var h = root.TryGetProperty("height", out var hv) && hv.TryGetInt32(out var hi) ? hi : 0;
+            return new Segment(mp4, start, start + TimeSpan.FromMilliseconds(duration), new FileInfo(mp4).Length, w, h, duration);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A segment's start by its name, <c>yyyyMMdd-HHmmss-fff…</c>.</summary>
+    public static bool TryStartOfName(string name, out DateTimeOffset start)
+    {
+        start = default;
+        if (name.Length < 19 || !DateTime.TryParseExact(name[..19], "yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var t))
+        {
+            return false;
+        }
+
+        start = new DateTimeOffset(t, TimeSpan.Zero);
+        return true;
+    }
+
+    /// <summary>The segments that ended before <paramref name="before"/> deleted, with their sidecars; one another
+    /// program holds is left for the next time. Returns how many went.</summary>
+    public int Prune(DateTimeOffset before)
+    {
+        var gone = 0;
+        foreach (var segment in List())
+        {
+            if (segment.EndUtc >= before)
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(segment.Path);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            gone++;
+            foreach (var ext in Sidecars)
+            {
+                try
+                {
+                    File.Delete(System.IO.Path.ChangeExtension(segment.Path, ext));
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        return gone;
+    }
+
+    /// <summary>What a crash left half written (the temporary files of segments never completed) deleted.</summary>
+    public void DeleteUnfinished()
+    {
+        if (!Directory.Exists(Folder))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(Folder, "*" + SegmentWriter.TempExtension))
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (Exception)
+            {
+            }
+        }
+    }
+}
