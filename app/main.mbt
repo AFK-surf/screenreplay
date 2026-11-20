@@ -889,14 +889,14 @@ fn main {
   if note_mode() != "" {
     rp_start_hidden()
     @hostapi.window_setup(note_w, note_h(), note_w, note_h(), inset=true)
-    @ui.run("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_s2) >> 8) & 0xFFFFFFL) }, tree=note_window)
+    @ui.run_legacy_ctx("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_s2) >> 8) & 0xFFFFFFL) }, tree=note_window)
     return
   }
   // (the tray's panel: the same program, its own small window, hidden till the recorder shows it)
   if tray_mode() {
     rp_start_hidden()
     @hostapi.window_setup(tray_w, tray_h, tray_w, tray_h, inset=true)
-    @ui.run("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_s2) >> 8) & 0xFFFFFFL) }, tree=tray_window)
+    @ui.run_legacy_ctx("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_s2) >> 8) & 0xFFFFFFL) }, tree=tray_window)
     return
   }
   start_hidden()
@@ -905,5 +905,5 @@ fn main {
   // (what the host clears to and what shows where nothing of the tree draws its own ground: the window's, as the
   // theme has it; left as mbui's own near-white, the hairlines between the title bar, the picture and the dock were
   // drawn over white: bright lines in the dark, the reviewer's 52nd, 24)
-  @ui.run("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_bg) >> 8) & 0xFFFFFFL) }, tree=make_window)
+  @ui.run_legacy_ctx("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_bg) >> 8) & 0xFFFFFFL) }, tree=make_window)
 }
