@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.11):** HDR screens: recordings no longer come out washed out when the recorder starts while the monitor is off (it now remembers the screen's SDR brightness). Also, sound and picture in step when playing back: the replay window now allows for the audio device's output delay, so the picture no longer runs some 30 ms ahead of the sound (more with Bluetooth headphones).
+**What's new in this version (0.1.12):** Fixed playback A/V desync (audio queue recovery after stalls, bounded GPU decode backlog with keyframe catch-up, backward-seek audio sync), reduced replay viewer idle CPU and memory, hid the background recorder from Windows Volume Mixer so ScreenReplay no longer appears twice, and fixed clicks and button spacing on the saved-clip card.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.11）：** HDR 屏幕：显示器关着时启动录制，录像不再发白（会记住屏幕的 SDR 内容亮度）。另外，回放时声画同步：回放窗口会扣除声卡的输出延迟，画面不再比声音早约 30 毫秒（用蓝牙耳机时差得更多）。
+**此版本新增内容（0.1.12）：** 修复回放声画不同步（卡顿后音频队列恢复、高 GPU 负载下限制硬解堆积并自动跳关键帧追齐、往回跳转等待目标帧后再起音）；窗口记录改为剪辑模式懒加载、日志增量读取，大幅降低回放窗口空闲 CPU 与内存占用；隐藏后台录制进程的 Windows 音量混合器条目；修复回放窗口右上角保存卡片无法点击及「打开位置」按钮排版。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

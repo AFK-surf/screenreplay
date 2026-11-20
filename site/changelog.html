@@ -51,6 +51,16 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.12</h2><span>2026-11-20</span></div>
+      <ul>
+        <li data-zh="修复回放声画不同步：修复卡顿后音频队列死锁导致的 150 ms 反复回弹、高 GPU 负载下硬解队列堆积导致的画面滞后，以及往回跳转时声音先于画面起播的问题。" data-en="Fixed playback A/V desync: resolved an audio queue deadlock after UI stalls, bounded hardware decode backlog with keyframe catch-up under heavy GPU load, and waited for the target frame before resuming audio on backward seeks.">修复回放声画不同步：修复卡顿后音频队列死锁导致的 150 ms 反复回弹、高 GPU 负载下硬解队列堆积导致的画面滞后，以及往回跳转时声音先于画面起播的问题。</li>
+        <li data-zh="大幅降低回放窗口空闲占用：窗口记录改为进入剪辑模式才懒加载，应用与标记日志改为增量读取，消除周期性卡顿并显著减少内存与 CPU 占用。" data-en="Lower replay viewer idle usage: window history now loads lazily in clip mode and app/marker logs are read incrementally, eliminating periodic stalls and cutting idle CPU and memory.">大幅降低回放窗口空闲占用：窗口记录改为进入剪辑模式才懒加载，应用与标记日志改为增量读取，消除周期性卡顿并显著减少内存与 CPU 占用。</li>
+        <li data-zh="隐藏后台录制进程的音量混合器条目：Windows 音量混合器不再同时出现两个 ScreenReplay 图标。" data-en="Hidden background recorder from Windows Volume Mixer so ScreenReplay no longer appears twice.">隐藏后台录制进程的音量混合器条目：Windows 音量混合器不再同时出现两个 ScreenReplay 图标。</li>
+        <li data-zh="修复回放窗口右上角保存完成卡片无法点击的问题，并优化「打开位置 / Show in folder」按钮的排版间距。" data-en="Fixed the top-right saved-clip card in the replay window not accepting clicks, and improved spacing on the Show in folder button.">修复回放窗口右上角保存完成卡片无法点击的问题，并优化「打开位置 / Show in folder」按钮的排版间距。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.11</h2><span>2026-11-20</span></div>
       <ul>
         <li data-zh="HDR 屏幕：显示器关着时启动录制，录像不再发白，会沿用上次记下的 SDR 内容亮度。" data-en="HDR screens: recordings no longer come out washed out when recording starts while the monitor is off; the last known SDR content brightness is used.">HDR 屏幕：显示器关着时启动录制，录像不再发白，会沿用上次记下的 SDR 内容亮度。</li>
