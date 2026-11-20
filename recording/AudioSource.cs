@@ -223,9 +223,12 @@ internal sealed unsafe class AudioSource : IDisposable
     private void Initialize(uint flags)
     {
         var format = Format(asFloat);
+        // Use a fresh session GUID when hiding from the Volume Mixer so Windows never reuses a pre-existing visible default session.
+        var session = (flags & SessionDisplayHide) != 0 ? Guid.NewGuid() : Guid.Empty;
+        var sessionPtr = (flags & SessionDisplayHide) != 0 ? &session : null;
         // IAudioClient::Initialize (3): shared, 200 ms of buffer
         var hr = ((delegate* unmanaged[Stdcall]<IntPtr, int, uint, long, long, WaveFormat*, Guid*, int>)Slot<IntPtr>(client, 3))(
-            client, 0, flags | StreamAutoConvertPcm | StreamSrcDefaultQuality, 2_000_000, 0, &format, null);
+            client, 0, flags | StreamAutoConvertPcm | StreamSrcDefaultQuality, 2_000_000, 0, &format, sessionPtr);
         Native.Check(hr, "IAudioClient.Initialize");
         if ((flags & StreamEventCallback) != 0)
         {
