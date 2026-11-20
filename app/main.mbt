@@ -167,7 +167,7 @@ fn title_bar(parent : @view.View) -> Unit {
           b.row(Is(true)).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
           if lib {
             // (in the saved clips: back, and their count)
-            icon_button(b, fn() { "chevron-left" }, fn() { t("回放") }, fn() { library_open.set(false) }) |> ignore
+            icon_button(b, fn() { "chevron-left" }, fn() { t("回放") }, fn() { library_open.set(false) }, side=Bottom) |> ignore
             words(b, fn() { t("已保存片段") }, 12.0, ui_text, weight=500) |> ignore
             words(b, fn() {
               clips_rev.get() |> ignore
@@ -258,12 +258,12 @@ fn title_bar(parent : @view.View) -> Unit {
             set_playing(false)
             clips_read()
             library_open.set(true)
-          })
+          }, side=Bottom)
           |> ignore
           icon_button(tools, fn() { "settings" }, fn() { t("设置") }, fn() {
             load_settings()
             settings_open.set(true)
-          })
+          }, side=Bottom)
           |> ignore
         })
         |> ignore
@@ -388,11 +388,17 @@ fn controls(parent : @view.View) -> Unit {
                 Some(r) => toggle_marker(r)
                 None => ()
               }
-            })
+            }, shortcut="mark")
           |> ignore
-          icon_button(b, fn() { if full_screen.get() { "unfull" } else { "full" } }, fn() { t("全屏") }, fn() {
-            set_full_screen(!full_screen.untracked())
-          })
+          icon_button(b, fn() { if full_screen.get() { "unfull" } else { "full" } }, fn() {
+              if full_screen.get() {
+                t("退出全屏")
+              } else {
+                t("全屏")
+              }
+            }, fn() {
+              set_full_screen(!full_screen.untracked())
+            }, shortcut="full")
           |> ignore
           volume_control(b)
         }
@@ -420,7 +426,7 @@ fn controls(parent : @view.View) -> Unit {
         |> ignore
       })
       |> ignore
-      icon_button(mid, fn() { "back-15" }, fn() { t("后退 15 秒 (J)") }, fn() { jump_by(-15000.0) }) |> ignore
+      icon_button(mid, fn() { "back-15" }, fn() { t("后退 15 秒") }, fn() { jump_by(-15000.0) }, shortcut="back15") |> ignore
       // (in clip mode play goes on from where it was in the clip, from its start past it)
       play_key(mid, fn() {
         if clipping.untracked() {
@@ -433,7 +439,7 @@ fn controls(parent : @view.View) -> Unit {
           set_playing(!want_play.untracked())
         }
       })
-      icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒 (L)") }, fn() { jump_by(15000.0) }) |> ignore
+      icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒") }, fn() { jump_by(15000.0) }, shortcut="on15") |> ignore
       mid.box(fn(r) {
         r.row(Is(true)).width(Is(Some(slot_w))).lines_up(Is(Some(Middle))).lies_along(Is(Start)).padding(Is((6.0, 0.0, 0.0, 0.0))) |> ignore
         speed_key(r)
@@ -453,13 +459,13 @@ fn controls(parent : @view.View) -> Unit {
             for step in [("undo", true), ("redo", false)] {
               let (name, back) = step
               let can = fn() { if back { clip_can_undo() } else { clip_can_redo() } }
-              icon_button(h, fn() { name }, fn() { if back { t("撤销 (Ctrl+Z)") } else { t("重做 (Ctrl+Y)") } }, fn() {
+              icon_button(h, fn() { name }, fn() { if back { t("撤销") } else { t("重做") } }, fn() {
                 if back {
                   clip_undo() |> ignore
                 } else {
                   clip_redo() |> ignore
                 }
-              })
+              }, shortcut=name)
               .alpha(By(fn() { if can() { 1.0 } else { 0.35 } }))
               .presses(By(can))
               |> ignore
@@ -488,7 +494,7 @@ fn controls(parent : @view.View) -> Unit {
             text_button(x, fn() { t("回到最新") }, show_latest, ghost=true) |> ignore
           }, at_once=true)
           let clip = text_button(b, fn() { t("剪辑") }, start_clip, icon="scissors")
-          tip(clip, fn() { t("剪辑 · C") })
+          tip(clip, fn() { t("剪辑") }, shortcut="clip")
         }
       }, at_once=true)
     })
@@ -878,6 +884,7 @@ fn main {
   if demux_dump() {
     return
   }
+  @sf.set_shortcuts(shortcut_words)
   // (the recorder's note: a card by the tray, shown once drawn, gone by itself: note_card.mbt)
   if note_mode() != "" {
     rp_start_hidden()

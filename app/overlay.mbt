@@ -10,9 +10,30 @@ let tips_layer : Ref[@view.View?] = Ref(None)
 let tips : @sf.TipLayer = @sf.TipLayer::new(fn() { tips_layer.val })
 
 ///|
-/// A tip saying `label` by `anchor` (over it).
-fn tip(anchor : @view.View, label : () -> String) -> Unit {
-  @sf.tip_node(tips, anchor, label, side=Top) |> ignore
+/// A tip saying `label` by `anchor` (over it, or on `side`), the keys of action `shortcut` after it as caps.
+fn tip(anchor : @view.View, label : () -> String, shortcut? : String = "", side? : @view.Side = Top) -> Unit {
+  @sf.tip_node(tips, anchor, label, side~, shortcut~) |> ignore
+}
+
+///|
+/// The keys of the actions the tips name (the replay's keymap, key_bindings, and the saved clip's player's), as said
+/// in a tip's caps.
+fn shortcut_words(action : String) -> String {
+  match action {
+    "play" => "Space"
+    "full" => "F"
+    "back15" => "J"
+    "on15" => "L"
+    "clip" => "C"
+    "mark" => "M"
+    "escape" => "Esc"
+    "undo" => "Ctrl+Z"
+    "redo" => "Ctrl+Y"
+    "clip-before" => "["
+    "clip-after" => "]"
+    "pic-fit" => "0"
+    _ => ""
+  }
 }
 
 ///|

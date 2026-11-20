@@ -183,7 +183,8 @@ fn pressable(
 
 ///|
 /// An icon button, 32 by 28, radius 6: bare, s3 under the pointer; its glyph muted, the text's colour under it. On
-/// the saved clip's dark stage (`stage`) in the stage's own greys, whatever the theme.
+/// the saved clip's dark stage (`stage`) in the stage's own greys, whatever the theme. Its tip (still.fail's: faded in,
+/// handed on between neighbours) says `label` (or `tip_words`) and the keys of action `shortcut` as caps, on `side`.
 fn icon_button(
   parent : @view.View,
   name : () -> String,
@@ -193,6 +194,25 @@ fn icon_button(
   h? : Double = 28.0,
   size? : Double = 16.0,
   stage? : Bool = false,
+  shortcut? : String = "",
+  side? : @view.Side = Top,
+  tip_words? : () -> String,
+) -> @view.View {
+  let k = icon_button_bare(parent, name, label, press, w, h, size, stage)
+  tip(k, match tip_words { Some(f) => f; None => label }, shortcut~, side~)
+  k
+}
+
+///|
+fn icon_button_bare(
+  parent : @view.View,
+  name : () -> String,
+  label : () -> String,
+  press : () -> Unit,
+  w : Double,
+  h : Double,
+  size : Double,
+  stage : Bool,
 ) -> @view.View {
   pressable(parent, label, press, fn(b) {
     let (hand, _) = answer(b)
@@ -333,7 +353,8 @@ fn play_button(
   playing? : () -> Bool = fn() { want_play.get() },
   stage? : Bool = false,
 ) -> Unit {
-  pressable(parent, fn() { if playing() { t("暂停") } else { t("播放") } }, press, fn(b) {
+  let label = fn() { if playing() { t("暂停") } else { t("播放") } }
+  let k = pressable(parent, label, press, fn(b) {
     let (hand, _) = answer(b)
     let morph = @motion.NodeWay::new(if @signals.untracked(playing) { 1.0 } else { 0.0 })
     b.reacts(playing, fn(on) { morph.go_ms(b, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 180.0 }) })
@@ -358,6 +379,6 @@ fn play_button(
     })
     |> ignore
   })
-  |> ignore
+  tip(k, label, shortcut="play")
 }
 

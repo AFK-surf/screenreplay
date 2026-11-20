@@ -471,16 +471,17 @@ fn clip_player_layer(root : @view.View) -> Unit {
             })
             |> ignore
             let (copied, copied_lately) = row.holds_for(1600.0, later=true)
-            let copy = icon_button(row, fn() { if copied_lately() { "check" } else { "copy" } }, fn() { t("复制") }, fn() {
+            icon_button(row, fn() { if copied_lately() { "check" } else { "copy" } }, fn() { t("复制") }, fn() {
               if rp_copy_file(cstr(path)) == 1 {
                 copied()
               }
-            }, stage=true)
-            tip(copy, fn() { if copied_lately() { t("已复制") } else { t("复制到剪贴板") } })
-            let folder = icon_button(row, fn() { "folder" }, fn() { t("打开位置") }, fn() { rp_reveal(cstr(path)) }, stage=true)
-            tip(folder, fn() { t("在文件夹中显示") })
-            let close = icon_button(row, fn() { "close" }, fn() { t("关闭 (Esc)") }, close_clip_player, stage=true)
-            tip(close, fn() { t("关闭 (Esc)") })
+            }, stage=true, tip_words=fn() { if copied_lately() { t("已复制") } else { t("复制到剪贴板") } })
+            |> ignore
+            icon_button(row, fn() { "folder" }, fn() { t("打开位置") }, fn() { rp_reveal(cstr(path)) }, stage=true, tip_words=fn() {
+              t("在文件夹中显示")
+            })
+            |> ignore
+            icon_button(row, fn() { "close" }, fn() { t("关闭") }, close_clip_player, stage=true, shortcut="escape") |> ignore
           })
           |> ignore
           })
@@ -540,16 +541,14 @@ fn clip_player_layer(root : @view.View) -> Unit {
               // (the transport's left: the clip before, play and pause, the clip after, where it is of how long)
               row.box(fn(b) {
                 b.row(Is(true)).margin(Is((-6.0, 0.0, 0.0, 0.0))) |> ignore
-                let k = icon_button(b, fn() { "skip-back" }, fn() { t("上一个片段 ([)") }, fn() { clip_go_beside(-1) }, stage=true)
+                let k = icon_button(b, fn() { "skip-back" }, fn() { t("上一个片段") }, fn() { clip_go_beside(-1) }, stage=true, shortcut="clip-before")
                 k.alpha(By(fn() { if before() { 1.0 } else { 0.3 } })).presses(By(before)) |> ignore
-                tip(k, fn() { t("上一个片段 ([)") })
               })
               |> ignore
               play_button(row, toggle, playing=fn() { clip_view_playing.get() }, stage=true)
               row.box(fn(b) {
-                let k = icon_button(b, fn() { "skip-forward" }, fn() { t("下一个片段 (])") }, fn() { clip_go_beside(1) }, stage=true)
+                let k = icon_button(b, fn() { "skip-forward" }, fn() { t("下一个片段") }, fn() { clip_go_beside(1) }, stage=true, shortcut="clip-after")
                 k.alpha(By(fn() { if after() { 1.0 } else { 0.3 } })).presses(By(after)) |> ignore
-                tip(k, fn() { t("下一个片段 (])") })
               })
               |> ignore
               row.box(fn(time) {
@@ -565,10 +564,10 @@ fn clip_player_layer(root : @view.View) -> Unit {
               volume_control(row, stage=true)
               row.box(fn(b) {
                 b.row(Is(true)).margin(Is((0.0, 0.0, -6.0, 0.0))) |> ignore
-                let k = icon_button(b, fn() { if fs() { "unfull" } else { "full" } }, fn() { t("全屏 (F)") }, fn() {
+                icon_button(b, fn() { if fs() { "unfull" } else { "full" } }, fn() { if fs() { t("退出全屏") } else { t("全屏") } }, fn() {
                   set_full_screen(!full_screen.untracked())
-                }, stage=true)
-                tip(k, fn() { if fs() { t("退出全屏 (F)") } else { t("全屏 (F)") } })
+                }, stage=true, shortcut="full")
+                |> ignore
               })
               |> ignore
             })
