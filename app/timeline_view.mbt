@@ -622,6 +622,23 @@ fn near_edge(at : Double, w : Double) -> Int {
 }
 
 ///|
+/// In clip mode, the playhead dragged within 6 points of an end of the clip lands on that end exactly.
+fn snap_to_clip(at : Double, w : Double) -> Double {
+  if !clipping.untracked() || w <= 0.0 {
+    return at
+  }
+  let room = 6.0 / w * @signals.untracked(view_len)
+  let (a, b) = (clip_a.untracked(), clip_b.untracked())
+  if (at - a).abs() < room {
+    a
+  } else if (at - b).abs() < room {
+    b
+  } else {
+    at
+  }
+}
+
+///|
 /// The clip's start when a drag of it began, and whether it has moved since.
 let clip_origin : Ref[Double] = Ref(0.0)
 
@@ -698,7 +715,16 @@ fn edge_scroll(w : Double) -> Unit {
 /// The pointer held on the band at `x` (of `w`): what is held follows it.
 fn band_moved(x : Double, w : Double) -> Unit {
   let at = at_x(x, w)
-  match grabbed.untracked() {
+  // (an end of the clip moves only once it is dragged 4 points: pressed and let go, it is a click that takes the
+  // playhead to that end; the user, 2026-11-20 「在clip模式下，很难把playhead移动到开头」)
+  let g = grabbed.untracked()
+  if (g == 1 || g == 2) && !clip_moved.val {
+    if (x - band_down_x.val).abs() < 4.0 {
+      return
+    }
+    clip_moved.val = true
+  }
+  match g {
     // (an end dragged past the other: the two change places, the one in hand now the other end, as editors do;
     // the user, 2026-11-14 「右侧拖拽越过左侧时，需要调转左右」)
     1 =>
@@ -722,7 +748,7 @@ fn band_moved(x : Double, w : Double) -> Unit {
     3 =>
       if scrub_dragged.untracked() || (x - band_down_x.val).abs() >= 4.0 {
         scrub_dragged.set(true)
-        scrub_to(at)
+        scrub_to(snap_to_clip(at, w))
       }
     4 => {
       let length = clip_b.untracked() - clip_a.untracked()
@@ -778,7 +804,9 @@ fn band_drag(d : @view.Drag, w : Double) -> Unit {
       // from the same moment, the ~100 ms between heard twice (the user, 2026-11-15: 「声音，播放中点时间线」 of
       // 「跳帧后还是会复读那么100毫秒」); after a drag, to where it was let go, exactly)
       if d.kind == Up && ((was == 3 && dragged) || (was == 4 && !clip_moved.val)) {
-        seek_to(at)
+        seek_to(if was == 3 { snap_to_clip(at, w) } else { at })
+      } else if d.kind == Up && (was == 1 || was == 2) && !clip_moved.val {
+        seek_to(if was == 1 { clip_a.untracked() } else { clip_b.untracked() })
       }
     }
   }
