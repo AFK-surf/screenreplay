@@ -94,6 +94,9 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
             info.Environment["REPLAY_RECORDER_HWND"] = recorder.ToInt64().ToString("x");
             // (beside the replay window's run, never handed to it as the same program started again would be)
             info.Environment["MBUI_WINDOW"] = "tray";
+            // (it plays no video: mbui's video device and decoders' threads not made for it, 13 MB of the GPU's memory,
+            // 16 MB and 9 threads of its own)
+            info.Environment["MBUI_NO_VIDEO_GPU"] = "1";
             info.Environment.Remove("REPLAY_RESIDENT");
             info.Environment.Remove("REPLAY_HIDDEN");
             // (what mbui says on its own (a frame that stalled: HANG …; no DirectComposition) kept in tray.log, so a

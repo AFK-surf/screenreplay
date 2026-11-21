@@ -189,6 +189,9 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
             info.Environment["REPLAY_ROOT"] = root;
             // (beside the replay window's run and the tray's panel, never handed to either)
             info.Environment["MBUI_WINDOW"] = "note";
+            // (it plays no video, its clip's picture an image: mbui's video device and decoders' threads not made for
+            // it, 12 MB of the GPU's memory, 15 MB and 9 threads of its own)
+            info.Environment["MBUI_NO_VIDEO_GPU"] = "1";
             info.Environment.Remove("REPLAY_TRAY");
             info.Environment.Remove("REPLAY_RESIDENT");
             info.Environment.Remove("REPLAY_HIDDEN");

@@ -240,9 +240,16 @@ fn asked_recorder(code : String, words : String) -> Unit {
   match the_root.val {
     Some(r) => {
       let until = now() + 8000.0
+      // (asked again each 250 ms till the recorder says what was asked, 8 s at most: not on for the 8 s once it has;
+      // one ask's following ends as another's begins)
+      asked_follow.val += 1
+      let mine = asked_follow.val
       fn look() {
+        if asked_follow.val != mine {
+          return
+        }
         status_rev.set(status_rev.untracked() + 1)
-        if now() < until {
+        if now() < until && @signals.untracked(real_code) != code {
           r.at_moment(now() + 250.0, look) |> ignore
         }
       }
@@ -251,6 +258,10 @@ fn asked_recorder(code : String, words : String) -> Unit {
     None => ()
   }
 }
+
+///|
+/// Which ask of the recorder is followed now (asked_recorder).
+let asked_follow : Ref[Int] = Ref(0)
 
 ///|
 fn real_code() -> String {
