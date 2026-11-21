@@ -232,6 +232,17 @@ fn link_row(
         |> ignore
       })
       |> ignore
+    } else if icon == "coffee" {
+      // (a cup, lines as the icon set's: it has none, and the row's place for it stood empty, the user, 2026-11-21)
+      b.box(fn(g) {
+        g
+        .width(Is(Some(16.0)))
+        .height(Is(Some(16.0)))
+        .picture(Is(Some(vector("M2.6 6.4h8.4v3.4a3.2 3.2 0 0 1-3.2 3.2H5.8a3.2 3.2 0 0 1-3.2-3.2ZM11 7.3h0.8a1.6 1.6 0 0 1 0 3.2H11M5 2.2v2M7.4 2.2v2M9.8 2.2v2", 16.0, 16.0, stroke=1.4))))
+        .tint(By(ui_muted))
+        |> ignore
+      })
+      |> ignore
     } else {
       @sf.icon_node(b, icon, 16.0, By(ui_muted)) |> ignore
     }
