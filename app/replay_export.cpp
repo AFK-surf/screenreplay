@@ -211,6 +211,9 @@ struct GpuCropper {
   ComPtr<ID3D11VideoProcessorInputView> in_view;
   UINT32 vp_in_w = 0, vp_in_h = 0, vp_out_w = 0, vp_out_h = 0;
   std::vector<ComPtr<ID3D11Texture2D>> pool;
+  // the video processor's output view of each pooled texture, made once (made for every frame before), while the
+  // processor they were made for stands
+  std::vector<std::pair<ID3D11Texture2D *, ComPtr<ID3D11VideoProcessorOutputView>>> out_views;
   ComPtr<ID3D11Texture2D> staging;
   UINT32 st_w = 0, st_h = 0;
 
@@ -331,6 +334,7 @@ struct GpuCropper {
 
         if (!vp || vp_in_w != tw || vp_in_h != th || vp_out_w != (UINT32)dw || vp_out_h != (UINT32)dh) {
           in_view.Reset();
+          out_views.clear();
           vp.Reset();
           vpe.Reset();
           D3D11_VIDEO_PROCESSOR_CONTENT_DESC cd{};
@@ -355,9 +359,25 @@ struct GpuCropper {
           CHECK(vdev->CreateVideoProcessorInputView(nv12.Get(), vpe.Get(), &ivd, &in_view));
         }
         ComPtr<ID3D11VideoProcessorOutputView> out_view;
-        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{};
-        ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-        CHECK(vdev->CreateVideoProcessorOutputView(dst_tex.Get(), vpe.Get(), &ovd, &out_view));
+        for (auto &e : out_views) {
+          if (e.first == dst_tex.Get()) {
+            out_view = e.second;
+            break;
+          }
+        }
+        if (!out_view) {
+          D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC ovd{};
+          ovd.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+          CHECK(vdev->CreateVideoProcessorOutputView(dst_tex.Get(), vpe.Get(), &ovd, &out_view));
+          // (kept only for a texture of the pool, which lives as long as this: one outside it may be let go, and another
+          // made at its address)
+          for (auto &t : pool) {
+            if (t.Get() == dst_tex.Get()) {
+              out_views.emplace_back(dst_tex.Get(), out_view);
+              break;
+            }
+          }
+        }
 
         vctx->VideoProcessorSetStreamFrameFormat(vp.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
         vctx->VideoProcessorSetStreamAutoProcessingMode(vp.Get(), 0, FALSE);
@@ -1259,18 +1279,36 @@ std::wstring partial_of(const Job &job) { return job.output + (job.codec == kGif
 
 // The job done: its file written, its progress told to `told`, stopped as `stop` is set. `count`: a GIF only counted,
 // nothing written (the estimate's sample).
-HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, Gif *count = nullptr) {
+// The Direct3D device a run decodes, crops and encodes on, and its manager for Media Foundation: made for each run,
+// or once for all of an estimate's samples (they were made and let go 8 times over for one estimate).
+struct ExportDevice {
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
-  D3D_FEATURE_LEVEL level;
-  CHECK(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                          nullptr, 0, D3D11_SDK_VERSION, &device, &level, &context));
-  ComPtr<ID3D10Multithread> mt;
-  if (SUCCEEDED(device.As(&mt))) mt->SetMultithreadProtected(TRUE);
-  UINT token = 0;
   ComPtr<IMFDXGIDeviceManager> manager;
-  CHECK(MFCreateDXGIDeviceManager(&token, &manager));
-  CHECK(manager->ResetDevice(device.Get(), token));
+
+  HRESULT make() {
+    if (manager) return S_OK;
+    D3D_FEATURE_LEVEL level;
+    CHECK(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                            nullptr, 0, D3D11_SDK_VERSION, &device, &level, &context));
+    ComPtr<ID3D10Multithread> mt;
+    if (SUCCEEDED(device.As(&mt))) mt->SetMultithreadProtected(TRUE);
+    UINT token = 0;
+    CHECK(MFCreateDXGIDeviceManager(&token, &manager));
+    HRESULT hr = manager->ResetDevice(device.Get(), token);
+    if (FAILED(hr)) manager.Reset();
+    return hr;
+  }
+};
+
+HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, Gif *count = nullptr,
+            ExportDevice *shared = nullptr) {
+  ExportDevice own_device;
+  ExportDevice &made = shared ? *shared : own_device;
+  CHECK(made.make());
+  ComPtr<ID3D11Device> device = made.device;
+  ComPtr<ID3D11DeviceContext> context = made.context;
+  ComPtr<IMFDXGIDeviceManager> manager = made.manager;
   GpuCropper gpu_crop;
   gpu_crop.init(device.Get(), context.Get());
 
@@ -1557,14 +1595,16 @@ HRESULT estimate(const Job &job, const std::atomic<bool> &stop, double *bytes) {
   uint64_t first = 0, later = 0;
   LONGLONG measured = 0;
   std::atomic<double> unused{0.0};
+  ExportDevice shared;
   for (int i = 0; i < n; i++) {
+    if (stop.load()) return E_ABORT;
     const LONGLONG span = std::min(second, job.total);
     const LONGLONG from = n == 1 ? 0 : (job.total - span) * i / (n - 1);
     Job s = stretch_of(job, from, span);
     if (s.parts.empty()) continue;
     Gif count;
     CHECK(count.open(L"", s.width, s.height));
-    CHECK(run(s, stop, unused, &count));
+    CHECK(run(s, stop, unused, &count, &shared));
     if (i == 0) first = count.first_bytes();
     later += count.later_bytes();
     // (what its frames after the first show: the second less the first frame's time)

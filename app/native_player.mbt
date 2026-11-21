@@ -840,6 +840,21 @@ fn Deck::close(self : Deck) -> Unit {
   self.stream = None
 }
 
+///|
+/// What it holds while it rests let go of (the resident window put away): its sound's decoder (made again as it next
+/// sounds), the files kept open for its reads. Its stream and its picture stay: the window shown again shows at once.
+fn Deck::rest(self : Deck) -> Unit {
+  self.cancel()
+  self.cancel_rest()
+  self.sound_stop()
+  if self.sound.dec != 0 {
+    rp_aac_close(self.sound.dec)
+    self.sound.dec = 0
+    self.sound.asc = b""
+  }
+  self.sound.track = None
+}
+
 // ---- the sound ----
 
 ///|

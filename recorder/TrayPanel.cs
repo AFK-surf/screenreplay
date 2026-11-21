@@ -53,12 +53,30 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
 
     private Process? process;
 
+    /// <summary>Let go of (the recorder quits): never started again after.</summary>
+    private volatile bool disposed;
+
     /// <summary>Whether `pid` is the panel's (not the replay window's).</summary>
-    public bool Owns(int pid) => process is { HasExited: false } && process.Id == pid;
+    public bool Owns(int pid)
+    {
+        try
+        {
+            return process is { HasExited: false } p && p.Id == pid;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Started now if it is not running, so the first press shows it at once.</summary>
     public void Warm()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         try
         {
             if (process is { HasExited: false })
@@ -83,6 +101,8 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
             process = Process.Start(info);
             if (process is not null)
             {
+                // (ended with the recorder however it ends: ChildJob)
+                ChildJob.Hold(process);
                 process.ErrorDataReceived += (_, e) => Note(e.Data);
                 process.OutputDataReceived += (_, e) => Note(e.Data);
                 process.BeginErrorReadLine();
@@ -137,6 +157,11 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
     /// </summary>
     public void Renew(string why)
     {
+        if (disposed)
+        {
+            return;
+        }
+
         try
         {
             if (process is not { HasExited: false })
@@ -170,6 +195,11 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
     /// tray menu does; false where it could not be.</summary>
     public bool Show(int x, int y)
     {
+        if (disposed)
+        {
+            return false;
+        }
+
         Warm();
         if (process is null)
         {
@@ -215,6 +245,12 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
 
     public void Dispose()
     {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
         try
         {
             if (process is { HasExited: false })
@@ -227,5 +263,6 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
         }
 
         process?.Dispose();
+        process = null;
     }
 }

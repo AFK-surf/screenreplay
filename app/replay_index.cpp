@@ -71,6 +71,11 @@ std::wstring cache_dir;
 int64_t prefer_clock = 0;
 bool started = false;
 std::atomic<int> made{0};
+// Devices left behind by a decoder that never answered (GpuIndexer::abandon): each holds its decoder's memory for the
+// process's life, so after a few the GPU is no longer used for the index (its pictures made by the CPU's decoder, as
+// REPLAY_INDEX_SOFTWARE does), not one more device left behind every stuck segment of a window resident for days.
+std::atomic<int> abandoned{0};
+const int kAbandonedMost = 3;
 
 std::wstring wide(const char *utf8) {
   int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
@@ -483,6 +488,7 @@ struct GpuIndexer {
   // (a decoder on this device never answered: everything left as it is, never let go, since letting go would wait
   // on it; the next segment makes a device of its own)
   void abandon() {
+    abandoned++;
     dev = nullptr;
     ctx = nullptr;
     vdev = nullptr;
@@ -782,7 +788,7 @@ void worker() {
       else thumbs.clear();
     }
     ULONGLONG began = GetTickCount64();
-    GpuIndexer *use_gpu = !cached && !software && gpu.ensure() ? &gpu : nullptr;
+    GpuIndexer *use_gpu = !cached && !software && abandoned.load() < kAbandonedMost && gpu.ensure() ? &gpu : nullptr;
     Made made_as = cached ? kMadeOk : wic ? make_thumbs(wic, use_gpu, path, dur, plain, thumbs) : kMadeNone;
     bool ok = made_as == kMadeOk;
     // (stuck: its decoder may still hold the device)

@@ -89,9 +89,7 @@ static bool rp_is_gif(const std::wstring &file) {
 // A frame of `file` at `ms` decoded on the GPU (IMFSourceReader with D3D11VA into NV12, so frames before `ms` cost no
 // colour conversion or scaling), then cropped to (cx, cy, cw, ch) and scaled to fit max_w x max_h by ID3D11VideoProcessor
 // into a small staging texture read back as a BMP; empty when the GPU path cannot decode it.
-static std::vector<uint8_t> rp_thumb_gpu_pixels(const std::wstring &file, double ms, int32_t max_w, int32_t max_h,
-                                                int32_t cx, int32_t cy, int32_t cw, int32_t ch) {
-  struct GpuThumb {
+struct GpuThumb {
     int state = 0;  // 0 uninit, 1 ready, -1 unavailable
     ID3D11Device *dev = nullptr;
     ID3D11DeviceContext *ctx = nullptr;
@@ -113,8 +111,43 @@ static std::vector<uint8_t> rp_thumb_gpu_pixels(const std::wstring &file, double
     ID3D11VideoProcessorOutputView *out_view = nullptr;
     ID3D11Texture2D *staging = nullptr;
     UINT32 vp_in_w = 0, vp_in_h = 0, vp_out_w = 0, vp_out_h = 0;
-  };
-  static thread_local GpuThumb g;
+    // The file let go of (its reader holds it open: a clip previewed last could not be deleted, nor a segment's
+    // space given back), the frame kept of it with it.
+    void drop_reader() {
+      rp_release(reader);
+      cached_file.clear();
+      rp_release(in_view);
+      rp_release(nv12);
+      nv12_w = nv12_h = 0;
+      nv12_file.clear();
+      nv12_target = -1;
+    }
+    // All of it let go of (the device, its decoder's and its video processor's memory): made again at the next ask.
+    void drop() {
+      drop_reader();
+      rp_release(out_view);
+      rp_release(bgra);
+      rp_release(staging);
+      rp_release(vp);
+      rp_release(vpe);
+      vp_in_w = vp_in_h = vp_out_w = vp_out_h = 0;
+      rp_release(mgr);
+      rp_release(vctx);
+      rp_release(vdev);
+      rp_release(ctx);
+      rp_release(dev);
+      state = 0;
+    }
+};
+
+// (the thumbnail worker's own: rp_thumb_job's thread alone uses them)
+static thread_local GpuThumb rp_gpu_thumb;
+static thread_local IMFSourceReader *rp_sw_reader = nullptr;
+static thread_local std::wstring rp_sw_file;
+
+static std::vector<uint8_t> rp_thumb_gpu_pixels(const std::wstring &file, double ms, int32_t max_w, int32_t max_h,
+                                                int32_t cx, int32_t cy, int32_t cw, int32_t ch) {
+  GpuThumb &g = rp_gpu_thumb;
   std::vector<uint8_t> out;
   if (g.state == 0) {
     g.state = -1;
@@ -373,8 +406,8 @@ static std::vector<uint8_t> rp_thumb_pixels(const char *path, double ms, int32_t
   if (rp_is_gif(file)) return rp_gif_pixels(file, max_w, max_h);
   std::vector<uint8_t> gpu = rp_thumb_gpu_pixels(file, ms, max_w, max_h, cx, cy, cw, ch);
   if (!gpu.empty()) return gpu;
-  static thread_local IMFSourceReader *cached_reader = nullptr;
-  static thread_local std::wstring cached_file;
+  IMFSourceReader *&cached_reader = rp_sw_reader;
+  std::wstring &cached_file = rp_sw_file;
   static thread_local UINT32 display_w = 0, display_h = 0;
   IMFAttributes *attrs = nullptr;
   IMFSourceReader *reader = nullptr;
@@ -493,21 +526,87 @@ extern "C" moonbit_bytes_t rp_thumb(moonbit_bytes_t path, double ms, int32_t max
 // Only one decode runs at a time. The worker owns ordinary C++ data; MoonBit
 // allocations and image registration stay on the UI thread. One byte means
 // pending (0) or unavailable (1); a completed result is a BMP.
+//
+// What the worker holds is let go of as it rests: the file it read (its reader holds it open, so a clip previewed
+// last could not be deleted) after 2 s with nothing asked, its device and all it made on it after 30 s, and at once
+// when the window is put away (rp_thumb_release). Made again at the next ask (some tens of ms, once).
+struct RpThumbJob {
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::string key;
+  std::string file;
+  double ms = 0;
+  int32_t max_w = 320, max_h = 180, cx = 0, cy = 0, cw = 0, ch = 0;
+  std::deque<std::pair<std::string, std::vector<uint8_t>>> cache;
+  bool busy = false;
+  bool started = false;
+  bool release = false;
+};
+
+// Process lifetime: a window may close while the worker is finishing.
+static RpThumbJob *rp_thumb_jobs = new RpThumbJob;
+
+static void rp_thumb_drop_readers() {
+  rp_gpu_thumb.drop_reader();
+  rp_release(rp_sw_reader);
+  rp_sw_file.clear();
+}
+
+static void rp_thumb_worker() {
+  RpThumbJob *job = rp_thumb_jobs;
+  // (what it holds: 0 nothing, 1 a file, 2 a device too)
+  int holds = 0;
+  for (;;) {
+    std::unique_lock<std::mutex> lock(job->mutex);
+    while (!job->busy) {
+      if (job->release) {
+        job->release = false;
+        lock.unlock();
+        rp_gpu_thumb.drop();
+        rp_thumb_drop_readers();
+        holds = 0;
+        lock.lock();
+        continue;
+      }
+      if (holds == 0) {
+        job->changed.wait(lock);
+      } else if (!job->changed.wait_for(lock, std::chrono::seconds(holds == 1 ? 30 : 2),
+                                        [job] { return job->busy || job->release; })) {
+        lock.unlock();
+        if (holds == 2) {
+          rp_thumb_drop_readers();
+          holds = 1;
+        } else {
+          rp_gpu_thumb.drop();
+          holds = 0;
+        }
+        lock.lock();
+      }
+    }
+    std::string file = job->file, key = job->key;
+    double ms = job->ms;
+    int32_t mw = job->max_w, mh = job->max_h, x = job->cx, y = job->cy, w = job->cw, h = job->ch;
+    lock.unlock();
+    ULONGLONG began = GetTickCount64();
+    std::vector<uint8_t> pixels;
+    try { pixels = rp_thumb_pixels(file.c_str(), ms, mw, mh, x, y, w, h); } catch (...) { }
+    holds = 2;
+    const char *trace = getenv("REPLAY_TRACE");
+    if (trace && strcmp(trace, "1") == 0) {
+      printf("REPLAY_DECODE %llu ms offset=%.0f bytes=%zu\n", GetTickCount64() - began, ms, pixels.size());
+      fflush(stdout);
+    }
+    lock.lock();
+    job->cache.emplace_back(key, std::move(pixels));
+    // Bounded to at most 32 frames (~30 MB at 640 x 360).
+    if (job->cache.size() > 32) job->cache.pop_front();
+    job->busy = false;
+  }
+}
+
 static moonbit_bytes_t rp_thumb_job(const char *path, const char *identity, double ms, int32_t max_w, int32_t max_h,
                                     int32_t cx, int32_t cy, int32_t cw, int32_t ch) {
-  struct Job {
-    std::mutex mutex;
-    std::condition_variable changed;
-    std::string key;
-    std::string file;
-    double ms = 0;
-    int32_t max_w = 320, max_h = 180, cx = 0, cy = 0, cw = 0, ch = 0;
-    std::deque<std::pair<std::string, std::vector<uint8_t>>> cache;
-    bool busy = false;
-    bool started = false;
-  };
-  // Process lifetime: a window may close while the worker is finishing.
-  static Job *job = new Job;
+  RpThumbJob *job = rp_thumb_jobs;
   std::lock_guard<std::mutex> guard(job->mutex);
   std::string key(identity);
   for (auto &entry : job->cache) {
@@ -515,29 +614,7 @@ static moonbit_bytes_t rp_thumb_job(const char *path, const char *identity, doub
   }
   if (!job->started) {
     try {
-      std::thread([]() {
-       for (;;) {
-        std::unique_lock<std::mutex> lock(job->mutex);
-        job->changed.wait(lock, [] { return job->busy; });
-        std::string file = job->file, key = job->key;
-        double ms = job->ms;
-        int32_t mw = job->max_w, mh = job->max_h, x = job->cx, y = job->cy, w = job->cw, h = job->ch;
-        lock.unlock();
-        ULONGLONG began = GetTickCount64();
-        std::vector<uint8_t> pixels;
-        try { pixels = rp_thumb_pixels(file.c_str(), ms, mw, mh, x, y, w, h); } catch (...) { }
-        const char *trace = getenv("REPLAY_TRACE");
-        if (trace && strcmp(trace, "1") == 0) {
-          printf("REPLAY_DECODE %llu ms offset=%.0f bytes=%zu\n", GetTickCount64() - began, ms, pixels.size());
-          fflush(stdout);
-        }
-        lock.lock();
-        job->cache.emplace_back(key, std::move(pixels));
-        // Bounded to at most 32 frames (~30 MB at 640 x 360).
-        if (job->cache.size() > 32) job->cache.pop_front();
-        job->busy = false;
-       }
-      }).detach();
+      std::thread(rp_thumb_worker).detach();
       job->started = true;
     } catch (...) {
       return moonbit_make_bytes(1, 1);
@@ -557,6 +634,19 @@ static moonbit_bytes_t rp_thumb_job(const char *path, const char *identity, doub
     job->changed.notify_one();
   }
   return moonbit_make_bytes(1, 0);
+}
+
+// The window put away: the frames made let go of (up to ~30 MB), and the worker's file, device and decoder as soon as
+// it rests (at once where it rests now).
+extern "C" void rp_thumb_release(void) {
+  RpThumbJob *job = rp_thumb_jobs;
+  std::lock_guard<std::mutex> guard(job->mutex);
+  job->cache.clear();
+  job->cache.shrink_to_fit();
+  if (job->started) {
+    job->release = true;
+    job->changed.notify_one();
+  }
 }
 
 extern "C" moonbit_bytes_t rp_clip_thumb(moonbit_bytes_t path, moonbit_bytes_t identity, double ms) {
@@ -1208,12 +1298,16 @@ static void rp_nv12_to_bgra(const uint8_t *data, size_t pitch, size_t rows, int 
 // rp_frame_at on the GPU: the frames from the key frame on decoded by the GPU's decoder into its own memory (no colour
 // conversion of any but the one kept: the CPU path converted every one of them, 1-4 s for a 4K frame two seconds after
 // its key frame), the last one not after `ms` copied aside, read back once and converted. False when the GPU cannot.
+// (made at the first copy and kept: making a device and its manager each time cost tens of ms of each copy; one copy
+// runs at a time, rp_frame_copying; let go of as the window is put away, rp_frame_release)
+static ID3D11Device *rp_copy_dev = nullptr;
+static ID3D11DeviceContext *rp_copy_ctx = nullptr;
+static IMFDXGIDeviceManager *rp_copy_mgr = nullptr;
+
 static bool rp_frame_at_gpu(const std::wstring &file, double ms, std::vector<uint8_t> &bgra, int &w, int &h) {
-  // (made at the first copy and kept: making a device and its manager each time cost tens of ms of each copy; one copy
-  // runs at a time, rp_frame_copying)
-  static ID3D11Device *dev = nullptr;
-  static ID3D11DeviceContext *ctx = nullptr;
-  static IMFDXGIDeviceManager *mgr = nullptr;
+  ID3D11Device *&dev = rp_copy_dev;
+  ID3D11DeviceContext *&ctx = rp_copy_ctx;
+  IMFDXGIDeviceManager *&mgr = rp_copy_mgr;
   IMFAttributes *attrs = nullptr;
   IMFSourceReader *reader = nullptr;
   IMFMediaType *want = nullptr;
@@ -1719,6 +1813,16 @@ extern "C" int32_t rp_frame_copy(moonbit_bytes_t path, double ms) {
     rp_frame_copying = 3;
   }
   return 1;
+}
+
+// The copy's device let go of (the window put away): made again at the next copy. Not while one is being made.
+extern "C" void rp_frame_release(void) {
+  int idle = 0;
+  if (!rp_frame_copying.compare_exchange_strong(idle, 1)) return;
+  rp_release(rp_copy_mgr);
+  rp_release(rp_copy_ctx);
+  rp_release(rp_copy_dev);
+  rp_frame_copying = 0;
 }
 
 // How the last copy went (rp_frame_copying), a finished one told once (then 0).

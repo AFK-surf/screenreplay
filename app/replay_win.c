@@ -521,10 +521,22 @@ extern void *mb_app_hwnd(void);
 static WNDPROC rp_prev_proc;
 static volatile LONG rp_hides, rp_shows;
 
+// What the hidden window holds for playing let go of at once, as it hides (replay_play.cpp, replay_mf.cpp): mbui draws
+// no frame for a hidden window, so nothing of the app's runs till it shows again; what is let go of here is what
+// native code holds (the segments kept open, the sound decoders, the thumbnail worker's and the copy's devices).
+extern void rp_play_release(void);
+extern void rp_aac_release_all(void);
+extern void rp_thumb_release(void);
+extern void rp_frame_release(void);
+
 static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_CLOSE) {
     ShowWindow(h, SW_HIDE);
     InterlockedIncrement(&rp_hides);
+    rp_play_release();
+    rp_aac_release_all();
+    rp_thumb_release();
+    rp_frame_release();
     return 0;
   }
   if (msg == WM_SHOWWINDOW && wp) InterlockedIncrement(&rp_shows);

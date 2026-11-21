@@ -74,6 +74,7 @@ fn gif_frame_key(path : String, at : Double) -> String {
       return ""
     }
     @ui.add_image(key, bmp)
+    hover_images.keep(key)
   }
   key
 }

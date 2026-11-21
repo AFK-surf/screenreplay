@@ -311,6 +311,9 @@ fn load() -> Unit {
       if !kept.contains(seg.path) {
         rp_idx_drop(cstr(seg.path))
         sidecars_drop(seg.path)
+        // (its pictures handed to mbui and its codec read once, let go of with it)
+        seg_images_forget(seg.path)
+        seg_codecs.remove(seg.path)
       }
     }
     segs.clear()

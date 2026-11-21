@@ -29,6 +29,10 @@ fn refresh(root : @view.View, first : Bool) -> Unit {
   load()
   if clipping.untracked() {
     load_windows()
+  } else if !snaps.is_empty() {
+    // (clip mode left: the windows noted and the clip's steps let go of till it is entered again, which reads them anew)
+    clear_windows()
+    clip_history_free()
   }
   status_rev.set(status_rev.untracked() + 1)
   if rp_take_request(cstr(root_dir() + "\\settings.request")) != 0 {
@@ -871,6 +875,13 @@ fn make_window(root : @view.View) -> Unit {
   update_watch(root)
   // (the folder first read once the window is up, a moment after it is made)
   root.at_moment(now() + 1.0, fn() {
+    // (started hidden by the recorder and not shown yet: nothing read or decoded till it first shows, resident.mbt)
+    if hidden_unshown() {
+      first_show_waits.val = Some(root)
+      stay_resident(root)
+      rp_alt_arrows() |> ignore
+      return
+    }
     refresh(root, true)
     stay_resident(root)
     rp_alt_arrows() |> ignore

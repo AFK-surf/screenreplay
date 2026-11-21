@@ -46,6 +46,7 @@ let snaps_head : Ref[String] = Ref("")
 /// Drops the loaded window snapshots (hidden in the background, or buffer purged) so they are only held while clipping.
 fn clear_windows() -> Unit {
   snaps.clear()
+  snaps.shrink_to_fit()
   snaps_read.val = 0.0
   snaps_tail.val = ""
   snaps_head.val = ""
@@ -101,6 +102,11 @@ fn load_windows() -> Unit {
   let path = root_dir() + "\\windows.jsonl"
   let size = rp_size(cstr(path))
   if size <= 0.0 {
+    // (emptied or gone (删除全部录像): what was read of it let go of too, not kept showing windows of then)
+    if !snaps.is_empty() {
+      clear_windows()
+      data_changed()
+    }
     return
   }
   let head = @utf8.decode_lossy(rp_read(cstr(path), 0.0, @cmp.minimum(48, size.to_int()))[:])

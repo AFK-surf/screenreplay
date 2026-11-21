@@ -97,12 +97,29 @@ fn clip_mark() -> Unit {
   match clip_marked.val {
     Some(was) if was != now => {
       clip_undos.push(was)
+      // (the last 100 steps kept: a clip worked on for hours no longer keeps every one)
+      if clip_undos.length() > clip_steps_kept {
+        clip_undos.remove(0) |> ignore
+      }
       clip_redos.clear()
     }
     _ => ()
   }
   clip_marked.val = Some(now)
   clip_steps_told()
+}
+
+///|
+let clip_steps_kept : Int = 100
+
+///|
+/// The steps let go of (clip mode left, the window put away).
+fn clip_history_free() -> Unit {
+  clip_undos.clear()
+  clip_undos.shrink_to_fit()
+  clip_redos.clear()
+  clip_redos.shrink_to_fit()
+  clip_marked.val = None
 }
 
 ///|

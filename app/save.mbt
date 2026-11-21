@@ -389,6 +389,7 @@ fn crop_thumb_key() -> String? {
   let bmp = rp_crop_thumb(cstr(s.path), cstr(identity), inside, x, y, w, h)
   if bmp.length() > 1 {
     @ui.add_image(key, bmp)
+    crop_images.keep(key)
     Some(key)
   } else {
     if bmp.length() == 1 && bmp[0] == 0 {

@@ -27,12 +27,36 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
 
     private string NoteFile => Path.Combine(root, "note.json");
 
+    /// <summary>Let go of (the recorder quits): none started again after, not even by the re-warm 3 s after an ask.</summary>
+    private bool disposed;
+
+    /// <summary>Whether `pid` is a card's (the one kept warm or the one shown), not the replay window's.</summary>
+    public bool Owns(int pid)
+    {
+        lock (gate)
+        {
+            return Is(warm, pid) || Is(shown, pid);
+        }
+
+        static bool Is(Process? p, int pid)
+        {
+            try
+            {
+                return p is { HasExited: false } && p.Id == pid;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+    }
+
     /// <summary>One started now (hidden) if none is kept, so the next ask shows at once.</summary>
     public void Warm()
     {
         lock (gate)
         {
-            if (warm is { HasExited: false })
+            if (disposed || warm is { HasExited: false })
             {
                 return;
             }
@@ -48,6 +72,11 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
     {
         lock (gate)
         {
+            if (disposed)
+            {
+                return;
+            }
+
             Kill(warm);
             warm = null;
         }
@@ -88,6 +117,11 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
         bool ok;
         lock (gate)
         {
+            if (disposed)
+            {
+                return false;
+            }
+
             Kill(shown);
             shown = null;
             id++;
@@ -158,7 +192,10 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
             info.Environment.Remove("REPLAY_TRAY");
             info.Environment.Remove("REPLAY_RESIDENT");
             info.Environment.Remove("REPLAY_HIDDEN");
-            return Process.Start(info);
+            var started = Process.Start(info);
+            // (ended with the recorder however it ends: ChildJob)
+            ChildJob.Hold(started);
+            return started;
         }
         catch (Exception ex)
         {
@@ -187,6 +224,7 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
     {
         lock (gate)
         {
+            disposed = true;
             Kill(shown);
             Kill(warm);
             shown = null;

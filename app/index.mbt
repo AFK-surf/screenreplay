@@ -95,6 +95,8 @@ fn thumb_key(at : Double) -> String {
           return ""
         }
         @ui.add_image(key, jpeg)
+        // (let go of as the segment leaves the buffer: kept_images.mbt)
+        seg_image_kept(s.path, key)
       }
       key
     }

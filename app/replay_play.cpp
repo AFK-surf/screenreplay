@@ -103,10 +103,46 @@ extern "C" moonbit_bytes_t rp_play_read(moonbit_bytes_t path, double offset, int
   return trimmed;
 }
 
-// The files warmed in this run (each once).
+// The files warmed in this run (each once till the window is put away: rp_play_release).
 static std::vector<std::string> rp_warmed;
 
-// The file at `path` opened on a thread of its own, kept for the reads to come, and read through once there so its
+// The files asked to be warmed and not begun yet, newest last; the one thread that warms them (started at the first
+// ask, kept for the process's life: a window may be put away while it reads). Before, each ask started a thread of its
+// own, and a fast run across many segments started dozens at once, each reading its whole file: the disk was busy
+// with all of them while the frames asked for waited behind.
+static std::vector<std::string> rp_warm_todo;
+static CONDITION_VARIABLE rp_warm_wake = CONDITION_VARIABLE_INIT;
+static bool rp_warm_started;
+// (raised by each ask and by rp_play_release: a read-through under way gives way to what is asked for now)
+static volatile LONG rp_warm_gen;
+
+static void rp_warm_loop() {
+  std::vector<uint8_t> buf(1 << 20);
+  for (;;) {
+    AcquireSRWLockExclusive(&rp_kept_lock);
+    while (rp_warm_todo.empty()) SleepConditionVariableSRW(&rp_warm_wake, &rp_kept_lock, INFINITE, 0);
+    // (the newest asked first: the oldest asks are for segments played past already)
+    std::string p = rp_warm_todo.back();
+    rp_warm_todo.pop_back();
+    LONG gen = rp_warm_gen;
+    ReleaseSRWLockExclusive(&rp_kept_lock);
+    HANDLE h = rp_play_open(p.c_str());
+    if (h == INVALID_HANDLE_VALUE) continue;
+    // (read through once, so its bytes are in the system's cache when its frames are read; given up where another file
+    // is asked for meanwhile)
+    DWORD got = 0;
+    while (rp_warm_gen == gen && ReadFile(h, buf.data(), (DWORD)buf.size(), &got, nullptr) && got > 0) {
+    }
+    // (the same handle then kept for the reads to come: the file opened once; its position is no matter, every read
+    // says where)
+    AcquireSRWLockExclusive(&rp_kept_lock);
+    bool kept = rp_kept_put(p, h);
+    ReleaseSRWLockExclusive(&rp_kept_lock);
+    if (!kept) CloseHandle(h);
+  }
+}
+
+// The file at `path` opened off the window's thread, kept for the reads to come, and read through once there so its
 // bytes are in the system's cache when its frames are read (a frame read cold from the disk took 12 to 24 ms here).
 extern "C" void rp_play_warm(moonbit_bytes_t path) {
   std::string p((const char *)path);
@@ -116,25 +152,38 @@ extern "C" void rp_play_warm(moonbit_bytes_t path) {
   if (!there) {
     rp_warmed.push_back(p);
     if (rp_warmed.size() > 64) rp_warmed.erase(rp_warmed.begin());
+    rp_warm_todo.push_back(p);
+    // (at most a few waiting: the oldest let go)
+    if (rp_warm_todo.size() > 3) rp_warm_todo.erase(rp_warm_todo.begin());
+    InterlockedIncrement(&rp_warm_gen);
+    if (!rp_warm_started) {
+      rp_warm_started = true;
+      try {
+        std::thread(rp_warm_loop).detach();
+      } catch (...) {
+        rp_warm_started = false;
+        rp_warm_todo.clear();
+      }
+    }
+    WakeConditionVariable(&rp_warm_wake);
   }
   ReleaseSRWLockExclusive(&rp_kept_lock);
-  if (there) return;
-  std::thread([p]() {
-    HANDLE h = rp_play_open(p.c_str());
-    if (h == INVALID_HANDLE_VALUE) return;
-    AcquireSRWLockExclusive(&rp_kept_lock);
-    bool kept = rp_kept_put(p, h);
-    ReleaseSRWLockExclusive(&rp_kept_lock);
-    if (!kept) CloseHandle(h);
-    // (read through by a handle of its own: a kept one may be let go meanwhile)
-    HANDLE r = rp_play_open(p.c_str());
-    if (r == INVALID_HANDLE_VALUE) return;
-    std::vector<uint8_t> buf(1 << 20);
-    DWORD got = 0;
-    while (ReadFile(r, buf.data(), (DWORD)buf.size(), &got, nullptr) && got > 0) {
-    }
-    CloseHandle(r);
-  }).detach();
+}
+
+// Every file kept open let go of (the window put away, rp_play_release): a segment the recorder has let go of since
+// is gone from the disk only once nothing holds it; what is warmed is warmed again when asked.
+extern "C" void rp_play_release(void) {
+  AcquireSRWLockExclusive(&rp_kept_lock);
+  for (auto &k : rp_kept) {
+    if (k.h) CloseHandle(k.h);
+    k.h = nullptr;
+    k.path.clear();
+    k.used = 0;
+  }
+  rp_warmed.clear();
+  rp_warm_todo.clear();
+  InterlockedIncrement(&rp_warm_gen);
+  ReleaseSRWLockExclusive(&rp_kept_lock);
 }
 
 // ---- sound ----
@@ -160,9 +209,15 @@ static RpAac *rp_aac_of(int32_t h) {
 extern "C" int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channels) {
   int32_t n = (int32_t)Moonbit_array_length(asc);
   if (n <= 0 || rate <= 0 || channels <= 0) return 0;
-  HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  (void)co;
-  if (FAILED(MFStartup(MF_VERSION, MFSTARTUP_LITE))) return 0;
+  // (COM and Media Foundation started once on the window's thread, kept for its life: started again at each decoder
+  // made, their counts only grew)
+  static int started = 0;
+  if (started == 0) {
+    HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    (void)co;
+    started = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE)) ? 1 : -1;
+  }
+  if (started < 0) return 0;
   IMFTransform *mft = nullptr;
   if (FAILED(CoCreateInstance(CLSID_CMSAACDecMFT, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&mft)))) return 0;
   IMFMediaType *in = nullptr, *out = nullptr;
@@ -209,6 +264,13 @@ extern "C" int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channe
   a->channels = channels;
   a->own_samples = (info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES)) != 0;
   a->out_size = info.cbSize > 0 ? info.cbSize : 1024 * 8 * 2;
+  // (a place one closed left taken again: the table no longer grows by one each decoder made)
+  for (size_t i = 0; i < rp_aacs.size(); i++) {
+    if (!rp_aacs[i]) {
+      rp_aacs[i] = a;
+      return (int32_t)i + 1;
+    }
+  }
   rp_aacs.push_back(a);
   return (int32_t)rp_aacs.size();
 }
@@ -327,6 +389,19 @@ extern "C" void rp_aac_reset(int32_t h) {
   a->mft->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
   a->phase = 0;
   a->have_last = false;
+}
+
+// Every sound decoder let go of (the window hidden: rp_resident_proc). Each handle the app holds is then of none (its
+// decodes give nothing and its close does nothing); the app makes a new one as it next sounds (Deck::rest, as it shows).
+extern "C" void rp_aac_release_all(void) {
+  for (auto &a : rp_aacs) {
+    if (!a) continue;
+    a->mft->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+    a->mft->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+    a->mft->Release();
+    delete a;
+    a = nullptr;
+  }
 }
 
 extern "C" void rp_aac_close(int32_t h) {

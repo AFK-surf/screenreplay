@@ -66,6 +66,8 @@ fn load_clips() -> Unit {
     if name != "" { clip_files.push(name.to_owned()) }
   }
   clip_files.sort_by(fn(a, b) { b.compare(a) })
+  // (what was kept of clips gone from the folder let go of: kept_images.mbt)
+  clips_gone_forget(clips_dir(), clip_files)
   library_page.set(@cmp.minimum(library_page.untracked(), @cmp.maximum(0, (clip_files.length() - 1) / clips_per_page)))
 }
 
@@ -381,6 +383,7 @@ fn clip_frame_key(path : String, at : Double) -> String {
       return ""
     }
     @ui.add_image(key, jpeg)
+    hover_images.keep(key)
   }
   key
 }

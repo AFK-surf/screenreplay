@@ -50,6 +50,7 @@ fn clip_thumb(path : String) -> String {
   let bmp = rp_clip_thumb(cstr(path), cstr(identity), if lead > 0.0 { lead + 39.0 } else { 0.0 })
   if bmp.length() > 1 {
     @ui.add_image(key, bmp)
+    clip_thumb_kept(path, key)
     key
   } else if bmp.length() == 1 && bmp[0] == 1 {
     "!"

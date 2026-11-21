@@ -194,10 +194,15 @@ internal sealed class RecorderApp : IDisposable
         window.PanelChose += Chosen;
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")))
         {
-            var warm = 0u;
-            warm = (uint)window.Every(5000, () =>
+            warmTimer = window.Every(5000, () =>
             {
-                window.Stop(warm);
+                window.Stop(warmTimer);
+                warmTimer = 0;
+                if (exiting)
+                {
+                    return;
+                }
+
                 panel.Warm();
                 notes.Warm();
             });
@@ -226,18 +231,28 @@ internal sealed class RecorderApp : IDisposable
         window.SessionChanged += OnSessionChanged;
         window.PowerChanged += OnPowerChanged;
         // (the tray's panel started anew 3 s after the last of a run of such changes, once they have settled)
-        var renew = 0u;
         void RenewPanelSoon(string why)
         {
-            if (renew != 0)
+            if (renewTimer != 0)
             {
-                window.Stop(renew);
+                window.Stop(renewTimer);
+                renewTimer = 0;
             }
 
-            renew = (uint)window.Every(3000, () =>
+            if (exiting)
             {
-                window.Stop(renew);
-                renew = 0;
+                return;
+            }
+
+            renewTimer = window.Every(3000, () =>
+            {
+                window.Stop(renewTimer);
+                renewTimer = 0;
+                if (exiting)
+                {
+                    return;
+                }
+
                 panel.Renew(why);
                 notes.Renew();
             });
@@ -274,14 +289,24 @@ internal sealed class RecorderApp : IDisposable
         asks.Created += asked;
         asks.Changed += asked;
         _ = CheckAsync();
-        // (the replay window ready in the background, so that opening it is only showing it)
-        if (Process.GetProcessesByName(Path.GetFileNameWithoutExtension(paths.ReplayExe)).Length == 0)
+        // (the replay window ready in the background, so that opening it is only showing it: unless one of this
+        // program's runs already (a recorder started again while its window stayed), found by its program file, not by
+        // its name alone (another buffer's test windows, the tray's panel and the note card have that name too))
+        if (FindReplay() is null)
         {
             StartReplay(hidden: true);
         }
     }
 
     private readonly FileSystemWatcher asks;
+
+    /// <summary>The timers that start the tray's panel and the note card (5 s after starting) and start them anew (3 s
+    /// after the displays changed): stopped as the recorder quits, so neither is started again behind it.</summary>
+    private nuint warmTimer;
+    private nuint renewTimer;
+
+    /// <summary>The replay window this recorder started (the resident one), while it runs.</summary>
+    private Process? replay;
 
     /// <summary>The session's state changed (WM_WTSSESSION_CHANGE's code, as SystemEvents.SessionSwitch's reason was).</summary>
     private void OnSessionChanged(int code)
@@ -402,6 +427,11 @@ internal sealed class RecorderApp : IDisposable
 
     private async Task CheckOnceAsync()
     {
+        if (exiting)
+        {
+            return;
+        }
+
         var quitRequest = Path.Combine(paths.Root, "quit.request");
         if (File.Exists(quitRequest))
         {
@@ -1507,57 +1537,72 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    private bool IsReplayWindowVisible()
+    /// <summary>The replay window's process (of this recorder's program file) and its top window titled ScreenReplay,
+    /// shown or hidden; null where none runs. The one this recorder started first, else one found by its program file
+    /// (a window kept from a recorder before this one); never the tray's panel nor the note card, which are the same
+    /// program (a warm note card was taken for the window and brought to the front, its card empty).</summary>
+    private (int Pid, IntPtr Window)? FindReplay()
     {
+        try
+        {
+            if (replay is { HasExited: false } mine)
+            {
+                var hwnd = ForegroundApp.TopWindowOf(mine.Id);
+                if (hwnd != IntPtr.Zero)
+                {
+                    return (mine.Id, hwnd);
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+
         foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(paths.ReplayExe)))
         {
             using (process)
             {
                 try
                 {
-                    if (!panel.Owns(process.Id) &&
-                        string.Equals(process.MainModule?.FileName, paths.ReplayExe, StringComparison.OrdinalIgnoreCase))
+                    if (panel.Owns(process.Id) || notes.Owns(process.Id) ||
+                        !string.Equals(process.MainModule?.FileName, paths.ReplayExe, StringComparison.OrdinalIgnoreCase))
                     {
-                        var hwnd = process.MainWindowHandle != IntPtr.Zero ? process.MainWindowHandle : ForegroundApp.TopWindowOf(process.Id);
-                        if (hwnd != IntPtr.Zero && ForegroundApp.IsReplayShown(hwnd))
-                        {
-                            return true;
-                        }
+                        continue;
                     }
-                }
-                catch (Exception) { }
-            }
-        }
-        return false;
-    }
 
-    private void OpenReplay(bool showSettings = false)
-    {
-        if (showSettings)
-        {
-            File.WriteAllText(Path.Combine(paths.Root, "settings.request"), "settings");
-        }
-        var running = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(paths.ReplayExe));
-        foreach (var process in running)
-        {
-            using (process)
-            {
-                try
-                {
-                    if (!panel.Owns(process.Id) && string.Equals(process.MainModule?.FileName, paths.ReplayExe, StringComparison.OrdinalIgnoreCase))
+                    // (the resident window is hidden while closed: its handle found among the process's windows)
+                    var hwnd = process.MainWindowHandle != IntPtr.Zero ? process.MainWindowHandle : ForegroundApp.TopWindowOf(process.Id);
+                    if (hwnd != IntPtr.Zero)
                     {
-                        // (the resident window is hidden while closed: its handle found among the process's windows)
-                        var window = process.MainWindowHandle != IntPtr.Zero ? process.MainWindowHandle : ForegroundApp.TopWindowOf(process.Id);
-                        if (window != IntPtr.Zero)
-                        {
-                            ForegroundApp.Bring(window);
-                            return;
-                        }
+                        return (process.Id, hwnd);
                     }
                 }
                 catch (System.ComponentModel.Win32Exception) { }
                 catch (InvalidOperationException) { }
             }
+        }
+
+        return null;
+    }
+
+    private bool IsReplayWindowVisible() => FindReplay() is { } found && ForegroundApp.IsReplayShown(found.Window);
+
+    private void OpenReplay(bool showSettings = false)
+    {
+        if (exiting)
+        {
+            return;
+        }
+
+        if (showSettings)
+        {
+            File.WriteAllText(Path.Combine(paths.Root, "settings.request"), "settings");
+        }
+
+        if (FindReplay() is { } found)
+        {
+            ForegroundApp.Bring(found.Window);
+            return;
         }
 
         StartReplay(hidden: false);
@@ -1579,7 +1624,23 @@ internal sealed class RecorderApp : IDisposable
         info.Environment["REPLAY_RESIDENT"] = "1";
         try
         {
-            Process.Start(info);
+            var started = Process.Start(info);
+            if (started is not null && !ChildJob.Hold(started))
+            {
+                Log("replay window: not bound to the recorder's life");
+            }
+
+            // (kept as this recorder's window unless its own still runs: one started while that one has no window yet
+            // hands itself to it and ends)
+            if (replay is { HasExited: false })
+            {
+                started?.Dispose();
+            }
+            else
+            {
+                replay?.Dispose();
+                replay = started;
+            }
         }
         catch (Exception ex)
         {
@@ -1619,6 +1680,21 @@ internal sealed class RecorderApp : IDisposable
 
         exiting = true;
         window.Stop(watch);
+        // (nothing started again behind it while it stops the recorder below: the panel's and the card's timers, the
+        // folder's news)
+        if (warmTimer != 0)
+        {
+            window.Stop(warmTimer);
+            warmTimer = 0;
+        }
+
+        if (renewTimer != 0)
+        {
+            window.Stop(renewTimer);
+            renewTimer = 0;
+        }
+
+        asks.EnableRaisingEvents = false;
         // (the resident replay window goes with it)
         foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(paths.ReplayExe)))
         {
@@ -1641,6 +1717,7 @@ internal sealed class RecorderApp : IDisposable
         if (recorder is not null)
         {
             await recorder.DisposeAsync();
+            recorder = null;
         }
 
         Log("quit");
@@ -1653,9 +1730,34 @@ internal sealed class RecorderApp : IDisposable
     public void Dispose()
     {
         window.SessionChanged -= OnSessionChanged;
+        // (also where the loop ended without ExitAsync: what it started and holds let go of all the same)
+        exiting = true;
+        panel.Dispose();
+        notes.Dispose();
+        if (recorder is not null)
+        {
+            try
+            {
+                recorder.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (Exception)
+            {
+            }
+
+            recorder = null;
+        }
+
+        replay?.Dispose();
+        replay = null;
         updater.Dispose();
         windows.Dispose();
         tray.Dispose();
+        foreach (var icon in trayIcons.Values)
+        {
+            Tray.FreeIcon(icon);
+        }
+
+        trayIcons.Clear();
         asks.Dispose();
         input.Dispose();
         controllers.Dispose();

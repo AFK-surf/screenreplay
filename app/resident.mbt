@@ -47,6 +47,50 @@ fn watch_turns(root : @view.View) -> Unit {
 }
 
 ///|
+extern "C" fn rp_play_release() -> Unit = "rp_play_release"
+
+///|
+extern "C" fn rp_thumb_release() -> Unit = "rp_thumb_release"
+
+///|
+extern "C" fn rp_frame_release() -> Unit = "rp_frame_release"
+
+///|
+/// Started hidden and not shown yet: the folder not read, no picture decoded, the saved clips not listed till it
+/// first shows (as_opened does it then), so a window kept for later holds no decoder, no index and no files (before,
+/// it read and decoded all of it at once, 200 MB and 100 MB of the GPU's memory, for a window that may not be opened
+/// for hours). The root its first show starts the folder's reading in.
+let first_show_waits : Ref[@view.View?] = Ref(None)
+
+///|
+/// Whether it was started hidden and has not shown since.
+fn hidden_unshown() -> Bool {
+  resident() && @ui.env("REPLAY_HIDDEN") == "1" && rp_window_shown() == 0
+}
+
+///|
+/// What it holds for playing let go of, kept as it shows: the sound's decoder, the files kept open, the thumbnail
+/// worker's device and file, the copy's device, the tracks read, the pictures made for previews (each made again
+/// when next asked for; the picture's stream stays, so showing it again is at once).
+fn let_go_while_hidden() -> Unit {
+  ntrace("put away: what it holds let go of")
+  match native_made.val {
+    Some(d) => d.rest()
+    None => ()
+  }
+  rp_play_release()
+  rp_thumb_release()
+  rp_frame_release()
+  tracks_read.clear()
+  clip_history_free()
+  hover_images.forget_all()
+  // (a crop being exported keeps its dialog, and its preview)
+  if export_out.untracked() == "" {
+    crop_images.forget_all()
+  }
+}
+
+///|
 /// Hidden: playing stopped, what was open put away.
 fn put_away() -> Unit {
   set_playing(false)
@@ -67,11 +111,21 @@ fn put_away() -> Unit {
   if full_screen.untracked() {
     set_full_screen(false)
   }
+  let_go_while_hidden()
 }
 
 ///|
 /// Shown: as a window just opened.
 fn as_opened() -> Unit {
+  // (started hidden, shown for the first time: the folder read every 3 s from now, the saved clips listed)
+  match first_show_waits.val {
+    Some(root) => {
+      first_show_waits.val = None
+      again(root, 3000.0, fn() { refresh(root, false) })
+      load_clips()
+    }
+    None => ()
+  }
   ask_flush()
   // (the apps' names read again: the recorder may have found a better one meanwhile)
   app_names.clear()

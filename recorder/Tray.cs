@@ -305,6 +305,19 @@ internal sealed class Tray : IDisposable
         return icon != IntPtr.Zero ? icon : LoadIconW(IntPtr.Zero, 32512);
     }
 
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr icon);
+
+    /// <summary>An icon LoadIcon gave let go of (the system's own, where it fell back to it, is shared: DestroyIcon
+    /// leaves that one be).</summary>
+    public static void FreeIcon(IntPtr icon)
+    {
+        if (icon != IntPtr.Zero)
+        {
+            DestroyIcon(icon);
+        }
+    }
+
     public void Dispose()
     {
         window.TrayMessage -= OnMessage;
