@@ -338,6 +338,30 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
+    /// <summary>Silence written up to <paramref name="until"/> (frames from the segment's start): the sound waited for
+    /// too long, so that the segment's sound still lasts as long as its picture.</summary>
+    public void PadAudio(long until)
+    {
+        if (audioStream < 0)
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            var chunk = new float[AudioRate / 5 * 2];
+            while (!finished && audioWritten < until)
+            {
+                var n = (int)Math.Min(until - audioWritten, AudioRate / 5);
+                WritePcm(chunk.AsSpan(0, n * 2), n);
+                for (var k = 0; k < n; k++)
+                {
+                    Level(null, 0, k);
+                }
+            }
+        }
+    }
+
     private void Level(IReadOnlyList<float[]>? each, int offset, int k)
     {
         if (each is not null)

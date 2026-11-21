@@ -763,6 +763,21 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     continue;
                 }
 
+                if (audioSources > 0 && (mixer?.Emitted ?? 0) < open.AudioEnd)
+                {
+                    // (the sound's thread held up (a system device going away as the screen turned off blocked it a
+                    // minute, 2026-11-21): the rest of its sound silence, not a track 20 s shorter than its picture)
+                    try
+                    {
+                        open.Writer.PadAudio(open.AudioEnd - open.AudioStart);
+                        Report("info", "audio.padded", $"the sound was {(open.AudioEnd - Math.Max(open.AudioStart, mixer?.Emitted ?? 0)) / AudioMixer.Rate} s late: silence in its place");
+                    }
+                    catch (Exception ex)
+                    {
+                        Report("warning", "audio.writeFailed", ex.Message);
+                    }
+                }
+
                 segments.RemoveAt(i--);
                 closing.RemoveAll(t => t.IsCompleted);
                 closing.Add(Task.Run(() => Complete(open)));

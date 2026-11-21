@@ -1074,6 +1074,21 @@ internal sealed class RecorderApp : IDisposable
             return;
         }
 
+        if (!Replay.Recording.DisplayMemory.ScreenIsOn)
+        {
+            // (the window left open with the screen off asks every few seconds and nobody sees it: 2026-11-21 a
+            // night of 8 s segments, 420 an hour, each starting on a 4K keyframe; 30 s ones while the screen is off)
+            try
+            {
+                File.Delete(request);
+            }
+            catch (IOException)
+            {
+            }
+
+            return;
+        }
+
         try
         {
             File.Delete(request);

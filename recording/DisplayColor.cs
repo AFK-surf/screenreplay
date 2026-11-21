@@ -240,6 +240,9 @@ public static class DisplayMemory
         Interlocked.Exchange(ref onSince, !on ? -1 : first ? Math.Max(1, Environment.TickCount64 - 5000) : Environment.TickCount64);
     }
 
+    /// <summary>Whether the console's screen is on (as last told; on until told otherwise).</summary>
+    public static bool ScreenIsOn => Interlocked.Read(ref onSince) >= 0;
+
     /// <summary>Whether what a monitor says of its white and peak is believed: not while the screen is off, nor in the
     /// 5 s after it comes on (20:19:49 on 2026-11-16 read 80 nits, then 276 3 s later).</summary>
     internal static bool Trusted
