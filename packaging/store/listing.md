@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.17):** Polished UI contrast, keyboard focus rings, and Reduce Motion across light and dark modes (WCAG AA). Hardened the Save clip dialog during encoding (locked options, Esc to cancel, footer Cancel button, clickable save folder) and replaced instant right-click marker deletion with a lightweight context menu. Fixed clip-mode Space playback, clip-body drag dead-zone, and overview resize handle alignment. Added a sticky Settings header bar, scrollable Onboarding and App Filter lists, portrait-clip player chrome width, dynamic tray height with live preference sync, fixed save-card timers and warning icons, added Ctrl+, for Settings, and updated the Shortcuts list and bilingual copy.
+**What's new in this version (0.1.18):** Raised D3D11 capture/encode GPU thread priority and upgraded the WGC capture frame pool to 4 buffers with latest-frame draining for smoother recording when 4K games peg the GPU. Patched lossless quick-save and H.265 exports to hvc1 in place so clips play directly in QuickTime, Safari and iOS. Sped up hardware AV1 re-encoding, lowered the save-card breathing indicator to 10 Hz on high-refresh displays, and automatically refresh cached timeline app icons when an application updates.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.17）：** 全面优化深浅色界面对比度、键盘焦点环与减少动态效果；加固保存片段弹窗编码态（锁定参数、Esc 取消导出、底部取消键与可点击保存路径），将时间轴标记右键改为轻菜单防误删并修复「删除全部录像」状态复位；对齐剪辑模式 Space 播放、区间正文 4 pt 拖动死区与总览手柄命中区；设置页改用固定顶栏，首次授权与应用过滤支持滚动，竖屏片段播放器保持最小控制栏宽；优化下拉菜单勾选样式、托盘面板自适应高度与跨进程设置同步、保存卡片计时器与警告图标，支持 Ctrl+, 打开设置并补全快捷键清单与中英文案细节。
+**此版本新增内容（0.1.18）：** 提升 D3D11 采集/编码设备 GPU 线程优先级并将 WGC 帧池升级为 4 缓冲排空，减少 4K 游戏 GPU 满载时的录屏掉帧；H.265 导出与无损秒存（Ctrl+Alt+S / 原样保存）原地写入 hvc1 标记，直接兼容 iPhone、Mac QuickTime 与 Safari 播放；优化硬件 AV1 重编码导出速度与线程计时精度；保存卡片呼吸提示降为 10 Hz 低功耗刷新；时间轴应用图标缓存随程序更新自动刷新。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

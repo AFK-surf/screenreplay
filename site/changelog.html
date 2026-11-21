@@ -51,6 +51,15 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.18</h2><span>2026-11-21</span></div>
+      <ul>
+        <li data-zh="录屏稳定性与高负载稳帧：提升 D3D11 采集/编码设备 GPU 线程优先级，避免 4K 游戏满载时抢占录屏队列；WGC 采集帧池升级至 4 缓冲并在回调中排空旧帧，降低高刷屏掉帧风险。" data-en="Capture stability under heavy GPU load: raised D3D11 capture/encode GPU thread priority so 4K games pegging the GPU do not starve recording, and upgraded the WGC capture frame pool to 4 buffers with latest-frame draining.">录屏稳定性与高负载稳帧：提升 D3D11 采集/编码设备 GPU 线程优先级，避免 4K 游戏满载时抢占录屏队列；WGC 采集帧池升级至 4 缓冲并在回调中排空旧帧，降低高刷屏掉帧风险。</li>
+        <li data-zh="跨设备兼容与导出提速：H.265 导出及无损秒存（Ctrl+Alt+S / 原样保存）自动写入 hvc1 标记，直接兼容 iPhone、Mac QuickTime 与 Safari 播放；AV1 重编码导出改用更快编码档位并提升导出线程时钟精度。" data-en="Apple compatibility &amp; faster AV1 export: lossless quick-save and H.265 exports now patch the MP4 sample entry to hvc1 in place so clips play directly in QuickTime, Safari and iOS; sped up hardware AV1 re-encoding and tightened export thread timer precision.">跨设备兼容与导出提速：H.265 导出及无损秒存（Ctrl+Alt+S / 原样保存）自动写入 hvc1 标记，直接兼容 iPhone、Mac QuickTime 与 Safari 播放；AV1 重编码导出改用更快编码档位并提升导出线程时钟精度。</li>
+        <li data-zh="功耗与细节：保存卡片呼吸提示降为 10 Hz 低功耗频率（减少 240 Hz 高刷屏唤醒）；应用图标缓存按程序修改时间自动刷新，软件更新 logo 后时间轴自动同步新图标。" data-en="Efficiency &amp; polish: lowered the save-card breathing indicator to 10 Hz to avoid high-refresh wakeups, and automatically refresh cached timeline app icons when an application's binary is updated.">功耗与细节：保存卡片呼吸提示降为 10 Hz 低功耗频率（减少 240 Hz 高刷屏唤醒）；应用图标缓存按程序修改时间自动刷新，软件更新 logo 后时间轴自动同步新图标。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.17</h2><span>2026-11-21</span></div>
       <ul>
         <li data-zh="界面对比度与键盘焦点：微调深浅色辅助文字、警告/危险操作色与关闭态开关边框，正文与控件边界达到 WCAG AA 标准；补齐按钮、开关、分段器与菜单的键盘焦点环（仅在键盘导航时显示，不干扰鼠标操作），完善减少动态效果。" data-en="Contrast &amp; keyboard focus: tuned light/dark subtle text, warning/danger inks, and off-state switch/checkbox borders to meet WCAG AA contrast; added crisp keyboard-only focus rings across buttons, switches, segmented controls, menus and cards, and tightened Reduce Motion behavior.">界面对比度与键盘焦点：微调深浅色辅助文字、警告/危险操作色与关闭态开关边框，正文与控件边界达到 WCAG AA 标准；补齐按钮、开关、分段器与菜单的键盘焦点环（仅在键盘导航时显示，不干扰鼠标操作），完善减少动态效果。</li>
