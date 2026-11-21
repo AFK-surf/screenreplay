@@ -51,6 +51,15 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.17</h2><span>2026-11-21</span></div>
+      <ul>
+        <li data-zh="界面对比度与键盘焦点：微调深浅色辅助文字、警告/危险操作色与关闭态开关边框，正文与控件边界达到 WCAG AA 标准；补齐按钮、开关、分段器与菜单的键盘焦点环（仅在键盘导航时显示，不干扰鼠标操作），完善减少动态效果。" data-en="Contrast &amp; keyboard focus: tuned light/dark subtle text, warning/danger inks, and off-state switch/checkbox borders to meet WCAG AA contrast; added crisp keyboard-only focus rings across buttons, switches, segmented controls, menus and cards, and tightened Reduce Motion behavior.">界面对比度与键盘焦点：微调深浅色辅助文字、警告/危险操作色与关闭态开关边框，正文与控件边界达到 WCAG AA 标准；补齐按钮、开关、分段器与菜单的键盘焦点环（仅在键盘导航时显示，不干扰鼠标操作），完善减少动态效果。</li>
+        <li data-zh="安全与交互细节：保存片段弹窗编码期间锁定参数、防重入、支持 Esc 取消导出并在底部补齐取消按钮与可点击保存路径；设置页「删除全部录像」状态自动复位，时间轴标记右键改为轻菜单防误删；修复剪辑模式 Space 播放区间一致、正文拖动 4 pt 死区及缩略总览手柄命中偏差。" data-en="Modality &amp; timeline ergonomics: locked export controls while encoding, prevented Enter re-entry, aligned Shift+Enter and Esc cancel inside the Save dialog, added a footer Cancel button and clickable destination path; fixed Delete all recordings state reset and replaced instant right-click marker deletion with a lightweight menu; aligned clip-mode Space playback, clip-body 4 pt drag dead-zone, and overview resize handle hit areas.">安全与交互细节：保存片段弹窗编码期间锁定参数、防重入、支持 Esc 取消导出并在底部补齐取消按钮与可点击保存路径；设置页「删除全部录像」状态自动复位，时间轴标记右键改为轻菜单防误删；修复剪辑模式 Space 播放区间一致、正文拖动 4 pt 死区及缩略总览手柄命中偏差。</li>
+        <li data-zh="布局、伴生窗与快捷键：设置页改用固定顶栏防滚动穿过关闭键，首次授权与应用过滤支持滚动防窄屏溢出，竖屏/窄裁剪片段在素材库播放器保持最小控制栏宽；下拉菜单选中勾移出键帽样式；托盘面板自适应高度、补退出分隔线并支持跨进程实时同步主题/语言/秒数；保存卡片修掉计时器冲突与警告图标，支持 Ctrl+, 打开设置并补全快捷键清单与中英文案打磨。" data-en="Layout, companion surfaces &amp; shortcuts: added a sticky header bar in Settings, scrollable containers for Onboarding and App Filter, and a minimum chrome width for portrait clips in the Library player; moved menu checkmarks out of shortcut keycaps; gave the tray panel dynamic height, a Quit divider, and live cross-process preference sync; fixed save-card timer collisions and warning icons, added Ctrl+, for Settings, and polished bilingual copy and the Shortcuts list.">布局、伴生窗与快捷键：设置页改用固定顶栏防滚动穿过关闭键，首次授权与应用过滤支持滚动防窄屏溢出，竖屏/窄裁剪片段在素材库播放器保持最小控制栏宽；下拉菜单选中勾移出键帽样式；托盘面板自适应高度、补退出分隔线并支持跨进程实时同步主题/语言/秒数；保存卡片修掉计时器冲突与警告图标，支持 Ctrl+, 打开设置并补全快捷键清单与中英文案打磨。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.16</h2><span>2026-11-21</span></div>
       <ul>
         <li data-zh="回放声音与录制帧率：修复蓝牙耳机等高延迟设备回放约 0.5 秒后断声，并支持切换默认输出设备或耳机重连后自动重建音频引擎；修复 240 Hz 屏上 60 fps 录制因采样间隔拍频掉到 ~49 fps 的问题，持续画面稳定跑满 60 fps。" data-en="Playback audio &amp; 60 fps capture: fixed playback audio cutting out after ~0.5 s on high-latency Bluetooth headsets and automatically rebuild Windows XAudio2 output after device switches or reconnects; fixed 60 fps capture dropping to ~48–50 fps on 240 Hz displays so motion stays at a steady 60 fps.">回放声音与录制帧率：修复蓝牙耳机等高延迟设备回放约 0.5 秒后断声，并支持切换默认输出设备或耳机重连后自动重建音频引擎；修复 240 Hz 屏上 60 fps 录制因采样间隔拍频掉到 ~49 fps 的问题，持续画面稳定跑满 60 fps。</li>

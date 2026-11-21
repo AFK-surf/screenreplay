@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.16):** Fixed playback audio cutting out after ~0.5 s on high-latency Bluetooth headsets and automatically rebuild Windows audio output after device switches or reconnects. Fixed 60 fps recording dropping to ~48–50 fps on 240 Hz displays. Much lower idle RAM, VRAM, handle and thread usage across the resident replay window, tray panel and save card, with zero orphan child processes on exit and no white flash on first open. Eliminated UI freezes during GIF size estimation and library loading, fixed PNG clipboard pasting and the vertical seam on the play triangle, and added an animated Sponsor card in Settings → About.
+**What's new in this version (0.1.17):** Polished UI contrast, keyboard focus rings, and Reduce Motion across light and dark modes (WCAG AA). Hardened the Save clip dialog during encoding (locked options, Esc to cancel, footer Cancel button, clickable save folder) and replaced instant right-click marker deletion with a lightweight context menu. Fixed clip-mode Space playback, clip-body drag dead-zone, and overview resize handle alignment. Added a sticky Settings header bar, scrollable Onboarding and App Filter lists, portrait-clip player chrome width, dynamic tray height with live preference sync, fixed save-card timers and warning icons, added Ctrl+, for Settings, and updated the Shortcuts list and bilingual copy.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.16）：** 修复蓝牙等高延迟音频设备回放约 0.5 秒后断声，并支持切换默认音频输出或蓝牙断连重连后自动恢复出声；修复 240 Hz 高刷屏上 60 fps 录制掉帧到 ~49 fps 的问题；全面优化常驻回放窗、托盘面板与保存卡片的内存/显存/句柄/线程占用与孤儿进程防漏，消除首次激活半秒白屏；消除 GIF 估算与素材库加载等 UI 卡顿，修复剪贴板 PNG 粘贴与播放箭头竖缝，并在设置 → 关于页升级了带微交互的赞助作者卡片。
+**此版本新增内容（0.1.17）：** 全面优化深浅色界面对比度、键盘焦点环与减少动态效果；加固保存片段弹窗编码态（锁定参数、Esc 取消导出、底部取消键与可点击保存路径），将时间轴标记右键改为轻菜单防误删并修复「删除全部录像」状态复位；对齐剪辑模式 Space 播放、区间正文 4 pt 拖动死区与总览手柄命中区；设置页改用固定顶栏，首次授权与应用过滤支持滚动，竖屏片段播放器保持最小控制栏宽；优化下拉菜单勾选样式、托盘面板自适应高度与跨进程设置同步、保存卡片计时器与警告图标，支持 Ctrl+, 打开设置并补全快捷键清单与中英文案细节。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 
