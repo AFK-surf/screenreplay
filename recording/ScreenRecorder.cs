@@ -273,6 +273,17 @@ public sealed class ScreenRecorder : IAsyncDisposable
     /// <summary>The display's settings changed (WM_DISPLAYCHANGE): its HDR looked at again at once, not at the next 2 s.</summary>
     public void DisplayChanged() => displayChanged = true;
 
+    private volatile string? renewAsked;
+    private long changedAt;
+
+    /// <summary>A new capture started beside the one in use (the screen woke: a capture made before the screen went
+    /// off gave no new frame after it came on, 2026-11-21, ten minutes of a still picture over the apps in use).</summary>
+    public void RenewCapture(string why) => renewAsked = why;
+
+    /// <summary>Something on the screen surely changed (another window came to the front): the capture is expected to
+    /// give a frame soon after.</summary>
+    public void ScreenChanged() => Volatile.Write(ref changedAt, Native.NowHns());
+
     /// <summary>
     /// Whether the display is in HDR, looked at every 2 s and on a display change: the capture taken as FP16 while it
     /// is. When that changes a new capture is started beside the one in use and handed to the clock once its first
@@ -292,12 +303,40 @@ public sealed class ScreenRecorder : IAsyncDisposable
             var published = capture;
             ScreenCapture? pending = null;
             long pendingSince = 0;
+            // (the capture's newest frame as last seen, and when it came; a new capture made at most each 30 s for a
+            // stall: input or another window in front 2 s ago and still no frame since)
+            const long Stall = 20_000_000, RenewEvery = 300_000_000;
+            long lastFrames = published.Frames, lastFrameAt = Native.NowHns(), lastRenew = long.MinValue / 2;
+            var stallTest = Environment.GetEnvironmentVariable("REPLAY_TEST_STALL") is not null;
             try
             {
                 while (!stopAsked)
                 {
                     Thread.Sleep(100);
                     var now = Native.NowHns();
+                    if (published.Frames != lastFrames)
+                    {
+                        lastFrames = published.Frames;
+                        lastFrameAt = now;
+                    }
+
+                    string? renew = null;
+                    if (renewAsked is { } asked && DisplayMemory.Trusted)
+                    {
+                        renewAsked = null;
+                        renew = asked;
+                    }
+                    else if (now - lastRenew >= RenewEvery && (!primary.IsWindow || stallTest))
+                    {
+                        // (a monitor only: input and the window in front say nothing of whether a window recorded
+                        // changed; tests only: REPLAY_TEST_STALL, the screen taken as changing all the time)
+                        var poked = stallTest ? now - Stall : Math.Max(options.Activity?.LastHns ?? 0, Volatile.Read(ref changedAt));
+                        if (poked > lastFrameAt && now - poked >= Stall)
+                        {
+                            renew = $"no new frame in {(now - lastFrameAt) / 10_000_000} s though the input or the window in front changed {(now - poked) / 10_000_000} s ago";
+                        }
+                    }
+
                     var look = displayChanged || now - lastDisplay >= DisplayEvery;
                     if (look)
                     {
@@ -326,7 +365,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
                             Interlocked.Exchange(ref ready, pending)?.Dispose();
                             intendedHdr = pending.Hdr;
                             published = pending;
-                            Report("info", "capture.source", $"{pending.Width}x{pending.Height}" + (pending.Hdr ? " FP16" : "") + $", after {(now - pendingSince) / 10_000} ms");
+                            lastFrames = published.Frames;
+                            lastFrameAt = now;
+                            Report("info", "capture.source",$"{pending.Width}x{pending.Height}" + (pending.Hdr ? " FP16" : "") + $", after {(now - pendingSince) / 10_000} ms");
                             pending = null;
                         }
                         else if (now - pendingSince > GiveUp)
@@ -337,7 +378,13 @@ public sealed class ScreenRecorder : IAsyncDisposable
                         }
                     }
 
-                    if (pending is null && hdr != intendedHdr && look)
+                    if (pending is null && renew is not null)
+                    {
+                        lastRenew = now;
+                        Report("info", "capture.renew", renew);
+                    }
+
+                    if (pending is null && ((hdr != intendedHdr && look) || renew is not null))
                     {
                         try
                         {
@@ -839,6 +886,8 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
         var sources = new AudioSource?[kinds.Count];
         var retryAt = new long[kinds.Count];
+        // (a source lost or not opened: said again once it is open, so the replay window's warning goes)
+        var troubled = new bool[kinds.Count];
         // (the frames are stamped with the moment they were composed, the sound with the moment it was played: one clock)
         var local = new AudioMixer(kinds.Count, t0, 0);
         mixer = local;
@@ -854,6 +903,15 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     {
                         sources[i] = OpenSource(kinds[i]);
                         retryAt[i] = now + 30_000_000;
+                        if (sources[i] is null)
+                        {
+                            troubled[i] = true;
+                        }
+                        else if (troubled[i])
+                        {
+                            troubled[i] = false;
+                            Report("info", Code(kinds[i]) + "Back", "the sound is recorded again");
+                        }
                     }
 
                     if (sources[i] is not { } source)
@@ -869,6 +927,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     catch (Exception ex)
                     {
                         Report("warning", Code(kinds[i]) + "Lost", ex.Message);
+                        troubled[i] = true;
                         source.Dispose();
                         sources[i] = null;
                         retryAt[i] = now + 10_000_000;

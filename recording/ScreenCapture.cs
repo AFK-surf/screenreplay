@@ -105,7 +105,20 @@ internal sealed class ScreenCapture : IDisposable
         }
     }
 
-    public void Start() => session.StartCapture();
+    public void Start()
+    {
+        // (tests only: REPLAY_TEST_STALL=<s>, the recording's first capture gives no new frames after that many seconds)
+        if (Interlocked.Exchange(ref stallAsked, 1) == 0
+            && double.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_STALL"), System.Globalization.CultureInfo.InvariantCulture, out var s) && s > 0)
+        {
+            stallAt = Native.NowHns() + (long)(s * 10_000_000);
+        }
+
+        session.StartCapture();
+    }
+
+    private static int stallAsked;
+    private long stallAt;
 
     private static unsafe GraphicsCaptureItem CreateItem(CaptureTarget target)
     {
@@ -143,6 +156,12 @@ internal sealed class ScreenCapture : IDisposable
             if (Target.IsWindow && !WindowShown.Showing(Target.Window))
             {
                 // (a window hidden or minimised: the picture before kept)
+                return;
+            }
+
+            if (stallAt > 0 && Native.NowHns() >= stallAt && latest is not null)
+            {
+                // (tests only: a capture stuck as one was after the screen woke, 2026-11-21)
                 return;
             }
 

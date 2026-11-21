@@ -50,10 +50,21 @@ public sealed class InputActivity
     /// its whole travel).</summary>
     public void Axes(double travel, int lagMs) => axes[At(lagMs)] += (int)Math.Round(travel * 1000);
 
+    private long last;
+
+    /// <summary>When the latest input came (the performance counter's clock, 100 ns; 0 none yet).</summary>
+    public long LastHns => Volatile.Read(ref last);
+
     /// <summary>The slot of the moment <paramref name="lagMs"/> ago, emptied first when it held older counts.</summary>
     private int At(int lagMs)
     {
-        var abs = (Native.NowHns() - lagMs * 10_000L) / Slot;
+        var hns = Native.NowHns() - lagMs * 10_000L;
+        if (hns > Volatile.Read(ref last))
+        {
+            Volatile.Write(ref last, hns);
+        }
+
+        var abs = hns / Slot;
         var i = (int)(abs % Slots);
         if (stamp[i] != abs)
         {

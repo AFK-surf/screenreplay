@@ -218,7 +218,11 @@ internal sealed class RecorderApp : IDisposable
                 _ = SaveLastAsync();
             }
         };
-        windows = new WindowTrack(window, paths.Windows, Log, _ => NoteForegroundApp()) { Active = false };
+        windows = new WindowTrack(window, paths.Windows, Log, _ =>
+        {
+            recorder?.ScreenChanged();
+            NoteForegroundApp();
+        }) { Active = false };
         window.SessionChanged += OnSessionChanged;
         window.PowerChanged += OnPowerChanged;
         // (the tray's panel started anew 3 s after the last of a run of such changes, once they have settled)
@@ -251,6 +255,7 @@ internal sealed class RecorderApp : IDisposable
             recorder?.DisplayChanged();
             if (on)
             {
+                recorder?.RenewCapture("the screen came on");
                 RenewPanelSoon("screen on");
             }
         };
@@ -1665,6 +1670,12 @@ internal sealed class RecorderApp : IDisposable
         if (e.Level != "info" && e.Code.StartsWith("audio.", StringComparison.Ordinal))
         {
             audioTrouble = e.Code;
+        }
+        // (the source that was in trouble open again: the warning in Settings gone, not kept till the app restarts)
+        else if (e.Code.StartsWith("audio.", StringComparison.Ordinal) && e.Code.EndsWith("Back", StringComparison.Ordinal)
+            && audioTrouble.StartsWith(e.Code[..^"Back".Length], StringComparison.Ordinal))
+        {
+            audioTrouble = "";
         }
     }
 
