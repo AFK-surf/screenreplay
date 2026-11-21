@@ -23,6 +23,22 @@ internal sealed class Gpu : IDisposable
     public ID3D11DeviceContext Context { get; }
     public IMFDXGIDeviceManager Manager { get; }
     public Windows.Graphics.DirectX.Direct3D11.IDirect3DDevice WinRtDevice { get; }
+    public string AdapterName { get; }
+
+    public int DeviceRemovedReason
+    {
+        get
+        {
+            try
+            {
+                return Device.DeviceRemovedReason.Code;
+            }
+            catch (Exception)
+            {
+                return -1;
+            }
+        }
+    }
 
     private static int started;
 
@@ -52,6 +68,16 @@ internal sealed class Gpu : IDisposable
         Manager.ResetDevice(Device).CheckError();
 
         using var dxgi = Device.QueryInterface<IDXGIDevice>();
+        var adapterName = "unknown";
+        try
+        {
+            using var adapter = dxgi.GetAdapter();
+            adapterName = adapter.Description.Description?.Trim() ?? "unknown";
+        }
+        catch (Exception)
+        {
+        }
+        AdapterName = adapterName;
         try
         {
             // Keep capture / HDR tone-mapping / hardware encode from being starved when a 4K game pegs the GPU at 100%.

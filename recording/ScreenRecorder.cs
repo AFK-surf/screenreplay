@@ -172,6 +172,8 @@ public sealed class ScreenRecorder : IAsyncDisposable
         Target = target;
         stopAsked = false;
         videoDone = false;
+        displayChanged = false;
+        renewAsked = null;
         gpu = new Gpu();
         var display = DisplayColor.Of(MonitorOf(target));
         Report("info", "display.color", Describe(display));
@@ -241,7 +243,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
         clockThread.Start();
         sourceThread = new Thread(SourceLoop) { IsBackground = true, Name = "recorder source" };
         sourceThread.Start();
-        Report("info", "recorder.started", $"{ActualCodec} {size.Width}x{size.Height} {options.FrameRate} fps {ActualBitrate / 1000} kbps, {audioSources} sound source(s)");
+        Report("info", "recorder.started", $"{ActualCodec} {size.Width}x{size.Height} {options.FrameRate} fps {ActualBitrate / 1000} kbps, {audioSources} sound source(s), GPU {gpu.AdapterName}");
     }
 
     private Exception? faultOnStop;
@@ -256,7 +258,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
     /// gone.</summary>
     private ScreenCapture MakeCapture(CaptureTarget target, DisplayColor display)
     {
-        var made = new ScreenCapture(gpu!, target, options.FrameRate, display.Hdr || options.ForceHdr, display);
+        var made = new ScreenCapture(gpu!, target, options.FrameRate, display.Hdr || options.ForceHdr, display,
+            msg => Report("warning", "capture.frameError", msg),
+            msg => Report("info", "capture.resized", msg));
         if (target == Target)
         {
             made.Closed += () =>
@@ -303,37 +307,50 @@ public sealed class ScreenRecorder : IAsyncDisposable
             var published = capture;
             ScreenCapture? pending = null;
             long pendingSince = 0;
-            // (the capture's newest frame as last seen, and when it came; a new capture made at most each 30 s for a
-            // stall: input or another window in front 2 s ago and still no frame since)
-            const long Stall = 20_000_000, RenewEvery = 300_000_000;
-            long lastFrames = published.Frames, lastFrameAt = Native.NowHns(), lastRenew = long.MinValue / 2;
+            // (the capture's newest frame as last seen, and when it came; delegated to StallWatcher so continuous
+            // gameplay input cannot starve the 2 s timer and repeated failed renewals escalate to a full GPU restart)
+            var stall = new StallWatcher(published.Frames, Native.NowHns());
+            var pendingFromStall = false;
             var stallTest = Environment.GetEnvironmentVariable("REPLAY_TEST_STALL") is not null;
+            var stallTestRealInput = Environment.GetEnvironmentVariable("REPLAY_TEST_STALL_REAL_INPUT") == "1";
             try
             {
                 while (!stopAsked)
                 {
                     Thread.Sleep(100);
                     var now = Native.NowHns();
-                    if (published.Frames != lastFrames)
-                    {
-                        lastFrames = published.Frames;
-                        lastFrameAt = now;
-                    }
+                    var inputHns = options.Activity?.LastHns ?? 0;
+                    var fgHns = Volatile.Read(ref changedAt);
+                    var poked = stallTest && !stallTestRealInput ? now : Math.Max(inputHns, fgHns);
+                    stall.Observe(published.Frames, now, poked);
 
                     string? renew = null;
-                    if (renewAsked is { } asked && DisplayMemory.Trusted)
+                    var renewIsStall = false;
+                    if (pending is null && renewAsked is { } asked && DisplayMemory.Trusted)
                     {
                         renewAsked = null;
                         renew = asked;
                     }
-                    else if (now - lastRenew >= RenewEvery && (!primary.IsWindow || stallTest))
+                    else if (pending is null)
                     {
-                        // (a monitor only: input and the window in front say nothing of whether a window recorded
-                        // changed; tests only: REPLAY_TEST_STALL, the screen taken as changing all the time)
-                        var poked = stallTest ? now - Stall : Math.Max(options.Activity?.LastHns ?? 0, Volatile.Read(ref changedAt));
-                        if (poked > lastFrameAt && now - poked >= Stall)
+                        // (a monitor only while the screen is on: input and the window in front say nothing of whether
+                        // a window recorded changed; tests only: REPLAY_TEST_STALL)
+                        var action = stall.Evaluate(now, (!primary.IsWindow && DisplayMemory.ScreenIsOn) || stallTest);
+                        if (action == StallAction.Restart)
                         {
-                            renew = $"no new frame in {(now - lastFrameAt) / 10_000_000} s though the input or the window in front changed {(now - poked) / 10_000_000} s ago";
+                            var devReason = gpu?.DeviceRemovedReason ?? 0;
+                            Report("warning", "capture.restarting",
+                                $"renewed capture stalled again without producing live frames (frames={published.Frames}, noFrame={(now - stall.LastFrameAt) / 10_000_000.0:0.1}s, deviceRemoved=0x{devReason:X8}): restarting recorder");
+                            faultOnStop = new CaptureStalledException("the capture stalled again after renewal");
+                            stopAsked = true;
+                            break;
+                        }
+                        else if (action == StallAction.Renew)
+                        {
+                            var devReason = gpu?.DeviceRemovedReason ?? 0;
+                            var by = fgHns >= inputHns ? "fg/desktop" : "input";
+                            renew = $"no new frame in {(now - stall.LastFrameAt) / 10_000_000.0:0.1} s though {by} changed {(now - stall.PokedSince) / 10_000_000.0:0.1} s ago (frames={published.Frames}, streak={stall.StallStreak}, deviceRemoved=0x{devReason:X8})";
+                            renewIsStall = true;
                         }
                     }
 
@@ -356,6 +373,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     {
                         pending.Dispose();
                         pending = null;
+                        pendingFromStall = false;
                     }
 
                     if (pending is not null)
@@ -365,22 +383,32 @@ public sealed class ScreenRecorder : IAsyncDisposable
                             Interlocked.Exchange(ref ready, pending)?.Dispose();
                             intendedHdr = pending.Hdr;
                             published = pending;
-                            lastFrames = published.Frames;
-                            lastFrameAt = now;
-                            Report("info", "capture.source",$"{pending.Width}x{pending.Height}" + (pending.Hdr ? " FP16" : "") + $", after {(now - pendingSince) / 10_000} ms");
+                            stall.NoteSwapped(published.Frames, now, pendingFromStall);
+                            Report("info", "capture.source", $"{pending.Width}x{pending.Height}" + (pending.Hdr ? " FP16" : "") + $", after {(now - pendingSince) / 10_000} ms");
                             pending = null;
+                            pendingFromStall = false;
                         }
                         else if (now - pendingSince > GiveUp)
                         {
-                            Report("warning", "capture.sourceFailed", "no picture in 1.5 s from the new capture: the one in use kept");
+                            var devReason = gpu?.DeviceRemovedReason ?? 0;
+                            Report("warning", "capture.sourceFailed", $"no picture in 1.5 s from the new capture (deviceRemoved=0x{devReason:X8}, failures={stall.SourceFailures + 1}): the one in use kept");
                             pending.Dispose();
                             pending = null;
+                            var wasStall = pendingFromStall;
+                            pendingFromStall = false;
+                            if (stall.NoteSourceFailed(now, wasStall, DisplayMemory.ScreenIsOn || stallTest))
+                            {
+                                Report("warning", "capture.restarting", $"renewed capture gave no picture twice (deviceRemoved=0x{devReason:X8}): restarting recorder");
+                                faultOnStop = new CaptureStalledException("the capture stayed stalled after renewal failed twice");
+                                stopAsked = true;
+                                break;
+                            }
                         }
                     }
 
                     if (pending is null && renew is not null)
                     {
-                        lastRenew = now;
+                        stall.NoteRenewStarted(now);
                         Report("info", "capture.renew", renew);
                     }
 
@@ -390,12 +418,14 @@ public sealed class ScreenRecorder : IAsyncDisposable
                         {
                             pending = MakeCapture(primary, display);
                             pendingSince = now;
+                            pendingFromStall = renewIsStall;
                             pending.Start();
                         }
                         catch (Exception ex)
                         {
                             pending?.Dispose();
                             pending = null;
+                            pendingFromStall = false;
                             Report("warning", "capture.closed", "the recording's target cannot be captured again: " + ex.Message);
                             faultOnStop = ex;
                             stopAsked = true;
@@ -507,12 +537,15 @@ public sealed class ScreenRecorder : IAsyncDisposable
             return encoder.ReadyWithin(TimeSpan.FromTicks(Period * (Patience - 1)));
         }
         int encoded = 0, skipped = 0;
+        int segEncoded = 1, segSkipped = 0;
+        long segCaptured = 0, segCapBase = 0;
         try
         {
             t0 = Native.NowHns();
             segmentStart = t0;
             current = Begin(first, t0);
             seen = capture!.Frames;
+            segCapBase = seen;
             EncodeFrame(current.Writer, 0, true);
             if (audioSources > 0)
             {
@@ -564,7 +597,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     // another capture (HDR on or off): its picture from now on,
                     // the first of it at this tick
                     var old = capture;
+                    segCaptured += Math.Max(0, old.Frames - segCapBase);
                     capture = swapped;
+                    segCapBase = capture.Frames;
                     old?.Dispose();
                     seen = -1;
                 }
@@ -576,8 +611,17 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     // the boundary: the segment's length, or now for a flush; where the clock stalled for longer than a
                     // segment, the next one starts now, the stretch between a gap like any other
                     var boundary = flush is null ? segmentStart + length : now;
+                    var segDur = boundary - segmentStart;
+                    var segCapTotal = segCaptured + Math.Max(0, capture.Frames - segCapBase);
+                    var segPoked = Math.Max(options.Activity?.LastHns ?? 0, Volatile.Read(ref changedAt));
+                    if (segEncoded <= 1 && segDur >= 150_000_000 && DisplayMemory.ScreenIsOn && segPoked > segmentStart)
+                    {
+                        Report("warning", "capture.stillSegment",
+                            $"{segDur / 10_000_000.0:0.#} s segment encoded {segEncoded} frame while active (captured={segCapTotal}, skipped={segSkipped}, totalFrames={capture.Frames}, deviceRemoved=0x{(gpu?.DeviceRemovedReason ?? 0):X8})");
+                    }
+
                     var writer = next.GetAwaiter().GetResult();
-                    Close(current, boundary - segmentStart, AudioFrameOf(boundary), flush);
+                    Close(current, segDur, AudioFrameOf(boundary), flush);
                     if (now - boundary > length)
                     {
                         boundary = now;
@@ -586,6 +630,10 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     segmentStart = boundary;
                     current = Begin(writer, boundary);
                     seen = capture.Frames;
+                    segEncoded = 1;
+                    segSkipped = 0;
+                    segCaptured = 0;
+                    segCapBase = seen;
                     EncodeFrame(current.Writer, 0, true);
                     credit = 0;
                     creditAt = now;
@@ -604,10 +652,12 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     // the clock keeps time and the encoder is given no more than it can do; the next tick takes the
                     // newest picture (seen left as it is)
                     skipped++;
+                    segSkipped++;
                 }
                 else if (capture.Frames != seen)
                 {
                     encoded++;
+                    segEncoded++;
                     seen = capture.Frames;
                     credit -= 1.0;
                     // its own moment (when it was composed), after the frame before it and not after now
@@ -1224,3 +1274,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
         await StopAsync();
     }
 }
+
+/// <summary>The screen capture stopped delivering frames and could not be recovered by renewing the session alone, so
+/// the host should start the recorder again with a fresh GPU device (not an encoder fault).</summary>
+public sealed class CaptureStalledException(string message) : Exception(message);

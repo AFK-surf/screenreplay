@@ -19,6 +19,7 @@ internal sealed class WindowTrack : IDisposable
     private const uint EventSystemMoveSizeEnd = 0x000B;
     private const uint EventSystemMinimizeStart = 0x0016;
     private const uint EventSystemMinimizeEnd = 0x0017;
+    private const uint EventSystemDesktopSwitch = 0x0020;
     private const uint EventObjectDestroy = 0x8001;
     private const uint EventObjectShow = 0x8002;
     private const uint EventObjectHide = 0x8003;
@@ -112,6 +113,7 @@ internal sealed class WindowTrack : IDisposable
     private readonly string path;
     private readonly Action<string> log;
     private readonly Action<IntPtr> foreground;
+    private readonly Action? desktopSwitch;
     private readonly WinEventProc proc;
     private readonly List<IntPtr> hooks = [];
     private readonly MessageWindow window;
@@ -146,12 +148,13 @@ internal sealed class WindowTrack : IDisposable
         }
     }
 
-    public WindowTrack(MessageWindow window, string path, Action<string> log, Action<IntPtr> foreground)
+    public WindowTrack(MessageWindow window, string path, Action<string> log, Action<IntPtr> foreground, Action? desktopSwitch = null)
     {
         this.window = window;
         this.path = path;
         this.log = log;
         this.foreground = foreground;
+        this.desktopSwitch = desktopSwitch;
         proc = OnEvent;
         active = true;
         Watch();
@@ -169,6 +172,7 @@ internal sealed class WindowTrack : IDisposable
                      (EventSystemForeground, EventSystemForeground),
                      (EventSystemMoveSizeEnd, EventSystemMoveSizeEnd),
                      (EventSystemMinimizeStart, EventSystemMinimizeEnd),
+                     (EventSystemDesktopSwitch, EventSystemDesktopSwitch),
                      (EventObjectDestroy, EventObjectReorder),
                      (EventObjectLocationChange, EventObjectNameChange),
                      (EventObjectCloaked, EventObjectUncloaked),
@@ -203,6 +207,14 @@ internal sealed class WindowTrack : IDisposable
 
     private void OnEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
+        // (UAC secure desktop / virtual desktop switch: Windows passes hwnd=0, so handle before the window filter)
+        if (ev == EventSystemDesktopSwitch)
+        {
+            dirty = true;
+            desktopSwitch?.Invoke();
+            return;
+        }
+
         // (a window's own: not its caret's, a scroll bar's or a control's inside it)
         if (idObject != ObjIdWindow || idChild != 0 || hwnd == IntPtr.Zero)
         {

@@ -126,6 +126,7 @@ internal sealed class RecorderApp : IDisposable
     private readonly TrayMenuItem turnOffItem;
     private readonly TrayMenuItem turnOnItem;
     private ScreenRecorder? recorder;
+    private (CaptureTarget Target, DateTimeOffset Since)? pendingDisplay;
     private bool starting;
     private bool locked;
     private DateTimeOffset? pausedUntil;
@@ -139,6 +140,16 @@ internal sealed class RecorderApp : IDisposable
     {
         this.paths = paths;
         L.Root = paths.Root;
+        var buildTag = "";
+        try
+        {
+            var bt = Path.Combine(AppContext.BaseDirectory, "build.txt");
+            if (File.Exists(bt)) buildTag = " (" + File.ReadAllText(bt).Trim() + ")";
+        }
+        catch (Exception)
+        {
+        }
+        Log($"app started: v{Updater.AppVersion}{buildTag}, os={Environment.OSVersion.Version}, packaged={Packaged.Is}, pid={Environment.ProcessId}");
         // (first: the thread's SynchronizationContext is the window's from here, which the awaits below resume on)
         window = new MessageWindow(Log);
         window.CloseAsked += async () => await ExitAsync();
@@ -231,6 +242,10 @@ internal sealed class RecorderApp : IDisposable
         {
             recorder?.ScreenChanged();
             NoteForegroundApp();
+        }, () =>
+        {
+            Log("desktop switched");
+            recorder?.ScreenChanged();
         }) { Active = false };
         window.SessionChanged += OnSessionChanged;
         window.PowerChanged += OnPowerChanged;
@@ -264,8 +279,11 @@ internal sealed class RecorderApp : IDisposable
 
         window.DisplayChanged += () =>
         {
+            Log("display changed");
             recorder?.DisplayChanged();
+            recorder?.ScreenChanged();
             RenewPanelSoon("displays changed");
+            _ = CheckAsync();
         };
         window.ScreenPower += on =>
         {
@@ -322,11 +340,13 @@ internal sealed class RecorderApp : IDisposable
         if (code is 7 or 2 or 4)
         {
             locked = true;
+            Log($"session locked (code={code})");
         }
         // WTS_SESSION_UNLOCK 8, WTS_CONSOLE_CONNECT 1, WTS_REMOTE_CONNECT 3
         else if (code is 8 or 1 or 3)
         {
             locked = false;
+            Log($"session unlocked (code={code})");
         }
 
         _ = CheckAsync();
@@ -547,6 +567,43 @@ internal sealed class RecorderApp : IDisposable
             await StopRecorderAsync();
             await recorder.DisposeAsync();
             recorder = null;
+            pendingDisplay = null;
+        }
+
+        // (primary monitor switched or changed resolution — e.g. laptop 2560x1600 handing off to external 3840x2160
+        // after boot/MUX switch, 2026-11-21: wait until the new target stays steady for 2 s while the screen is on,
+        // then restart the recorder on the new primary monitor and resolution instead of staying stuck on the old one)
+        if (recorder is { IsRunning: true, Target: { IsWindow: false } curTarget } && Replay.Recording.DisplayMemory.ScreenIsOn)
+        {
+            var primaryNow = CaptureTarget.PrimaryMonitor();
+            if (primaryNow is { Width: >= 320, Height: >= 200 }
+                && (primaryNow.Monitor != curTarget.Monitor || primaryNow.Width != curTarget.Width || primaryNow.Height != curTarget.Height))
+            {
+                var nowUtc = DateTimeOffset.UtcNow;
+                if (pendingDisplay is { } pd && pd.Target == primaryNow)
+                {
+                    if (nowUtc - pd.Since >= TimeSpan.FromSeconds(2))
+                    {
+                        Log($"primary display changed: {curTarget.Width}x{curTarget.Height} (0x{curTarget.Monitor:X}) -> {primaryNow.Width}x{primaryNow.Height} (0x{primaryNow.Monitor:X}), restarting recorder");
+                        pendingDisplay = null;
+                        await StopRecorderAsync();
+                        await recorder.DisposeAsync();
+                        recorder = null;
+                    }
+                }
+                else
+                {
+                    pendingDisplay = (primaryNow, nowUtc);
+                }
+            }
+            else
+            {
+                pendingDisplay = null;
+            }
+        }
+        else
+        {
+            pendingDisplay = null;
         }
 
         settings = wanted;
@@ -1072,7 +1129,8 @@ internal sealed class RecorderApp : IDisposable
         {
             Log("faulted: " + ex);
             // HEVC failing while it records (not only as it starts): after twice in 10 minutes, H.264 for this run
-            if (created.ActualCodec == "HEVC")
+            // (a capture stall restart is not an encoder fault, so keep HEVC)
+            if (created.ActualCodec == "HEVC" && ex is not CaptureStalledException)
             {
                 hevcFaults = DateTimeOffset.UtcNow - lastHevcFault < TimeSpan.FromMinutes(10) ? hevcFaults + 1 : 1;
                 lastHevcFault = DateTimeOffset.UtcNow;

@@ -21,9 +21,13 @@ internal sealed class ScreenCapture : IDisposable
     private readonly GraphicsCaptureItem item;
     private readonly Direct3D11CaptureFramePool pool;
     private readonly GraphicsCaptureSession session;
+    private readonly Action<string>? onError;
+    private readonly Action<string>? onResized;
     private readonly object gate = new();
     private readonly DirectXPixelFormat poolFormat;
     private long minStepTicks;
+    private long lastErrorAt;
+    private int suppressedErrors;
     private Windows.Graphics.SizeInt32 poolSize;
     private ID3D11Texture2D? latest;
     private bool disposed;
@@ -72,9 +76,11 @@ internal sealed class ScreenCapture : IDisposable
 
     private DisplayColor display;
 
-    public ScreenCapture(Gpu gpu, CaptureTarget target, int frameRate, bool hdr, DisplayColor display)
+    public ScreenCapture(Gpu gpu, CaptureTarget target, int frameRate, bool hdr, DisplayColor display, Action<string>? onError = null, Action<string>? onResized = null)
     {
         this.gpu = gpu;
+        this.onError = onError;
+        this.onResized = onResized;
         Target = target;
         Hdr = hdr;
         this.display = display;
@@ -120,18 +126,29 @@ internal sealed class ScreenCapture : IDisposable
 
     public void Start()
     {
-        // (tests only: REPLAY_TEST_STALL=<s>, the recording's first capture gives no new frames after that many seconds)
+        // (tests only: REPLAY_TEST_STALL=<s>, the recording's first capture gives no new frames after that many seconds;
+        // REPLAY_TEST_STALL_FAIL=<n>, the next n captures give no first frame at all, to test restart escalation)
         if (Interlocked.Exchange(ref stallAsked, 1) == 0
             && double.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_STALL"), System.Globalization.CultureInfo.InvariantCulture, out var s) && s > 0)
         {
             stallAt = Native.NowHns() + (long)(s * 10_000_000);
+            if (int.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_STALL_FAIL"), out var fails) && fails > 0)
+            {
+                Volatile.Write(ref stallFailLeft, fails);
+            }
+        }
+        else if (Volatile.Read(ref stallFailLeft) > 0 && Interlocked.Decrement(ref stallFailLeft) >= 0)
+        {
+            failFirstFrame = true;
         }
 
         session.StartCapture();
     }
 
     private static int stallAsked;
+    private static int stallFailLeft;
     private long stallAt;
+    private bool failFirstFrame;
 
     private static unsafe GraphicsCaptureItem CreateItem(CaptureTarget target)
     {
@@ -179,7 +196,7 @@ internal sealed class ScreenCapture : IDisposable
                 return;
             }
 
-            if (stallAt > 0 && Native.NowHns() >= stallAt && latest is not null)
+            if (failFirstFrame || (stallAt > 0 && Native.NowHns() >= stallAt && latest is not null))
             {
                 // (tests only: a capture stuck as one was after the screen woke, 2026-11-21)
                 return;
@@ -190,8 +207,10 @@ internal sealed class ScreenCapture : IDisposable
             if (resized)
             {
                 // (the window resized: the pool's buffers made to its size; this frame still used, cut to it)
-                poolSize = content;
+                var prev = poolSize;
                 sender.Recreate(gpu.WinRtDevice, poolFormat, 4, content);
+                poolSize = content;
+                onResized?.Invoke($"{prev.Width}x{prev.Height} -> {content.Width}x{content.Height}");
             }
 
             var frameTicks = frame.SystemRelativeTime.Ticks;
@@ -245,9 +264,25 @@ internal sealed class ScreenCapture : IDisposable
 
             FirstFrame.Set();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // (a frame lost; the device's loss shows in the encoder's next write)
+            // (a frame lost; the device's loss shows in the encoder's next write; reported rate-limited so repeated
+            // WGC/D3D11 callback failures leave a trace in recorder.log)
+            if (!disposed && onError is not null)
+            {
+                var errNow = Native.NowHns();
+                if (errNow - Interlocked.Read(ref lastErrorAt) >= 50_000_000)
+                {
+                    Interlocked.Exchange(ref lastErrorAt, errNow);
+                    var skipped = Interlocked.Exchange(ref suppressedErrors, 0);
+                    var more = skipped > 0 ? $" (+{skipped} more)" : "";
+                    onError($"{ex.GetType().Name}: {ex.Message} (0x{ex.HResult:X8}){more}");
+                }
+                else
+                {
+                    Interlocked.Increment(ref suppressedErrors);
+                }
+            }
         }
         finally
         {
