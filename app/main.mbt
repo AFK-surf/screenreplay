@@ -340,10 +340,13 @@ fn picture(parent : @view.View) -> Unit {
         })
         |> ignore
       } else {
-        b.lines_up(Is(Some(Middle))).gap(Is(8.0)) |> ignore
-        @sf.icon_node(b, "monitor", 32.0, By(ui_subtle)) |> ignore
-        words(b, fn() { t("还没有录像") }, 15.0, ui_text, weight=600) |> ignore
-        words(b, fn() { t("后台录制开始后，最近的录像会出现在这里") }, 12.0, ui_subtle) |> ignore
+        b.show(fn() { !awaiting_first_show.get() }, fn(e) {
+          e.lines_up(Is(Some(Middle))).gap(Is(8.0)) |> ignore
+          @sf.icon_node(e, "monitor", 32.0, By(ui_subtle)) |> ignore
+          words(e, fn() { t("还没有录像") }, 15.0, ui_text, weight=600) |> ignore
+          words(e, fn() { t("后台录制开始后，最近的录像会出现在这里") }, 12.0, ui_subtle) |> ignore
+        }, at_once=true)
+        |> ignore
       }
     }, at_once=true)
     saved_note(stage)
@@ -874,12 +877,18 @@ fn make_window(root : @view.View) -> Unit {
   perf_watch(root)
   update_watch(root)
   // (the folder first read once the window is up, a moment after it is made)
+  if hidden_unshown() {
+    awaiting_first_show.set(true)
+  }
+  root.reacts(fn() { ((c_bg() >> 8) & 0xFFFFFFL).to_int() }, fn(rgb) { rp_set_bg_rgb(rgb) })
   root.at_moment(now() + 1.0, fn() {
-    // (started hidden by the recorder and not shown yet: nothing read or decoded till it first shows, resident.mbt)
+    // (started hidden by the recorder and not shown yet: frame 1 is now presented while cloaked, so hide it and wait
+    // to read or decode the folder till its first real show, resident.mbt)
     if hidden_unshown() {
       first_show_waits.val = Some(root)
       stay_resident(root)
       rp_alt_arrows() |> ignore
+      rp_resident_primed()
       return
     }
     refresh(root, true)
@@ -910,6 +919,7 @@ fn main {
     @ui.run_legacy_ctx("ScreenReplay", fn(c) { c.set_clear((@signals.untracked(c_s2) >> 8) & 0xFFFFFFL) }, tree=tray_window)
     return
   }
+  rp_set_bg_rgb(((@signals.untracked(c_bg) >> 8) & 0xFFFFFFL).to_int())
   start_hidden()
   // (no title bar of the system's: the app's own)
   @hostapi.window_setup(1000.0, 720.0, 1440.0, 900.0, inset=true)

@@ -333,6 +333,11 @@ fn spring(parent : @view.View) -> Unit {
 /// The play key's glyph, a triangle and two bars one the other's shape (each bar half of the triangle, its corners
 /// going to theirs), `k` of the way from play (0) to pause (1): on a 14 grid.
 fn play_pause_picture(k : Double) -> @pixels.Vector {
+  // (at rest on play, draw one solid triangle: two polygons meeting at x=7.65 anti-alias independently at 150% DPI
+  // and leave a visible vertical seam down the middle of the arrow)
+  if k <= 0.001 {
+    return vectors(14.0, 14.0, [("M3.0 1.8L12.3 7.0L3.0 12.2Z", 0.0)])
+  }
   let lerp = fn(a : (Double, Double), b : (Double, Double)) { (a.0 + (b.0 - a.0) * k, a.1 + (b.1 - a.1) * k) }
   let quad = fn(play : Array[(Double, Double)], pause : Array[(Double, Double)]) {
     let p = play.mapi(fn(i, a) { lerp(a, pause[i]) })

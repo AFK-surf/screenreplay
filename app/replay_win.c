@@ -550,8 +550,13 @@ moonbit_bytes_t rp_gpu(void) {
 // its close (the title bar's ×, Alt+F4, WM_CLOSE) taken here before mbui's host would end the program. How many times it
 // was hidden and shown, for the app to put itself back as at a fresh open (rp_window_turns).
 extern void *mb_app_hwnd(void);
+extern void mb_app_wake(void);
 static WNDPROC rp_prev_proc;
 static volatile LONG rp_hides, rp_shows;
+static int rp_priming, rp_show_asked;
+static HWND rp_primed_hwnd;
+static LONG_PTR rp_primed_ex;
+static COLORREF rp_bg_rgb = RGB(0x1B, 0x1C, 0x1F);
 
 // What the hidden window holds for playing let go of at once, as it hides (replay_play.cpp, replay_mf.cpp): mbui draws
 // no frame for a hidden window, so nothing of the app's runs till it shows again; what is let go of here is what
@@ -561,7 +566,53 @@ extern void rp_aac_release_all(void);
 extern void rp_thumb_release(void);
 extern void rp_frame_release(void);
 
+void rp_set_bg_rgb(int32_t rgb) {
+  rp_bg_rgb = RGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+}
+
+void rp_resident_primed(void);
+
+static VOID CALLBACK rp_resident_primed_timer(HWND h, UINT msg, UINT_PTR id, DWORD at) {
+  (void)msg;
+  (void)at;
+  KillTimer(h, id);
+  rp_resident_primed();
+}
+
+static void rp_unprime_now(HWND h, int hide) {
+  if (!rp_priming || !h) return;
+  KillTimer(h, 0x5252);
+  rp_priming = 0;
+  if (hide) ShowWindow(h, SW_HIDE);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, rp_primed_ex);
+  BOOL cloak = FALSE;
+  DwmSetWindowAttribute(h, DWMWA_CLOAK, &cloak, sizeof(cloak));
+}
+
+void rp_resident_primed(void) {
+  HWND h = rp_primed_hwnd ? rp_primed_hwnd : (HWND)mb_app_hwnd();
+  if (!rp_priming || !h) return;
+  if (rp_show_asked) {
+    rp_unprime_now(h, 0);
+    InterlockedIncrement(&rp_shows);
+    mb_app_wake();
+    return;
+  }
+  rp_unprime_now(h, 1);
+}
+
 static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_ERASEBKGND && wp) {
+    RECT rc;
+    if (GetClientRect(h, &rc)) {
+      HBRUSH br = CreateSolidBrush(rp_bg_rgb);
+      if (br) {
+        FillRect((HDC)wp, &rc, br);
+        DeleteObject(br);
+      }
+    }
+    return 1;
+  }
   if (msg == WM_CLOSE) {
     ShowWindow(h, SW_HIDE);
     InterlockedIncrement(&rp_hides);
@@ -571,7 +622,19 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     rp_frame_release();
     return 0;
   }
-  if (msg == WM_SHOWWINDOW && wp) InterlockedIncrement(&rp_shows);
+  if (msg == WM_ACTIVATE && LOWORD(wp) != WA_INACTIVE && rp_priming) {
+    rp_show_asked = 1;
+    rp_unprime_now(h, 0);
+    InterlockedIncrement(&rp_shows);
+    mb_app_wake();
+  }
+  if (msg == WM_WINDOWPOSCHANGED && !rp_priming) {
+    const WINDOWPOS *pos = (const WINDOWPOS *)lp;
+    if (pos->flags & SWP_SHOWWINDOW) {
+      InterlockedIncrement(&rp_shows);
+      mb_app_wake();
+    }
+  }
   return CallWindowProcW(rp_prev_proc, h, msg, wp, lp);
 }
 
@@ -607,25 +670,45 @@ int32_t rp_window_turns(void) {
   return (int32_t)(((rp_hides & 0x7FFF) << 16) | (rp_shows & 0xFFFF));
 }
 
-// Whether the window shows now.
+// Whether the window shows now (false while cloaked for hidden first-frame priming).
 int32_t rp_window_shown(void) {
   HWND h = (HWND)mb_app_hwnd();
-  return h && IsWindowVisible(h) ? 1 : 0;
+  return h && IsWindowVisible(h) && !rp_priming ? 1 : 0;
 }
 
 // Started hidden (the recorder's resident start, REPLAY_HIDDEN=1): mbui's host shows its window as it makes it, and
 // the program's start-up show state is not asked there, so the first show of this thread's first top-level window is
-// taken out as it is made (its WM_WINDOWPOSCHANGING's SWP_SHOWWINDOW), once. Set before the window is made.
+// either stripped (tray panel / note card: rp_start_hidden) or shown DWM-cloaked with WS_EX_TOOLWINDOW for one frame
+// (main resident window: rp_start_resident_hidden) so shaders and the UI shell are presented before the window hides,
+// preventing a ~0.5 s blank white flash on first activation.
 static HHOOK rp_cbt;
 static WNDPROC rp_hidden_prev;
 static HWND rp_hidden_window;
+static int rp_hidden_prime;
 
 static LRESULT CALLBACK rp_hidden_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_ACTIVATE && LOWORD(wp) != WA_INACTIVE && rp_priming && h == rp_primed_hwnd) {
+    rp_show_asked = 1;
+    rp_unprime_now(h, 0);
+    InterlockedIncrement(&rp_shows);
+    mb_app_wake();
+  }
   if (msg == WM_WINDOWPOSCHANGING && rp_hidden_window == h) {
     WINDOWPOS *pos = (WINDOWPOS *)lp;
     if (pos->flags & SWP_SHOWWINDOW) {
-      pos->flags &= ~SWP_SHOWWINDOW;
       rp_hidden_window = NULL;
+      if (rp_hidden_prime) {
+        pos->flags |= SWP_NOACTIVATE;
+        rp_primed_ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        SetWindowLongPtrW(h, GWL_EXSTYLE, (rp_primed_ex & ~(LONG_PTR)WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW);
+        BOOL cloak = TRUE;
+        DwmSetWindowAttribute(h, DWMWA_CLOAK, &cloak, sizeof(cloak));
+        rp_priming = 1;
+        rp_primed_hwnd = h;
+        SetTimer(h, 0x5252, 2000, rp_resident_primed_timer);
+      } else {
+        pos->flags &= ~SWP_SHOWWINDOW;
+      }
     }
   }
   return CallWindowProcW(rp_hidden_prev, h, msg, wp, lp);
@@ -647,6 +730,12 @@ static LRESULT CALLBACK rp_cbt_proc(int code, WPARAM wp, LPARAM lp) {
 }
 
 void rp_start_hidden(void) {
+  rp_hidden_prime = 0;
+  if (!rp_cbt) rp_cbt = SetWindowsHookExW(WH_CBT, rp_cbt_proc, NULL, GetCurrentThreadId());
+}
+
+void rp_start_resident_hidden(void) {
+  rp_hidden_prime = 1;
   if (!rp_cbt) rp_cbt = SetWindowsHookExW(WH_CBT, rp_cbt_proc, NULL, GetCurrentThreadId());
 }
 

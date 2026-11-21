@@ -63,6 +63,11 @@ extern "C" fn rp_frame_release() -> Unit = "rp_frame_release"
 let first_show_waits : Ref[@view.View?] = Ref(None)
 
 ///|
+/// True while started hidden and before its first real show has loaded the buffer (keeps the primed frame from
+/// flashing "Nothing recorded yet").
+let awaiting_first_show : @signals.Signal[Bool] = @signals.signal(false)
+
+///|
 /// Whether it was started hidden and has not shown since.
 fn hidden_unshown() -> Bool {
   resident() && @ui.env("REPLAY_HIDDEN") == "1" && rp_window_shown() == 0
@@ -117,12 +122,15 @@ fn put_away() -> Unit {
 ///|
 /// Shown: as a window just opened.
 fn as_opened() -> Unit {
-  // (started hidden, shown for the first time: the folder read every 3 s from now, the saved clips listed)
+  // (started hidden, shown for the first time: the folder read every 3 s from now; saved clips deferred briefly so
+  // the buffer and first video frame show ahead of scanning the clips folder)
+  let mut defer_clips : @view.View? = None
   match first_show_waits.val {
     Some(root) => {
       first_show_waits.val = None
+      awaiting_first_show.set(false)
       again(root, 3000.0, fn() { refresh(root, false) })
-      load_clips()
+      defer_clips = Some(root)
     }
     None => ()
   }
@@ -142,15 +150,29 @@ fn as_opened() -> Unit {
   if !segs.is_empty() {
     seek_to(span() - 30000.0)
   }
+  match defer_clips {
+    Some(root) => root.at_moment(now() + 80.0, fn() { load_clips() }) |> ignore
+    None => ()
+  }
 }
 
 ///|
 extern "C" fn rp_start_hidden() -> Unit = "rp_start_hidden"
 
 ///|
-/// Started hidden where the recorder starts it resident (REPLAY_HIDDEN=1): its window made but not shown.
+extern "C" fn rp_start_resident_hidden() -> Unit = "rp_start_resident_hidden"
+
+///|
+extern "C" fn rp_resident_primed() -> Unit = "rp_resident_primed"
+
+///|
+extern "C" fn rp_set_bg_rgb(rgb : Int) -> Unit = "rp_set_bg_rgb"
+
+///|
+/// Started hidden where the recorder starts it resident (REPLAY_HIDDEN=1): its window made DWM-cloaked for its first
+/// frame so shaders and the UI shell are already presented when first activated, then hidden cleanly.
 fn start_hidden() -> Unit {
   if resident() && @ui.env("REPLAY_HIDDEN") == "1" {
-    rp_start_hidden()
+    rp_start_resident_hidden()
   }
 }
