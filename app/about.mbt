@@ -355,20 +355,8 @@ fn about_page(p : @view.View) -> Unit {
     |> ignore
   }
   // (free, a sponsor's page for who wants to give: the user, 2026-11-19 「把这个项目直接免费提供。然后提供赞助链接」)
-  p.box(fn(card) {
-    card
-    .radius(Is(10.0))
-    .ground(By(fn() { tone(c_s2(), 0xF4F5F7FFL) }))
-    .edge(By(fn() { if is_dark() { (0.0, 0L) } else { (1.0, 0x00000014L) } }))
-    .clips(Is(true))
-    |> ignore
-    link_row(card, true, "coffee", fn() { t("赞助作者") }, fn() {
-      rp_launch(cstr(sponsor_url + (if is_english() { "?lang=en" } else { "?lang=zh" }))) |> ignore
-    }, note=fn() {
-      t("ScreenReplay 免费使用，觉得好用可以请我喝杯咖啡")
-    }, external=true)
-  })
-  |> ignore
+  // (a card of its own: sponsor_card.mbt, the user's 方案 B, 2026-11-21)
+  sponsor_card(p)
   p.box(fn(card) {
     card
     .radius(Is(10.0))

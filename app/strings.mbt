@@ -348,6 +348,7 @@ let english : Map[String, String] = {
   "打开日志文件夹": "Open logs folder",
   "赞助作者": "Sponsor",
   "ScreenReplay 免费使用，觉得好用可以请我喝杯咖啡": "ScreenReplay is free. If it helps you, buy me a coffee",
+  "请喝咖啡": "Buy me a coffee",
   "开源许可": "Open-source licenses",
   "{0} 秒": "{0} s",
   "录像缓冲位置": "Where recordings are kept",
