@@ -43,16 +43,24 @@ fn app_name(process : String) -> String {
 ///|
 /// The app in front at `at` (ms into the buffer), "" none known.
 fn app_at(at : Double) -> String {
+  // (the last noted at or before it, found by halving: apps.jsonl's lines are in time's order; the title bar asks it
+  // each frame while playing, and a long buffer has thousands)
   let abs = t0() + at
-  let mut name = ""
-  for entry in apps {
-    if entry.0 <= abs {
-      name = entry.1
+  let mut lo = 0
+  let mut hi = apps.length()
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if apps[mid].0 <= abs {
+      lo = mid + 1
     } else {
-      break
+      hi = mid
     }
   }
-  name
+  if lo == 0 {
+    ""
+  } else {
+    apps[lo - 1].1
+  }
 }
 
 ///|

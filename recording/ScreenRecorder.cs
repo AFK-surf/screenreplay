@@ -521,22 +521,42 @@ public sealed class ScreenRecorder : IAsyncDisposable
             }
 
             next = Task.Run(() => MakeWriter(OutputSize!.Value, encode!.Hevc));
-            var tick = t0;
+            var tick = t0 + Period;
             paceStart = t0;
+            // (a frame is taken as it comes (the capture's event wakes the clock), where a period's credit has come since
+            // the last: up to one frame's worth kept, one taken at 3/4 of it, so a frame that comes a hair early is not
+            // put off a whole period, nor do more than the rate's frames a second go in. Taken only at the clock's ticks
+            // before, a frame that came just after a tick waited for the next, and on a 240 Hz screen a third of a 60 fps
+            // recording's frames were 33 ms apart (the user, 2026-11-21: 「帧数也不够满」))
+            var credit = 0.0;
+            var creditAt = t0;
+            double Credit(long at)
+            {
+                credit = Math.Min(1.0, credit + (double)(at - creditAt) / Period);
+                creditAt = at;
+                return credit;
+            }
+
+            // (a frame waiting for its credit: woken as it has come, not at the next tick)
+            var creditDue = long.MaxValue;
             while (!stopAsked)
             {
-                tick += Period;
-                var now = Native.NowHns();
-                if (tick < now - Period)
-                {
-                    // (the clock fell behind (the computer stalled): on from now, not a run of ticks to catch up)
-                    tick = now;
-                }
-
-                Wait(timer, tick);
+                Wait(timer, Math.Min(tick, creditDue), capture.FrameEvent);
+                creditDue = long.MaxValue;
                 if (stopAsked)
                 {
                     break;
+                }
+
+                var now = Native.NowHns();
+                if (now >= tick)
+                {
+                    tick += Period;
+                    if (tick < now - Period)
+                    {
+                        // (the clock fell behind (the computer stalled): on from now, not a run of ticks to catch up)
+                        tick = now + Period;
+                    }
                 }
 
                 if (Interlocked.Exchange(ref ready, null) is { } swapped)
@@ -567,8 +587,15 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     current = Begin(writer, boundary);
                     seen = capture.Frames;
                     EncodeFrame(current.Writer, 0, true);
+                    credit = 0;
+                    creditAt = now;
                     lastTime = lastKey = sinceKey = 0;
                     next = Task.Run(() => MakeWriter(OutputSize!.Value, encode!.Hevc));
+                }
+                else if (capture.Frames != seen && Credit(now) < 0.75)
+                {
+                    // (a frame come before a period's credit: taken as the credit has come, the newest then)
+                    creditDue = now + (long)((0.75 - credit) * Period) + 1;
                 }
                 else if (capture.Frames != seen && !Ready(encoder!))
                 {
@@ -582,6 +609,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
                 {
                     encoded++;
                     seen = capture.Frames;
+                    credit -= 1.0;
                     // its own moment (when it was composed), after the frame before it and not after now
                     var at = Math.Clamp(capture.LatestTime - segmentStart, lastTime + 10_000, Math.Max(lastTime + 10_000, now - segmentStart));
                     var key = at - lastKey >= KeyEvery && (sinceKey >= KeyFrames || at - lastTime >= KeyEvery);
@@ -592,6 +620,12 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     {
                         lastKey = at;
                     }
+                }
+                else
+                {
+                    // (nothing new on the screen: the thumbnails' read-backs taken all the same, not only as the next
+                    // frame is encoded; a still screen left them waiting, and the segment was written without them)
+                    CollectThumbs();
                 }
 
                 if (now - paceStart >= PaceEvery)
@@ -655,13 +689,19 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
             if (next is not null)
             {
-                next.ContinueWith(t =>
+                // (the writer made ahead let go of before what it was made on is torn down: waited for with the segments
+                // still completing, below)
+                var aborting = next.ContinueWith(t =>
                 {
                     if (t.IsCompletedSuccessfully)
                     {
                         t.Result.Abort();
                     }
                 });
+                lock (segmentsGate)
+                {
+                    closing.Add(aborting);
+                }
             }
         }
 
@@ -699,7 +739,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
     private volatile bool stopRequestedByCaller;
 
-    private static void Wait(IntPtr timer, long dueHns)
+    /// <summary>Till <paramref name="dueHns"/>, or a frame comes (<paramref name="frame"/>, the capture's event), the
+    /// sooner.</summary>
+    private static unsafe void Wait(IntPtr timer, long dueHns, IntPtr frame)
     {
         var left = dueHns - Native.NowHns();
         if (left <= 0)
@@ -711,7 +753,18 @@ public sealed class ScreenRecorder : IAsyncDisposable
         {
             var relative = -left;
             Native.SetWaitableTimer(timer, in relative, 0, IntPtr.Zero, IntPtr.Zero, false);
-            Native.WaitForSingleObject(timer, 1000);
+            if (frame == IntPtr.Zero)
+            {
+                Native.WaitForSingleObject(timer, 1000);
+                return;
+            }
+
+            var both = stackalloc IntPtr[2] { timer, frame };
+            Native.WaitForMultipleObjects(2, both, false, 1000);
+        }
+        else if (frame != IntPtr.Zero)
+        {
+            Native.WaitForSingleObject(frame, (uint)Math.Max(1, left / 10_000));
         }
         else
         {
@@ -763,24 +816,32 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     continue;
                 }
 
-                if (audioSources > 0 && (mixer?.Emitted ?? 0) < open.AudioEnd)
-                {
-                    // (the sound's thread held up (a system device going away as the screen turned off blocked it a
-                    // minute, 2026-11-21): the rest of its sound silence, not a track 20 s shorter than its picture)
-                    try
-                    {
-                        open.Writer.PadAudio(open.AudioEnd - open.AudioStart);
-                        Report("info", "audio.padded", $"the sound was {(open.AudioEnd - Math.Max(open.AudioStart, mixer?.Emitted ?? 0)) / AudioMixer.Rate} s late: silence in its place");
-                    }
-                    catch (Exception ex)
-                    {
-                        Report("warning", "audio.writeFailed", ex.Message);
-                    }
-                }
-
+                // (the sound's thread held up (a system device going away as the screen turned off blocked it a
+                // minute, 2026-11-21): the rest of its sound silence, not a track 20 s shorter than its picture. Written
+                // with the rest of its completing, on its own task: written here, under the segments' lock on the clock's
+                // thread, up to a segment's silence encoded held up the frames and the sound's thread meanwhile)
+                var lateBy = audioSources > 0 && (mixer?.Emitted ?? 0) < open.AudioEnd
+                    ? open.AudioEnd - Math.Max(open.AudioStart, mixer?.Emitted ?? 0)
+                    : 0;
                 segments.RemoveAt(i--);
                 closing.RemoveAll(t => t.IsCompleted);
-                closing.Add(Task.Run(() => Complete(open)));
+                closing.Add(Task.Run(() =>
+                {
+                    if (lateBy > 0)
+                    {
+                        try
+                        {
+                            open.Writer.PadAudio(open.AudioEnd - open.AudioStart);
+                            Report("info", "audio.padded", $"the sound was {lateBy / AudioMixer.Rate} s late: silence in its place");
+                        }
+                        catch (Exception ex)
+                        {
+                            Report("warning", "audio.writeFailed", ex.Message);
+                        }
+                    }
+
+                    Complete(open);
+                }));
             }
         }
     }
@@ -840,12 +901,32 @@ public sealed class ScreenRecorder : IAsyncDisposable
             }
             capture!.WithLatest((source, w, h, display) => converter!.Convert(source, w, h, display, texture, (uint)slice));
             Thumbs(writer, texture, (uint)slice, time);
-            FrameTrace.Note($"encode at={time / 10000.0:F2} key={key} target={texture.NativePointer:x} slice={slice} captured={capture.LatestTime / 10000.0:F2}");
+            if (FrameTrace.On) FrameTrace.Note($"encode at={time / 10000.0:F2} key={key} target={texture.NativePointer:x} slice={slice} captured={capture.LatestTime / 10000.0:F2}");
             writer.WriteVideo(sample, time, Period, key);
         }
         finally
         {
             sample.Dispose();
+        }
+    }
+
+    /// <summary>The read-backs of thumbnails the GPU has done taken (on the clock's thread, as all of the thumbnails').</summary>
+    private void CollectThumbs()
+    {
+        if (thumbnailer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            thumbnailer.Collect();
+        }
+        catch (Exception ex)
+        {
+            Report("warning", "thumbnails.failed", ex.Message);
+            thumbnailer.Dispose();
+            thumbnailer = null;
         }
     }
 

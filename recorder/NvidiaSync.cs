@@ -40,6 +40,11 @@ internal static class NvidiaSync
         return f;
     }
 
+    private static readonly object Gate = new();
+
+    // 0 not tried, 1 NvAPI ready, -1 none (no NVIDIA driver)
+    private static int state;
+
     /// <summary>Where Fast Sync is on ("global", program profiles' names, joined by "; "), "" nowhere or not known.
     /// REPLAY_TEST_FASTSYNC: what it says instead (a test of the window's words).</summary>
     public static unsafe string Where()
@@ -50,7 +55,24 @@ internal static class NvidiaSync
             return test;
         }
 
-        if (!NativeLibrary.TryLoad("nvapi64.dll", out _))
+        // (the library loaded and NvAPI initialized once for the process, not every 5 minutes: each load and each
+        // NvAPI_Initialize counted one more reference, never given back)
+        lock (Gate)
+        {
+            if (state == 0)
+            {
+                try
+                {
+                    state = NativeLibrary.TryLoad("nvapi64.dll", out _) && ((delegate* unmanaged[Cdecl]<int>)Fn(0x0150E828))() == 0 ? 1 : -1;
+                }
+                catch (Exception)
+                {
+                    state = -1;
+                }
+            }
+        }
+
+        if (state < 0)
         {
             return "";
         }
@@ -60,10 +82,6 @@ internal static class NvidiaSync
         IntPtr session = IntPtr.Zero;
         try
         {
-            if (((delegate* unmanaged[Cdecl]<int>)Fn(0x0150E828))() != 0)
-            {
-                return "";
-            }
 
             var destroy = (delegate* unmanaged[Cdecl]<IntPtr, int>)Fn(0xDAD9CFF8);
             if (((delegate* unmanaged[Cdecl]<IntPtr*, int>)Fn(0x0694D52E))(&session) != 0)

@@ -23,13 +23,16 @@ internal sealed class ScreenCapture : IDisposable
     private readonly GraphicsCaptureSession session;
     private readonly object gate = new();
     private readonly DirectXPixelFormat poolFormat;
-    private readonly long minStepTicks;
+    private long minStepTicks;
     private Windows.Graphics.SizeInt32 poolSize;
     private ID3D11Texture2D? latest;
     private bool disposed;
 
     /// <summary>Set once the first frame is in.</summary>
     public ManualResetEventSlim FirstFrame { get; } = new(false);
+
+    /// <summary>Set as each frame is taken (an auto-reset event): what the recorder's clock waits on beside its timer.</summary>
+    public IntPtr FrameEvent { get; }
 
     /// <summary>The capture stopped by itself (the window closed, the monitor gone).</summary>
     public event Action? Closed;
@@ -75,7 +78,17 @@ internal sealed class ScreenCapture : IDisposable
         Target = target;
         Hdr = hdr;
         this.display = display;
-        minStepTicks = 10_000_000L * 9 / 10 / Math.Max(1, frameRate);
+        // (half the period: frames come at most twice the recording's rate, and the recorder's clock takes one a period
+        // as each comes (ScreenRecorder's credit). At 90% (15 ms) on a 240 Hz screen a frame that came a composition late
+        // was put off to the 5th (20.8 ms), and with the clock's own ticks beside it about a third of a 60 fps
+        // recording's frames were 33 ms apart (the user, 2026-11-21: 48-52 fps of a window changing 225 times a second,
+        // 60.0 with this). REPLAY_TEST_MINSTEP: another share of the period, in percent (tests only))
+        minStepTicks = 10_000_000L * 5 / 10 / Math.Max(1, frameRate);
+        if (int.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_MINSTEP"), out var pct) && pct >= 0)
+        {
+            minStepTicks = 10_000_000L * pct / 100 / Math.Max(1, frameRate);
+        }
+        FrameEvent = Native.CreateEvent(IntPtr.Zero, false, false, IntPtr.Zero);
         poolFormat = hdr ? DirectXPixelFormat.R16G16B16A16Float : DirectXPixelFormat.B8G8R8A8UIntNormalized;
         item = CreateItem(target);
         item.Closed += (_, _) => Closed?.Invoke();
@@ -96,8 +109,8 @@ internal sealed class ScreenCapture : IDisposable
 
         try
         {
-            // (frames no closer together than 90% of the recording's period: a 240 Hz screen is not copied 120-240
-            // times a second for a 60 fps recording; Windows 11 24H2 and later)
+            // (frames no closer together than half the recording's period: a 240 Hz screen is not copied 240 times a
+            // second for a 60 fps recording; Windows 11 24H2 and later)
             session.MinUpdateInterval = TimeSpan.FromTicks(minStepTicks);
         }
         catch (Exception)
@@ -215,9 +228,12 @@ internal sealed class ScreenCapture : IDisposable
                 }
 
                 gpu.Context.CopySubresourceRegion(latest, 0, 0, 0, 0, texture, 0, new Box(0, 0, 0, w, h, 1));
-                FrameTrace.Note($"capture t={frame.SystemRelativeTime.Ticks / 10000.0:F2} surface={texture.NativePointer:x} {w}x{h}");
+                if (FrameTrace.On) FrameTrace.Note($"capture t={frame.SystemRelativeTime.Ticks / 10000.0:F2} surface={texture.NativePointer:x} {w}x{h}");
                 LatestTime = frame.SystemRelativeTime.Ticks;
                 Frames++;
+                // (the recorder's clock woken: the frame taken as it comes, not at its next tick; under the lock, so
+                // never after Dispose has closed it)
+                Native.SetEvent(FrameEvent);
             }
 
             FirstFrame.Set();
@@ -267,5 +283,8 @@ internal sealed class ScreenCapture : IDisposable
         }
 
         FirstFrame.Dispose();
+        // (closed once nothing can set it or wait on it: the frames' callbacks are unhooked above, and the recorder's
+        // clock disposes a capture only between its waits)
+        Native.CloseHandle(FrameEvent);
     }
 }

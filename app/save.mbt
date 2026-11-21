@@ -392,15 +392,27 @@ fn crop_thumb_key() -> String? {
     crop_images.keep(key)
     Some(key)
   } else {
-    if bmp.length() == 1 && bmp[0] == 0 {
+    if bmp.length() == 1 && bmp[0] == 0 && !crop_thumb_due.val {
+      // (looked for again in 50 ms, once: not a timer more for each time it is asked meanwhile)
       match the_root.val {
-        Some(r) => r.at_moment(now() + 50.0, fn() { crop_thumb_rev.set(crop_thumb_rev.untracked() + 1) }) |> ignore
+        Some(r) => {
+          crop_thumb_due.val = true
+          r.at_moment(now() + 50.0, fn() {
+            crop_thumb_due.val = false
+            crop_thumb_rev.set(crop_thumb_rev.untracked() + 1)
+          })
+          |> ignore
+        }
         None => ()
       }
     }
     None
   }
 }
+
+///|
+/// Whether the crop's preview is to be looked for again already.
+let crop_thumb_due : Ref[Bool] = Ref(false)
 
 ///|
 /// What the clip will take: as recorded, its segments' bytes in it; encoded, its bitrate over its length (H.264's and

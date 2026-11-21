@@ -314,14 +314,16 @@ internal sealed class SegmentWriter : IDisposable
                 return;
             }
 
-            // (written in order; what overlaps what was written already is left out, a hole is silence)
+            // (written in order; what overlaps what was written already is left out, a hole is silence: all of it, up to
+            // a minute (before, 2 s of it, and what came after was written 2 s on from there, early by the rest of the
+            // hole, the sound ahead of its picture for the rest of the segment); a longer one a gap in the track)
             if (at > audioWritten)
             {
-                var gap = (int)Math.Min(at - audioWritten, AudioRate * 2L);
-                WritePcm(new float[gap * 2], gap);
-                for (var k = 0; k < gap; k++)
+                var gap = Math.Min(at - audioWritten, AudioRate * 60L);
+                WriteSilence(gap);
+                if (at > audioWritten)
                 {
-                    Level(null, 0, k);
+                    audioWritten = at;
                 }
             }
             var skip = (int)Math.Max(0, audioWritten - at);
@@ -349,16 +351,42 @@ internal sealed class SegmentWriter : IDisposable
 
         lock (gate)
         {
-            var chunk = new float[AudioRate / 5 * 2];
-            while (!finished && audioWritten < until)
+            if (!finished && audioWritten < until)
             {
-                var n = (int)Math.Min(until - audioWritten, AudioRate / 5);
-                WritePcm(chunk.AsSpan(0, n * 2), n);
-                for (var k = 0; k < n; k++)
-                {
-                    Level(null, 0, k);
-                }
+                WriteSilence(until - audioWritten);
             }
+        }
+    }
+
+    /// <summary>`frames` of silence written (under the gate), 200 ms a sample, straight into each buffer's memory (an array
+    /// of floats made for it before: up to 768 KB a time on the large object heap), and its levels with it.</summary>
+    private void WriteSilence(long frames)
+    {
+        while (frames > 0)
+        {
+            var n = (int)Math.Min(frames, AudioRate / 5);
+            var bytes = n * 4;
+            using var buffer = MediaFactory.MFCreateMemoryBuffer(bytes);
+            buffer.Lock(out var data, out _, out _);
+            unsafe
+            {
+                new Span<byte>((void*)data, bytes).Clear();
+            }
+
+            buffer.Unlock();
+            buffer.CurrentLength = bytes;
+            using var sample = MediaFactory.MFCreateSample();
+            sample.AddBuffer(buffer);
+            sample.SampleTime = audioWritten * 10_000_000 / AudioRate;
+            sample.SampleDuration = (audioWritten + n) * 10_000_000 / AudioRate - sample.SampleTime;
+            writer.WriteSample(audioStream, sample);
+            audioWritten += n;
+            for (var k = 0; k < n; k++)
+            {
+                Level(null, 0, k);
+            }
+
+            frames -= n;
         }
     }
 
@@ -488,12 +516,7 @@ internal sealed class SegmentWriter : IDisposable
                 var want = durationHns * AudioRate / 10_000_000;
                 if (want > audioWritten)
                 {
-                    var n = (int)Math.Min(want - audioWritten, AudioRate * 2L);
-                    WritePcm(new float[n * 2], n);
-                    for (var k = 0; k < n; k++)
-                    {
-                        Level(null, 0, k);
-                    }
+                    WriteSilence(Math.Min(want - audioWritten, AudioRate * 2L));
                 }
             }
 

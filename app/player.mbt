@@ -17,16 +17,29 @@ let picture_aspect : @signals.Signal[Double] = @signals.signal(16.0 / 9.0, same=
 /// The segment holding `at` (ms into the buffer), or the next one after a gap; and where in it.
 fn locate(at : Double) -> (Int, Double) {
   let base = t0()
-  for i, s in segs {
-    let a = s.start - base
-    if at < a {
-      return (i, 0.0)
+  // (the last segment starting at or before `at`, found by halving: where pieces overlap by a hair, the next's, and a
+  // step to the next's first frame came back to this one's end, stuck there (the user, 2026-11-15: 「按住右……就不继续
+  // 往右了」))
+  let mut lo = 0
+  let mut hi = segs.length()
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if segs[mid].start - base <= at {
+      lo = mid + 1
+    } else {
+      hi = mid
     }
-    // (where the next piece starts at or before `at`, the next's: pieces may overlap by a hair, and a step to the
-    // next's first frame came back to this one's end, stuck there (the user, 2026-11-15: 「按住右……就不继续往右了」))
-    if at < a + s.dur && !(i + 1 < segs.length() && at >= segs[i + 1].start - base) {
-      return (i, at - a)
-    }
+  }
+  let i = lo - 1
+  if i < 0 {
+    return (0, 0.0)
+  }
+  let a = segs[i].start - base
+  if at < a + segs[i].dur {
+    return (i, at - a)
+  }
+  if i + 1 < segs.length() {
+    return (i + 1, 0.0)
   }
   let last = segs.length() - 1
   (last, @cmp.maximum(0.0, segs[last].dur - 100.0))

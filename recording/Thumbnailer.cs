@@ -36,6 +36,13 @@ internal sealed class Thumbnailer : IDisposable
     private readonly Queue<Pending> pending = new();
     private readonly Stack<ID3D11Texture2D> free = new();
 
+    // (read-backs not taken yet at most this many: a GPU that holds them back does not have a staging texture made for
+    // every frame meanwhile; a thumbnail is then left out)
+    private const int MostPending = 8;
+
+    // JPEGs being made on the thread pool: waited for before the WIC factory they use is let go of
+    private int encoding;
+
     public Thumbnailer(Gpu gpu, int width, int height, int frameRate)
     {
         this.gpu = gpu;
@@ -121,6 +128,11 @@ internal sealed class Thumbnailer : IDisposable
     /// On the recorder's clock thread, as each frame is made.</summary>
     public void Take(ID3D11Texture2D target, uint slice, SegmentWriter writer, long ms)
     {
+        if (pending.Count >= MostPending)
+        {
+            return;
+        }
+
         var ctx = gpu.Context;
         ctx.CopySubresourceRegion(copy, 0, 0, 0, 0, target, slice, new Vortice.Mathematics.Box(0, 0, 0, inW, inH, 1));
         videoContext.VideoProcessorBlt(processor, outputView, 0, 1, [new VideoProcessorStream { Enable = true, InputSurface = inputView }]).CheckError();
@@ -160,7 +172,10 @@ internal sealed class Thumbnailer : IDisposable
             }
 
             pending.Dequeue();
-            var rows = new byte[outW * outH * 4];
+            // (its rows in a pooled buffer: 331 KB each, twice a second, every one a new array on the large object heap
+            // before, some 2.3 GB an hour for the GC)
+            var size = outW * outH * 4;
+            var rows = System.Buffers.ArrayPool<byte>.Shared.Rent(size);
             unsafe
             {
                 for (var y = 0; y < outH; y++)
@@ -172,28 +187,44 @@ internal sealed class Thumbnailer : IDisposable
             ctx.Unmap(p.Staging, 0);
             free.Push(p.Staging);
             var (w, h, writer, ms) = (outW, outH, p.Writer, p.Ms);
-            ThreadPool.QueueUserWorkItem(_ => writer.ThumbMade(ms, Jpeg(rows, w, h)));
+            Interlocked.Increment(ref encoding);
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    writer.ThumbMade(ms, Jpeg(rows, size, w, h));
+                }
+                finally
+                {
+                    System.Buffers.ArrayPool<byte>.Shared.Return(rows);
+                    Interlocked.Decrement(ref encoding);
+                }
+            });
         }
     }
 
-    private byte[]? Jpeg(byte[] bgra, int w, int h)
+    private byte[]? Jpeg(byte[] bgra, int size, int w, int h)
     {
         try
         {
-            using var stream = new MemoryStream();
+            // (made at about its size: some 15-30 KB a thumbnail)
+            using var stream = new MemoryStream(32 << 10);
             using var encoder = wic.CreateEncoder(ContainerFormat.Jpeg);
             encoder.Initialize(stream, BitmapEncoderCacheOption.NoCache);
             using var frame = encoder.CreateNewFrame(out var props);
-            props.Set("ImageQuality", Quality);
-            frame.Initialize(props);
-            props.Dispose();
+            using (props)
+            {
+                props.Set("ImageQuality", Quality);
+                frame.Initialize(props);
+            }
+
             frame.SetSize((uint)w, (uint)h);
             frame.SetPixelFormat(PixelFormat.Format32bppBGR);
             unsafe
             {
                 fixed (byte* px = bgra)
                 {
-                    using var bitmap = wic.CreateBitmapFromMemory((uint)w, (uint)h, PixelFormat.Format32bppBGR, (uint)(w * 4), (uint)bgra.Length, px);
+                    using var bitmap = wic.CreateBitmapFromMemory((uint)w, (uint)h, PixelFormat.Format32bppBGR, (uint)(w * 4), (uint)size, px);
                     frame.WriteSource(bitmap);
                 }
             }
@@ -222,6 +253,14 @@ internal sealed class Thumbnailer : IDisposable
             free.Pop().Dispose();
         }
 
+        // (the JPEGs still being made finish before their factory goes: 2 s at most, else it is left to them)
+        var until = Environment.TickCount64 + 2000;
+        while (Volatile.Read(ref encoding) > 0 && Environment.TickCount64 < until)
+        {
+            Thread.Sleep(5);
+        }
+
+        var done = Volatile.Read(ref encoding) == 0;
         outputView.Dispose();
         inputView.Dispose();
         processor.Dispose();
@@ -230,6 +269,9 @@ internal sealed class Thumbnailer : IDisposable
         copy.Dispose();
         videoContext.Dispose();
         videoDevice.Dispose();
-        wic.Dispose();
+        if (done)
+        {
+            wic.Dispose();
+        }
     }
 }

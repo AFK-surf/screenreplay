@@ -520,14 +520,14 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
 
         sample.SampleTime = time - start;
-        try
+        // (its decode time, where it has one, by IMFAttributes::GetUINT64 (8) asked straight: Vortice's throws where there
+        // is none, an exception thrown and caught for every frame, 60 to 120 a second, on encoders that set none)
+        var key = SampleExtension_DecodeTimestamp;
+        ulong dts;
+        var got = ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, ulong*, int>)(*(IntPtr**)sample.NativePointer)[8])(sample.NativePointer, &key, &dts);
+        if (got >= 0)
         {
-            var dts = sample.GetUInt64(SampleExtension_DecodeTimestamp);
             sample.Set(SampleExtension_DecodeTimestamp, (ulong)Math.Max(0, (long)dts - start));
-        }
-        catch (Exception)
-        {
-            // (no decode time on it)
         }
 
         target.WriteEncoded(sample);
@@ -569,7 +569,13 @@ internal sealed unsafe class VideoEncoder : IDisposable
         {
         }
 
-        pump.Join(TimeSpan.FromSeconds(2));
+        if (!pump.Join(TimeSpan.FromSeconds(2)))
+        {
+            // (the pump still in the encoder (a driver that does not answer): what it uses left as it is, never let go
+            // under it; a leak, not a crash)
+            return;
+        }
+
         Native.Release(codecApi);
         Marshal.Release(events);
         outputType.Dispose();

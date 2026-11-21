@@ -112,9 +112,23 @@ internal sealed unsafe class AudioSource : IDisposable
         return id;
     }
 
+    /// <summary>COM started on this thread once (the sound's thread asks for the default device every 30 s, and opens
+    /// sources again after a failure: each start before counted one more, never ended).</summary>
+    [ThreadStatic]
+    private static bool comStarted;
+
+    private static void StartCom()
+    {
+        if (!comStarted)
+        {
+            comStarted = true;
+            Native.CoInitializeEx(IntPtr.Zero, 0);
+        }
+    }
+
     private static IntPtr DefaultDevice(int flow)
     {
-        Native.CoInitializeEx(IntPtr.Zero, 0);
+        StartCom();
         if (Native.CoCreateInstance(in Native.CLSID_MMDeviceEnumerator, IntPtr.Zero, ClsctxAll, in Native.IID_IMMDeviceEnumerator, out var enumerator) < 0)
         {
             return IntPtr.Zero;
@@ -172,7 +186,7 @@ internal sealed unsafe class AudioSource : IDisposable
     /// <summary>What process <paramref name="pid"/> and the processes it started play, nothing else.</summary>
     public static AudioSource OpenProcess(uint pid)
     {
-        Native.CoInitializeEx(IntPtr.Zero, 0);
+        StartCom();
         // AUDIOCLIENT_ACTIVATION_PARAMS { AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, { pid, INCLUDE_TARGET_PROCESS_TREE } }
         var parameters = stackalloc int[3] { 1, (int)pid, 0 };
         // PROPVARIANT { VT_BLOB, BLOB { cbSize, pBlobData } }
@@ -185,11 +199,15 @@ internal sealed unsafe class AudioSource : IDisposable
         var done = Native.CreateEvent(IntPtr.Zero, true, false, IntPtr.Zero);
         var handler = CompletionHandler.Create(done);
         IntPtr operation = IntPtr.Zero, activated = IntPtr.Zero;
+        var answered = true;
         try
         {
             Native.Check(Native.ActivateAudioInterfaceAsync("VAD\\Process_Loopback", in Native.IID_IAudioClient, (IntPtr)variant, handler, out operation), "ActivateAudioInterfaceAsync");
             if (Native.WaitForSingleObject(done, 5000) != 0)
             {
+                // (its handler may still signal the event later: kept open, never closed under it (a handle closed and
+                // made again for something else would be signalled in its place))
+                answered = false;
                 throw new TimeoutException("process loopback activation did not complete");
             }
 
@@ -216,7 +234,10 @@ internal sealed unsafe class AudioSource : IDisposable
             Native.Release(activated);
             Native.Release(operation);
             Marshal.Release(handler);
-            Native.CloseHandle(done);
+            if (answered)
+            {
+                Native.CloseHandle(done);
+            }
         }
     }
 

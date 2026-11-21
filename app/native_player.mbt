@@ -437,15 +437,29 @@ fn Deck::pos(self : Deck) -> Double {
 /// The piece holding `at` (ms on its clock), or the next one after a gap; and where in it.
 fn Deck::locate(self : Deck, at : Double) -> (Int, Double) {
   let n = (self.count)()
-  for i in 0..<n {
-    let a = (self.start)(i)
-    if at < a {
-      return (i, 0.0)
+  // (the last piece starting at or before `at`, found by halving: asked as the clock goes, over hundreds of pieces;
+  // where pieces overlap by a hair the later one's, as the walk it replaces took)
+  let mut lo = 0
+  let mut hi = n
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if (self.start)(mid) <= at {
+      lo = mid + 1
+    } else {
+      hi = mid
     }
-    // (the next piece's where it starts at or before `at`: pieces may overlap by a hair; locate's)
-    if at < a + (self.dur)(i) && !(i + 1 < n && at >= (self.start)(i + 1)) {
-      return (i, at - a)
-    }
+  }
+  let i = lo - 1
+  if i < 0 {
+    return (0, 0.0)
+  }
+  let a = (self.start)(i)
+  if at < a + (self.dur)(i) {
+    return (i, at - a)
+  }
+  // (in a gap after it: the next one's start)
+  if i + 1 < n {
+    return (i + 1, 0.0)
   }
   (n - 1, @cmp.maximum(0.0, (self.dur)(n - 1) - 100.0))
 }

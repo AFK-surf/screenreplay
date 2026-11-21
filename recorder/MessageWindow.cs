@@ -69,6 +69,12 @@ internal sealed class MessageWindow : IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr RegisterPowerSettingNotification(IntPtr recipient, ref Guid setting, uint flags);
 
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterPowerSettingNotification(IntPtr handle);
+
+    /// <summary>The screen's power notification asked for (let go of in Dispose).</summary>
+    private IntPtr powerNotify;
+
     /// <summary>GUID_CONSOLE_DISPLAY_STATE: the console's displays off (0), on (1) or dimmed (2).</summary>
     private static Guid consoleDisplayState = new("6fe69556-704a-47a0-8f24-c28d936fda47");
 
@@ -197,7 +203,7 @@ internal sealed class MessageWindow : IDisposable
         // NOTIFY_FOR_THIS_SESSION: what SystemEvents.SessionSwitch was told before
         WTSRegisterSessionNotification(Handle, 0);
         // DEVICE_NOTIFY_WINDOW_HANDLE: as WM_POWERBROADCAST's PBT_POWERSETTINGCHANGE
-        RegisterPowerSettingNotification(Handle, ref consoleDisplayState, 0);
+        powerNotify = RegisterPowerSettingNotification(Handle, ref consoleDisplayState, 0);
         before = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(new Context(this));
     }
@@ -349,6 +355,11 @@ internal sealed class MessageWindow : IDisposable
 
         hotkeys.Clear();
         WTSUnRegisterSessionNotification(Handle);
+        if (powerNotify != IntPtr.Zero)
+        {
+            UnregisterPowerSettingNotification(powerNotify);
+            powerNotify = IntPtr.Zero;
+        }
         DestroyWindow(Handle);
         UnregisterClassW(ClassName, instance);
         SynchronizationContext.SetSynchronizationContext(before);

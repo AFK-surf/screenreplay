@@ -222,7 +222,27 @@ priv struct NoteAsk {
 
 ///|
 fn note_file_ask() -> NoteAsk? {
-  match parse(read_text(root_dir() + "\\note.json")) {
+  // (read and parsed only where it was written since it was last read: it is looked at 10 times a second while the
+  // card shows; the same ask as before otherwise)
+  let path = root_dir() + "\\note.json"
+  let written = rp_modified(cstr(path))
+  let size = rp_size(cstr(path))
+  let (seen, seen_size, kept) = note_read.val
+  if written == seen && size == seen_size && written >= 0.0 {
+    return kept
+  }
+  let ask = note_file_parse(path)
+  note_read.val = (written, size, ask)
+  ask
+}
+
+///|
+/// note.json as last read: when it was written then, and what it asked.
+let note_read : Ref[(Double, Double, NoteAsk?)] = Ref((-2.0, -2.0, None))
+
+///|
+fn note_file_parse(path : String) -> NoteAsk? {
+  match parse(read_text(path)) {
     Some(Object(o)) => {
       let str = fn(k) {
         match o.get(k) {

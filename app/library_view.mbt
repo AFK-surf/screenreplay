@@ -55,13 +55,28 @@ fn clip_thumb(path : String) -> String {
   } else if bmp.length() == 1 && bmp[0] == 1 {
     "!"
   } else {
-    match the_root.val {
-      Some(r) => r.at_moment(now() + 50.0, fn() { clips_rev.set(clips_rev.untracked() + 1) }) |> ignore
-      None => ()
+    // (looked for again in 50 ms: once for all the cards waiting, not a timer of each card's, each telling every card
+    // to look again)
+    if !clip_thumb_due.val {
+      match the_root.val {
+        Some(r) => {
+          clip_thumb_due.val = true
+          r.at_moment(now() + 50.0, fn() {
+            clip_thumb_due.val = false
+            clips_rev.set(clips_rev.untracked() + 1)
+          })
+          |> ignore
+        }
+        None => ()
+      }
     }
     ""
   }
 }
+
+///|
+/// Whether the cards' pictures are to be looked for again already.
+let clip_thumb_due : Ref[Bool] = Ref(false)
 
 ///|
 fn clip_card(parent : @view.View, name : String) -> Unit {

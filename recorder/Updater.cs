@@ -346,6 +346,7 @@ internal sealed class Updater : IDisposable
         var fileName = $"ScreenReplay-Setup-{ver}.exe";
         var dest = Path.Combine(TempUpdateDir(), fileName);
         var part = dest + ".part";
+        var handedOn = false;
         try
         {
             var url = DownloadBase() + $"v{ver}/{fileName}";
@@ -417,6 +418,9 @@ internal sealed class Updater : IDisposable
             log($"update: {ver} verified and ready at {dest}");
             WriteState();
 
+            // (let go here, once, before the install takes it: let go again in `finally`, it was cleared under an
+            // install already started, and another could begin beside it)
+            handedOn = true;
             Interlocked.Exchange(ref busy, 0);
             if (askedByUser)
             {
@@ -435,7 +439,10 @@ internal sealed class Updater : IDisposable
         }
         finally
         {
-            Interlocked.Exchange(ref busy, 0);
+            if (!handedOn)
+            {
+                Interlocked.Exchange(ref busy, 0);
+            }
         }
     }
 

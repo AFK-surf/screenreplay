@@ -23,7 +23,24 @@ extern "C" fn rp_write(path : Bytes, data : Bytes) -> Int = "rp_write"
 extern "C" fn rp_mkdirs(path : Bytes) -> Int = "rp_mkdirs"
 
 ///|
-extern "C" fn rp_local_offset() -> Int = "rp_local_offset"
+extern "C" fn rp_local_offset_now() -> Int = "rp_local_offset"
+
+///|
+/// How far local time is ahead of UTC (minutes), asked of Windows at most once a second: the title bar's moment
+/// and the axis asked it three times a frame while playing, each a walk of the time zone's rules.
+let local_offset_read : Ref[(Double, Int)] = Ref((-1.0e18, 0))
+
+///|
+fn rp_local_offset() -> Int {
+  let t = rp_now()
+  let (at, v) = local_offset_read.val
+  if t - at < 1000.0 && t >= at {
+    return v
+  }
+  let v = rp_local_offset_now()
+  local_offset_read.val = (t, v)
+  v
+}
 
 ///|
 extern "C" fn rp_now() -> Double = "rp_now"

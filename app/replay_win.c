@@ -97,7 +97,10 @@ static moonbit_bytes_t rp_list_globs(moonbit_bytes_t dir, const char *const *glo
       if (n <= 1) continue;
       if (len + (size_t)n + 1 > cap) {
         cap = (len + n + 1) * 2;
-        out = (char *)realloc(out, cap);
+        char *more = (char *)realloc(out, cap);
+        // (no more memory: the names so far)
+        if (!more) break;
+        out = more;
       }
       memcpy(out + len, name, (size_t)n - 1);
       len += (size_t)n - 1;
@@ -207,7 +210,9 @@ int32_t rp_write(moonbit_bytes_t path, moonbit_bytes_t data) {
 int32_t rp_mkdirs(moonbit_bytes_t path) {
   wchar_t *w = rp_wide((const char *)path);
   int32_t ok = 1;
-  for (wchar_t *p = w + 3; *p; p++) {
+  // (from past the drive's "C:\"; a path shorter than that from its start: w + 3 was past its end, read beyond it)
+  size_t len = wcslen(w);
+  for (wchar_t *p = w + (len < 3 ? len : 3); *p; p++) {
     if (*p == L'\\' || *p == L'/') {
       wchar_t c = *p;
       *p = 0;
@@ -275,11 +280,13 @@ int32_t rp_copy_file(moonbit_bytes_t path) {
   int32_t ok = 0;
   if (mem) {
     DROPFILES *drop = (DROPFILES *)GlobalLock(mem);
-    drop->pFiles = sizeof(DROPFILES);
-    drop->fWide = TRUE;
-    memcpy((char *)drop + sizeof(DROPFILES), w, n * sizeof(wchar_t));
-    GlobalUnlock(mem);
-    if (OpenClipboard(NULL)) {
+    if (drop) {
+      drop->pFiles = sizeof(DROPFILES);
+      drop->fWide = TRUE;
+      memcpy((char *)drop + sizeof(DROPFILES), w, n * sizeof(wchar_t));
+      GlobalUnlock(mem);
+    }
+    if (drop && OpenClipboard(NULL)) {
       EmptyClipboard();
       if (SetClipboardData(CF_HDROP, mem)) {
         ok = 1;
@@ -487,12 +494,13 @@ int32_t rp_copy_text(moonbit_bytes_t text) {
   if (OpenClipboard(NULL)) {
     EmptyClipboard();
     HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, n);
-    if (g) {
-      memcpy(GlobalLock(g), w, n);
+    void *to = g ? GlobalLock(g) : NULL;
+    if (to) {
+      memcpy(to, w, n);
       GlobalUnlock(g);
       ok = SetClipboardData(CF_UNICODETEXT, g) != NULL;
-      if (!ok) GlobalFree(g);
     }
+    if (g && !ok) GlobalFree(g);
     CloseClipboard();
   }
   free(w);

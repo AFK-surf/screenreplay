@@ -1789,6 +1789,9 @@ static HWND rp_clip_window() {
   static HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   std::call_once(once, []() {
     std::thread([]() {
+      // (COM on this thread: the PNG promised is made here when a program pastes (WM_RENDERFORMAT), by WIC, which
+      // without it could not be made (CoCreateInstance: CO_E_NOTINITIALIZED), so only the DIB was ever pasted)
+      HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
       WNDCLASSW wc = {};
       wc.lpfnWndProc = rp_clip_proc;
       wc.hInstance = GetModuleHandleW(nullptr);
@@ -1799,6 +1802,7 @@ static HWND rp_clip_window() {
       SetEvent(ready);
       MSG m;
       while (GetMessageW(&m, nullptr, 0, 0) > 0) DispatchMessageW(&m);
+      if (SUCCEEDED(co)) CoUninitialize();
     }).detach();
   });
   WaitForSingleObject(ready, 2000);

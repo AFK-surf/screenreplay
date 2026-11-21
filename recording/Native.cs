@@ -150,6 +150,9 @@ internal static partial class Native
     [LibraryImport("kernel32.dll")]
     public static partial uint WaitForSingleObject(IntPtr handle, uint milliseconds);
 
+    [LibraryImport("kernel32.dll")]
+    public static unsafe partial uint WaitForMultipleObjects(uint count, IntPtr* handles, [MarshalAs(UnmanagedType.Bool)] bool waitAll, uint milliseconds);
+
     [LibraryImport("kernel32.dll", EntryPoint = "CreateEventW")]
     public static partial IntPtr CreateEvent(IntPtr attributes, [MarshalAs(UnmanagedType.Bool)] bool manualReset, [MarshalAs(UnmanagedType.Bool)] bool initialState, IntPtr name);
 

@@ -1868,14 +1868,24 @@ internal sealed class RecorderApp : IDisposable
     }
 
     private readonly object logGate = new();
+    private int logWrites;
 
     private void Log(string text)
     {
         try
         {
-            // (the recorder's threads report here too)
+            // (the recorder's threads report here too; begun again past 2 MB, the one before kept as recorder.old.log,
+            // as tray.log is kept small: it grew without end before)
             lock (logGate)
-            File.AppendAllText(Path.Combine(paths.Root, "recorder.log"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {text}\n");
+            {
+                var file = Path.Combine(paths.Root, "recorder.log");
+                if (++logWrites % 64 == 1 && File.Exists(file) && new FileInfo(file).Length > 2_000_000)
+                {
+                    File.Move(file, Path.Combine(paths.Root, "recorder.old.log"), overwrite: true);
+                }
+
+                File.AppendAllText(file, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {text}\n");
+            }
         }
         catch (IOException)
         {
@@ -2259,8 +2269,19 @@ internal static class ForegroundApp
                 var parentExe = parent.StartTime <= current.StartTime ? parent.MainModule?.FileName ?? "" : "";
                 if (parentExe.Length > 0 && string.Equals(parent.ProcessName, process.ProcessName, StringComparison.OrdinalIgnoreCase))
                 {
+                    // (each one gone up from let go of: only the caller's own is the caller's to let go)
+                    if (!ReferenceEquals(current, process))
+                    {
+                        current.Dispose();
+                    }
+
                     current = parent;
                     continue;
+                }
+
+                if (!ReferenceEquals(current, process))
+                {
+                    current.Dispose();
                 }
 
                 var owner = parentExe.Length > 0 &&
