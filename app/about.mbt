@@ -207,6 +207,7 @@ fn link_row(
     .gap(Is(10.0))
     .lines_up(Is(Some(Middle)))
     .cursor(Is(Some(Arrow)))
+    .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
     .ground(By(fn() { mix(clear(c_s3()), c_s3(), hand.shown(b) * 0.5) }))
     |> ignore
     if icon == "x-logo" {
@@ -336,6 +337,10 @@ fn about_page(p : @view.View) -> Unit {
       |> ignore
       setting_row(card, true, fn() { t("版本更新") }, update_note_words, fn(c) {
         c.row(Is(true)).gap(Is(6.0)).lines_up(Is(Some(Middle))) |> ignore
+        let busy = fn() {
+          let s = update_status().state
+          s == "checking" || s == "fetching" || s == "installing"
+        }
         c.show(fn() {
           let s = update_status().state
           s == "found" || s == "fetching" || s == "ready"
@@ -344,7 +349,8 @@ fn about_page(p : @view.View) -> Unit {
             rp_launch(cstr(site_url + "/changelog" + (if is_english() { "?lang=en" } else { "" }))) |> ignore
           }, ghost=true, small=true) |> ignore
         }) |> ignore
-        text_button(c, update_action_words, update_action_pressed, small=true) |> ignore
+        let act_btn = text_button(c, update_action_words, update_action_pressed, small=true)
+        act_btn.alpha(By(fn() { if busy() { 0.45 } else { 1.0 } })).presses(By(fn() { !busy() })) |> ignore
       })
       if rp_install_kind() == 1 {
         toggle_row(card, false, fn() { t("自动更新") }, fn() { t("每天检查一次，空闲时在后台静默下载并更新") }, fn() { sets().auto_update }, fn(v) {
@@ -364,9 +370,11 @@ fn about_page(p : @view.View) -> Unit {
     .edge(By(fn() { if is_dark() { (0.0, 0L) } else { (1.0, 0x00000014L) } }))
     .clips(Is(true))
     |> ignore
-    link_row(card, true, "file-text", fn() { t("更新日志") }, fn() { rp_launch(cstr(site_url + "/changelog")) |> ignore }, external=true)
+    link_row(card, true, "file-text", fn() { t("更新日志") }, fn() {
+      rp_launch(cstr(site_url + "/changelog" + (if is_english() { "?lang=en" } else { "" }))) |> ignore
+    }, external=true)
     link_row(card, false, "shield-check", fn() { t("隐私政策") }, fn() {
-      rp_launch(cstr(site_url + "/privacy")) |> ignore
+      rp_launch(cstr(site_url + "/privacy" + (if is_english() { "?lang=en" } else { "" }))) |> ignore
     }, external=true)
     // (the first run's sheet read again: its words alone, 知道了)
     link_row(card, false, "monitor", fn() { t("录制说明") }, consent_reread)

@@ -123,24 +123,41 @@ fn save_prefs() -> Unit {
 }
 
 ///|
-/// When viewer.json was written as ask_system last read it (-2 never).
+/// When viewer.json and settings.json were written as ask_system last read them (-2 never).
 let viewer_seen : Ref[Double] = Ref(-2.0)
+
+///|
+let settings_seen : Ref[Double] = Ref(-2.0)
 
 ///|
 /// Windows asked how it stands (its theme, its language) now, and again in a second.
 fn ask_system(root : @view.View) -> Unit {
   system_light.set(rp_system_light() == 1)
   system_chinese.set(rp_system_chinese() == 1)
-  still_motion.val = rp_animations_off() == 1
-  // (the switch as viewer.json has it now: another process's window may have turned it; read only where the file was
-  // written since it was last read)
+  still_motion.set(rp_animations_off() == 1)
+  // (reload viewer.json and settings.json when another process writes them, so warm tray & note windows stay in sync)
   let written = rp_modified(cstr(viewer_path()))
   if written != viewer_seen.val {
     viewer_seen.val = written
     match parse(read_text(viewer_path())) {
-      Some(Object(o)) => hidden_from_capture.set(!(o.get("hide_from_capture") is Some(False)))
+      Some(Object(o)) => {
+        hidden_from_capture.set(!(o.get("hide_from_capture") is Some(False)))
+        match o.get("appearance") {
+          Some(String(v)) => appearance.set(v)
+          _ => ()
+        }
+        match o.get("language") {
+          Some(String(v)) => language.set(v)
+          _ => ()
+        }
+      }
       _ => ()
     }
+  }
+  let set_written = rp_modified(cstr(settings_path()))
+  if set_written != settings_seen.val {
+    settings_seen.val = set_written
+    load_settings()
   }
   rp_hide_from_capture(if hidden_from_capture.untracked() { 1 } else { 0 })
   again(root, 1000.0, fn() { ask_system(root) })

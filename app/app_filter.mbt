@@ -333,7 +333,7 @@ fn tick_box(parent : @view.View, on : () -> Bool) -> Unit {
     .lines_up(Is(Some(Middle)))
     .lies_along(Is(Middle))
     .ground(By(fn() { if on() { ui_accent() } else { 0L } }))
-    .edge(By(fn() { if on() { (0.0, 0L) } else { (1.5, c_s4()) } }))
+    .edge(By(fn() { if on() { (0.0, 0L) } else { (1.5, ui_subtle()) } }))
     |> ignore
     c.show(on, fn(g) {
       g
@@ -469,7 +469,7 @@ fn apps_layer(root : @view.View) -> Unit {
         open.go_ms(panel, 1.0, if motion_off() { 1.0 } else { 120.0 })
         panel
         .alpha(By(fn() { open.shown(panel) }))
-        .scale(By(fn() { 0.96 + 0.04 * open.shown(panel) }), about=At(1.0, 1.0))
+        .scale(By(fn() { if motion_off() { 1.0 } else { 0.96 + 0.04 * open.shown(panel) } }), about=At(1.0, 1.0))
         .width(Is(Some(384.0)))
         .padding(Is((6.0, 10.0, 6.0, 8.0)))
         .ground(By(c_s1))
@@ -496,34 +496,39 @@ fn apps_layer(root : @view.View) -> Unit {
           |> ignore
         })
         |> ignore
-        // the rows
-        panel.box(fn(list) {
-          list.each(fn() { apps_rows().0 }, fn(r) { r.0 }, fn(row, r) {
-            app_row(row, @signals.untracked(fn() { r.get() }), @signals.untracked(fn() { app_stats.get().1 }))
-          }, at_once=true)
-          |> ignore
-          list.show(fn() { apps_rows().1 > 0 }, fn(x) {
-            pressable(x, fn() { t("显示全部") }, fn() { apps_more.set(true) }, fn(b) {
-              b
-              .row(Is(true))
-              .height(Is(Some(34.0)))
-              .padding(Is((10.0, 0.0, 10.0, 0.0)))
-              .gap(Is(10.0))
-              .radius(Is(6.0))
-              .lines_up(Is(Some(Middle)))
-              .ground(By(fn() { if b.pointed() { c_s2() } else { 0L } }))
-              |> ignore
-              b.box(fn(n) {
-                n.grow(Is(1.0)).padding(Is((52.0, 0.0, 0.0, 0.0))) |> ignore
-                words(n, fn() { tf("其它 {0} 个", [apps_rows().1.to_string()]) }, 13.0, ui_muted) |> ignore
+        // the rows (scrollable when expanded past ~10 apps so it never overflows a 720 pt window)
+        panel.box(fn(sc) {
+          sc.max_height(Is(Some(400.0))) |> ignore
+          sc.scrolls(@view.Scroll::new(), slop=@ui.touch_slop(), bar=@ui.tree_scroll_bar(), fn(list) {
+            list.each(fn() { apps_rows().0 }, fn(r) { r.0 }, fn(row, r) {
+              app_row(row, @signals.untracked(fn() { r.get() }), @signals.untracked(fn() { app_stats.get().1 }))
+            }, at_once=true)
+            |> ignore
+            list.show(fn() { apps_rows().1 > 0 }, fn(x) {
+              pressable(x, fn() { t("显示全部") }, fn() { apps_more.set(true) }, fn(b) {
+                b
+                .row(Is(true))
+                .height(Is(Some(34.0)))
+                .padding(Is((10.0, 0.0, 10.0, 0.0)))
+                .gap(Is(10.0))
+                .radius(Is(6.0))
+                .lines_up(Is(Some(Middle)))
+                .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+                .ground(By(fn() { if b.pointed() || b.focus_shown() { c_s2() } else { 0L } }))
+                |> ignore
+                b.box(fn(n) {
+                  n.grow(Is(1.0)).padding(Is((52.0, 0.0, 0.0, 0.0))) |> ignore
+                  words(n, fn() { tf("其他 {0} 个", [apps_rows().1.to_string()]) }, 13.0, ui_muted) |> ignore
+                })
+                |> ignore
+                words(b, fn() { front_words(apps_rows().2) }, 12.0, ui_subtle) |> ignore
+                // (the share column's room, so its time stands with the rows' times)
+                b.box(fn(sp) { sp.width(Is(Some(30.0))) |> ignore }) |> ignore
               })
               |> ignore
-              words(b, fn() { front_words(apps_rows().2) }, 12.0, ui_subtle) |> ignore
-              // (the share column's room, so its time stands with the rows' times)
-              b.box(fn(sp) { sp.width(Is(Some(30.0))) |> ignore }) |> ignore
-            })
+            }, at_once=true)
             |> ignore
-          }, at_once=true)
+          })
           |> ignore
         })
         |> ignore

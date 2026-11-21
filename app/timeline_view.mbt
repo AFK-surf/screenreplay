@@ -726,7 +726,7 @@ fn band_moved(x : Double, w : Double) -> Unit {
   // (an end of the clip moves only once it is dragged 4 points: pressed and let go, it is a click that takes the
   // playhead to that end; the user, 2026-11-20 「在clip模式下，很难把playhead移动到开头」)
   let g = grabbed.untracked()
-  if (g == 1 || g == 2) && !clip_moved.val {
+  if (g == 1 || g == 2 || g == 4) && !clip_moved.val {
     if (x - band_down_x.val).abs() < 4.0 {
       return
     }

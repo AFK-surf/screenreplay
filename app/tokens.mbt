@@ -80,7 +80,7 @@ fn ui_muted() -> Int64 {
 
 ///|
 fn ui_subtle() -> Int64 {
-  tone(0x8C9199FFL, 0x6C7178FFL)
+  tone(0x9AA0A8FFL, 0x595E66FFL)
 }
 
 ///|
@@ -115,7 +115,7 @@ fn rec_red() -> Int64 {
 /// What cannot be undone (deleting recordings, a clip to the Recycle Bin; the user, 2026-11-15: 「对危险功能要改成红
 /// 色」): its words red, on a faint red ground (14%, 22% under the pointer; light 10%, 17%).
 fn danger_ink() -> Int64 {
-  tone(0xFF6B6BFFL, 0xD92D2DFFL)
+  tone(0xFF7D7DFFL, 0xB91C1CFFL)
 }
 
 ///|
@@ -126,7 +126,13 @@ fn danger_ground(hover : Double) -> Int64 {
 ///|
 /// Amber: only warnings.
 fn warn() -> Int64 {
-  tone(0xE5A545FFL, 0xA85F00FFL)
+  tone(0xE5A545FFL, 0x8F4F00FFL)
+}
+
+///|
+/// Visible keyboard focus ring (only shown on focus_shown(), never on mouse hover).
+fn focus_ring() -> Int64 {
+  tone(0xFFFFFFB3L, 0x17181BB3L)
 }
 
 ///|
@@ -163,7 +169,7 @@ let stage_text : Int64 = 0xEDEEF0FFL
 let stage_muted : Int64 = 0xA4A8B0FFL
 
 ///|
-let stage_subtle : Int64 = 0x7A7F88FFL
+let stage_subtle : Int64 = 0x8F959EFFL
 
 ///|
 let stage_hover : Int64 = 0xFFFFFF1AL

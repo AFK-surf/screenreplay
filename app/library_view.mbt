@@ -91,7 +91,15 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
       .ground(Is(picture_ground))
       .lines_up(Is(Some(Middle)))
       .lies_along(Is(Middle))
-      .edge(By(fn() { (1.0, if pic.pointed() { tone(0xFFFFFF33L, 0x00000040L) } else { hair2() }) }))
+      .edge(By(fn() {
+        if pic.focus_shown() {
+          (1.5, focus_ring())
+        } else if pic.pointed() {
+          (1.0, tone(0xFFFFFF33L, 0x00000040L))
+        } else {
+          (1.0, hair2())
+        }
+      }))
       .image(By(fn() {
         clips_rev.get() |> ignore
         let k = if av1_unplayable(path) { "!" } else { clip_thumb(path) }
@@ -151,24 +159,16 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
     card.box(fn(foot) {
       foot.row(Is(true)).height(Is(Some(34.0))).gap(Is(2.0)).lines_up(Is(Some(Middle))) |> ignore
       foot.box(fn(n) {
-        n.grow(Is(1.0)).basis(Is(Some(0.0))).gap(Is(2.0)).clips(Is(true)) |> ignore
-        words(n, fn() { clip_title(name) }, 13.0, ui_text, weight=500) |> ignore
-        words(n, fn() {
-          let mb = (rp_size(cstr(path)) / 1048576.0).to_int()
-          if mb < 1 {
-            t("小于 1 MB")
-          } else {
-            "\{mb} MB"
-          }
-        }, 12.0, ui_subtle)
-        |> ignore
+        n.grow(Is(1.0)).basis(Is(Some(0.0))).min_width(Is(Some(0.0))).gap(Is(2.0)).clips(Is(true)) |> ignore
+        words(n, fn() { clip_title(name) }, 13.0, ui_text, weight=500).min_width(Is(Some(0.0))).allow_ellipsis(Is(true)) |> ignore
+        words(n, fn() { bytes_text(rp_size(cstr(path))) }, 12.0, ui_subtle).min_width(Is(Some(0.0))).allow_ellipsis(Is(true)) |> ignore
       })
       |> ignore
       foot.pick(fn() { delete_pending.get() == name }, fn(b, asking) {
-        b.row(Is(true)).gap(Is(2.0)).lines_up(Is(Some(Middle))) |> ignore
+        b.row(Is(true)).gap(Is(4.0)).lines_up(Is(Some(Middle))) |> ignore
         if asking {
-          text_button(b, fn() { t("取消") }, fn() { delete_pending.set("") }, ghost=true) |> ignore
-          text_button(b, fn() { t("移到回收站") }, fn() {
+          text_button(b, fn() { t("取消") }, fn() { delete_pending.set("") }, ghost=true, small=true) |> ignore
+          let del = text_button(b, fn() { t("删除") }, fn() {
             let result = rp_recycle(cstr(path))
             library_message.set(
               if result == 0 {
@@ -179,8 +179,8 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
             )
             delete_pending.set("")
             clips_read()
-          }, danger=true)
-          |> ignore
+          }, danger=true, small=true)
+          tip(del, fn() { t("移到回收站") })
         } else {
           icon_button(b, fn() { "copy" }, fn() { t("复制") }, fn() {
             library_message.set(
@@ -229,9 +229,14 @@ fn library_layer(root : @view.View) -> Unit {
         b.grow(Is(1.0)) |> ignore
         if empty {
           b.lines_up(Is(Some(Middle))).lies_along(Is(Middle)).gap(Is(12.0)) |> ignore
-          @sf.icon_node(b, "folder", 32.0, By(ui_subtle)) |> ignore
+          @sf.icon_node(b, "clips", 32.0, By(ui_subtle)) |> ignore
           words(b, fn() { t("还没有保存的片段") }, 15.0, ui_text, weight=600) |> ignore
           words(b, fn() { t("在回放里按 C 选取一段，按 Enter 保存，就会出现在这里。") }, 13.0, ui_muted) |> ignore
+          b.box(fn(pad) {
+            pad.padding(Is((0.0, 4.0, 0.0, 0.0))) |> ignore
+            text_button(pad, fn() { t("回到回放") }, fn() { library_open.set(false) }) |> ignore
+          })
+          |> ignore
         } else {
           b.gap(Is(28.0)) |> ignore
           for row in 0..<2 {
@@ -263,14 +268,20 @@ fn library_layer(root : @view.View) -> Unit {
         spring(foot)
         foot.show(fn() { pages() > 1 }, fn(b) {
           b.row(Is(true)).gap(Is(10.0)).lines_up(Is(Some(Middle))) |> ignore
+          let can_prev = fn() { library_page.get() > 0 }
+          let can_next = fn() { library_page.get() + 1 < pages() }
           icon_button(b, fn() { "chevron-left" }, fn() { t("上一页") }, fn() {
             library_page.set(@cmp.maximum(0, library_page.untracked() - 1))
           })
+          .alpha(By(fn() { if can_prev() { 1.0 } else { 0.35 } }))
+          .presses(By(can_prev))
           |> ignore
           words(b, fn() { "\{library_page.get() + 1} / \{pages()}" }, 12.0, ui_muted) |> ignore
           icon_button(b, fn() { "chevron-right" }, fn() { t("下一页") }, fn() {
             library_page.set(@cmp.minimum(@signals.untracked(pages) - 1, library_page.untracked() + 1))
           })
+          .alpha(By(fn() { if can_next() { 1.0 } else { 0.35 } }))
+          .presses(By(can_next))
           |> ignore
         }, at_once=true)
       })
@@ -444,7 +455,14 @@ fn clip_player_layer(root : @view.View) -> Unit {
       // the picture and the rows, a column as wide as the picture (in full screen all of the window, the rows over it)
       s.box(fn(col) {
         col
-        .width(By(fn() { Some(if fs() { col.window().0 } else { clip_fit(col).0 }) }))
+        .width(By(fn() {
+          if fs() {
+            Some(col.window().0)
+          } else {
+            let max_w = @cmp.maximum(320.0, col.window().0 - 2.0 * stage_side)
+            Some(@cmp.minimum(max_w, @cmp.maximum(480.0, clip_fit(col).0)))
+          }
+        }))
         .height(By(fn() { if fs() { Some(col.window().1) } else { None } }))
         .lines_up(Is(Some(Middle)))
         .lies_along(Is(Middle))
@@ -475,13 +493,10 @@ fn clip_player_layer(root : @view.View) -> Unit {
             .on_pointer_moved(fn() { moved() })
             |> ignore
             row.box(fn(n) {
-              n.row(Is(true)).grow(Is(1.0)).basis(Is(Some(0.0))).shrink(Is(1.0)).gap(Is(10.0)).cuts(Is(true)).lines_up(Is(Some(Middle))) |> ignore
-              words(n, fn() { clip_title(name) }, 13.0, fn() { stage_text }, weight=600) |> ignore
+              n.row(Is(true)).grow(Is(1.0)).basis(Is(Some(0.0))).shrink(Is(1.0)).min_width(Is(Some(0.0))).gap(Is(10.0)).cuts(Is(true)).lines_up(Is(Some(Middle))) |> ignore
+              words(n, fn() { clip_title(name) }, 13.0, fn() { stage_text }, weight=600).min_width(Is(Some(0.0))).allow_ellipsis(Is(true)) |> ignore
               words(n, fn() {
-                // (as its card on the clips page says it)
-                let mb = (rp_size(cstr(path)) / 1048576.0).to_int()
-                let size = if mb < 1 { t("小于 1 MB") } else { "\{mb} MB" }
-                size + " · " + clock((d.span)())
+                bytes_text(rp_size(cstr(path))) + " · " + clock((d.span)())
               }, 12.0, fn() { stage_muted })
               |> ignore
             })
@@ -639,7 +654,7 @@ fn clip_progress(parent : @view.View, d : Deck, path : String, moved : () -> Uni
       .height(Is(Some(stage_bar_h)))
       .presses(Is(true))
       .cursor(Is(Some(Arrow)))
-      .says(Is(Some(@view.said(Slider, label="position"))))
+      .says(By(fn() { Some(@view.said(Slider, label=t("播放进度"))) }))
       .lies_along(Is(Middle))
       .on_pointer_moved(moved)
       .on_drag(fn(e) {

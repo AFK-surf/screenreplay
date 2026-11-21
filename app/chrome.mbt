@@ -37,7 +37,7 @@ fn volume_control(parent : @view.View, stage? : Bool = false) -> Unit {
     // closing only 400 ms after the pointer left (800 was too slow, the user, 2026-11-16), called off if it comes back meanwhile: at once, it was gone before
     // the hand had settled (the user, 2026-11-16: 「音量调节这个消失太快了」))
     let close_later : Ref[() -> Unit] = Ref(fn() {  })
-    area.reacts(fn() { area.pointer_within() || speaker.pointed() || volume_drag.get() }, fn(on) {
+    area.reacts(fn() { area.pointer_within() || speaker.pointed() || speaker.focus_shown() || volume_drag.get() }, fn(on) {
       (close_later.val)()
       close_later.val = fn() {  }
       if on {
@@ -57,7 +57,7 @@ fn volume_control(parent : @view.View, stage? : Bool = false) -> Unit {
         .height(Is(Some(20.0)))
         .presses(Is(true))
         .cursor(Is(Some(Arrow)))
-        .says(Is(Some(@view.said(Slider, label="volume"))))
+        .says(By(fn() { Some(@view.said(Slider, label=t("音量"))) }))
         .on_drag(fn(d) {
           if d.kind == Down {
             region_let_go()
@@ -332,12 +332,13 @@ fn recorder_chip(parent : @view.View) -> Unit {
     k
     .row(Is(true))
     .height(Is(Some(28.0)))
-    .padding(Is((10.0, 0.0, 10.0, 0.0)))
-    .gap(Is(7.0))
+    .padding(Is((10.0, 0.0, 8.0, 0.0)))
+    .gap(Is(6.0))
     .radius(Is(6.0))
     .lines_up(Is(Some(Middle)))
     .cursor(Is(Some(Arrow)))
-    .ground(By(fn() { if k.pointed() { press_ground() } else { 0L } }))
+    .edge(By(fn() { if k.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+    .ground(By(fn() { if k.pointed() || k.focus_shown() { press_ground() } else { 0L } }))
     |> ignore
     k.pick(fn() { recorder_status().1 }, fn(b, on) {
       b.row(Is(true)).gap(Is(7.0)).lines_up(Is(Some(Middle))) |> ignore
@@ -421,6 +422,16 @@ fn recorder_chip(parent : @view.View) -> Unit {
         |> ignore
       }
     }, at_once=true)
+    k.box(fn(c) {
+      c
+      .width(Is(Some(8.0)))
+      .height(Is(Some(8.0)))
+      .laid_nowhere(By(fn() { recorder_code() == "" }))
+      .picture(Is(Some(vector("M1.5 3 4 5.5 6.5 3", 8.0, 8.0, stroke=1.25))))
+      .tint(By(ui_subtle))
+      |> ignore
+    })
+    |> ignore
   })
   |> ignore
 }

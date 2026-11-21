@@ -14,12 +14,12 @@ fn with_alpha(c : Int64, a : Double) -> Int64 {
 ///|
 /// The warm gold, and its brighter (dark) or deeper (light) hover.
 fn amber() -> Int64 {
-  tone(0xE5A545FFL, 0xB87314FFL)
+  tone(0xE5A545FFL, 0x9E600DFFL)
 }
 
 ///|
 fn amber_hi() -> Int64 {
-  tone(0xF5C36BFFL, 0x9A5C0AFFL)
+  tone(0xF5C36BFFL, 0x824E08FFL)
 }
 
 ///|
@@ -85,7 +85,7 @@ fn sponsor_card(p : @view.View) -> Unit {
     // (REPLAY_DEV_POINTER's pointer, a test window's, points at nothing: where it is within the card counts so)
     let dev_hand = @ui.env("REPLAY_DEV_POINTER") == "1"
     card.reacts(fn() { card.pointed() || card.focus_shown() || (dev_hand && card.pointer_within()) }, fn(on) {
-      if still {
+      if motion_off() {
         hand.put(if on { 1.0 } else { 0.0 })
         return
       }
@@ -110,7 +110,11 @@ fn sponsor_card(p : @view.View) -> Unit {
       }
     })
     card.reacts(fn() { card.pressed() }, fn(on) {
-      held.go_ms(card, if on { 0.99 } else { 1.0 }, if still { 1.0 } else { 100.0 })
+      if motion_off() {
+        held.put(1.0)
+      } else {
+        held.go_ms(card, if on { 0.99 } else { 1.0 }, 100.0)
+      }
     })
     card
     .scale(By(fn() { held.shown(card) }))
@@ -126,6 +130,9 @@ fn sponsor_card(p : @view.View) -> Unit {
       mix(tone(c_s2(), 0xF4F5F7FFL), amber(), 0.07 + 0.06 * h)
     }))
     .edge(By(fn() {
+      if card.focus_shown() {
+        return (1.5, focus_ring())
+      }
       let h = hand.shown(card)
       // (the glow as it comes: its edge brighter a moment, gone by its end)
       let g = glow.shown(card)
@@ -195,7 +202,7 @@ fn sponsor_card(p : @view.View) -> Unit {
     card.box(fn(copy) {
       copy.grow(Is(1.0)).min_width(Is(Some(0.0))).gap(Is(2.0)) |> ignore
       words(copy, fn() { t("赞助作者") }, 13.0, ui_text, weight=600) |> ignore
-      words(copy, fn() { t("ScreenReplay 免费使用，觉得好用可以请我喝杯咖啡") }, 11.5, ui_subtle)
+      words(copy, fn() { t("ScreenReplay 免费使用，觉得好用可以请我喝杯咖啡") }, 12.0, ui_subtle)
       .shrink(Is(1.0))
       .min_width(Is(Some(0.0)))
       .allow_ellipsis(Is(true))

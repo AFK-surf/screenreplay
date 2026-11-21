@@ -60,14 +60,13 @@ fn note_body(
   parent.padding(Is(if path == "" { (14.0, 0.0, 8.0, 0.0) } else { (14.0, 14.0, 14.0, 14.0) })).gap(Is(12.0)) |> ignore
   if path == "" {
     parent.row(Is(true)).lines_up(Is(Some(Middle))).gap(Is(10.0)) |> ignore
-    @sf.icon_node(parent, if warning { "info" } else { mark }, 16.0, By(fn() {
+    glyph(parent, fn() { if warning { "warn-tri" } else { mark } }, 16.0, fn() {
       if warning {
-        0xD08A1EFFL
+        warn()
       } else {
         ui_muted()
       }
-    }))
-    |> ignore
+    })
     words(parent, title, 13.0, ui_text, weight=500).grow(Is(1.0)).shrink(Is(1.0)).min_width(Is(Some(0.0))).allow_ellipsis(Is(true))
     |> ignore
     icon_button(parent, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore
@@ -143,21 +142,13 @@ fn note_body(
       })
       |> ignore
       words(says, fn() { clip_title(name) }, 12.0, ui_muted).allow_ellipsis(Is(true)).min_width(Is(Some(0.0))) |> ignore
-      words(says, fn() {
-        let mb = (rp_size(cstr(path)) / 1048576.0).to_int()
-        if mb < 1 {
-          t("小于 1 MB")
-        } else {
-          "\{mb} MB"
-        }
-      }, 12.0, ui_subtle)
-      |> ignore
+      words(says, fn() { bytes_text(rp_size(cstr(path))) }, 12.0, ui_subtle) |> ignore
     })
     |> ignore
     // (the close button at the head's right, its top with the picture's)
     head.box(fn(c) {
       c.height(Is(Some(72.0))) |> ignore
-      icon_button(c, fn() { "close" }, fn() { t("关闭") }, close, w=24.0, h=24.0, size=12.0) |> ignore
+      icon_button(c, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore
     })
     |> ignore
   })
@@ -298,14 +289,29 @@ fn note_window(root : @view.View) -> Unit {
     }
   }
   let ask : @signals.Signal[NoteAsk] = @signals.signal(first)
-  // (gone after its time, counted once there is something whole to show, later while the pointer is over it)
-  fn leave() -> Unit {
-    if root.pointed() {
-      again(root, 1000.0, leave)
-    } else {
-      gone()
+  // (gone after its time, counted once there is something whole to show; generation-guarded so newer asks or copy clicks
+  // extend cleanly instead of being killed by a stale timer, and pointer_within keeps the card alive over child buttons)
+  let leave_gen : Ref[Int] = Ref(0)
+  fn schedule_leave(ms : Double) -> Unit {
+    leave_gen.val += 1
+    let mine = leave_gen.val
+    fn check() -> Unit {
+      if leave_gen.val != mine {
+        return
+      }
+      if root.pointer_within() || root.pointed() {
+        again(root, 2000.0, check)
+      } else {
+        gone()
+      }
     }
+    again(root, ms, check)
   }
+  root.reacts(fn() { note_copied.get() }, fn(v) {
+    if v != "" {
+      schedule_leave(4000.0)
+    }
+  })
   let height = fn(a : NoteAsk) { if a.mode == "saved" && a.path != "" { note_clip_h } else { note_line_h } }
   // (seen: made the card's size at the tray's corner, cloaked, and let be seen once a frame of it is drawn)
   let shown_at = Ref(-1.0)
@@ -317,7 +323,9 @@ fn note_window(root : @view.View) -> Unit {
     again(root, 60.0, fn() { rp_note_reveal() })
     shown_at.val = rp_now()
     if a.mode != "saved" || a.path != "" {
-      again(root, if a.mode == "saved" { 8000.0 } else { 4000.0 }, leave)
+      schedule_leave(if a.mode == "saved" { 8000.0 } else if a.warn { 7000.0 } else { 4000.0 })
+    } else {
+      leave_gen.val += 1
     }
   }
   if first.mode != "" {
@@ -339,7 +347,7 @@ fn note_window(root : @view.View) -> Unit {
           ask.set(a)
           // (grown to the clip's card, its foot where it was)
           rp_note_window(note_w, height(a), 0) |> ignore
-          again(root, 8000.0, leave)
+          schedule_leave(8000.0)
         }
       }
       _ => ()

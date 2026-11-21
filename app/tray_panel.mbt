@@ -30,7 +30,18 @@ fn tray_mode() -> Bool {
 let tray_w : Double = 280.0
 
 ///|
-let tray_h : Double = 359.0
+let tray_h : Double = 368.0
+
+///|
+fn tray_height_for(code : String) -> Double {
+  if code == "paused" {
+    336.0
+  } else if code == "disabled" {
+    304.0
+  } else {
+    368.0
+  }
+}
 
 ///|
 /// What is chosen told to the recorder, and the panel hidden.
@@ -51,11 +62,12 @@ fn tray_item(parent : @view.View, label : () -> String, keys : String, press : (
     .radius(Is(6.0))
     .lines_up(Is(Some(Middle)))
     .cursor(Is(Some(Arrow)))
+    .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
     .ground(By(fn() { if b.pointed() || b.focus_shown() { c_s3() } else { 0L } }))
     |> ignore
     b.box(fn(l) {
-      l.grow(Is(1.0)) |> ignore
-      words(l, label, 13.0, ui_text, weight=if strong { 600 } else { 400 }) |> ignore
+      l.grow(Is(1.0)).min_width(Is(Some(0.0))) |> ignore
+      words(l, label, 13.0, ui_text, weight=if strong { 600 } else { 400 }).min_width(Is(Some(0.0))).allow_ellipsis(Is(true)) |> ignore
     })
     |> ignore
     if keys != "" {
@@ -88,7 +100,8 @@ fn tray_window(root : @view.View) -> Unit {
   root.ground(By(c_s2)).pad(Is(4.0)) |> ignore
   // (its window made a panel once it is up; while it shows, the recorder's word read every second)
   // (and drawn once unseen, its device made, before anyone presses for it: rp_tray_window, rp_tray_primed)
-  root.at_moment(now() + 1.0, fn() { rp_tray_window(tray_w, tray_h) |> ignore }) |> ignore
+  root.at_moment(now() + 1.0, fn() { rp_tray_window(tray_w, tray_height_for(@signals.untracked(recorder_code))) |> ignore }) |> ignore
+  root.reacts(recorder_code, fn(code) { rp_tray_window(tray_w, tray_height_for(code)) |> ignore })
   fn look() -> Unit {
     if rp_window_shown() == 1 {
       status_rev.set(status_rev.untracked() + 1)
@@ -109,7 +122,15 @@ fn tray_window(root : @view.View) -> Unit {
         .width(Is(Some(7.0)))
         .height(Is(Some(7.0)))
         .radius(Is(3.5))
-        .ground(By(fn() { if recorder_status().1 { 0xFF4D4DFFL } else { 0xD08A1EFFL } }))
+        .ground(By(fn() {
+          if recorder_status().1 {
+            rec_red()
+          } else if recorder_code() == "disabled" {
+            ui_subtle()
+          } else {
+            warn()
+          }
+        }))
         |> ignore
       })
       |> ignore
@@ -132,10 +153,10 @@ fn tray_window(root : @view.View) -> Unit {
   |> ignore
   tray_rule(root)
   // what it is for, first: the last moments saved
-  tray_item(root, fn() { tf("保存最近 {0} 秒", [settings.last_seconds.to_string()]) }, "Ctrl+Alt+S", fn() { tray_do(5) }, strong=true)
+  tray_item(root, fn() { tf("保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, "Ctrl+Alt+S", fn() { tray_do(5) }, strong=true)
   tray_item(root, fn() { t("打开回放") }, "Ctrl+Alt+R", fn() { tray_do(1) })
   tray_item(root, fn() { t("标记此刻") }, "Ctrl+Alt+M", fn() { tray_do(4) })
-  tray_item(root, fn() { t("已保存片段文件夹") }, "", fn() { tray_do(3) })
+  tray_item(root, fn() { t("打开已保存片段文件夹") }, "", fn() { tray_do(3) })
   tray_rule(root)
   // recording held or let go, as it stands now
   root.pick(fn() { recorder_code() }, fn(b, code) {
@@ -153,8 +174,8 @@ fn tray_window(root : @view.View) -> Unit {
       tray_item(b, fn() { t("关闭后台录制") }, "", fn() { tray_do(9) })
     }
   }, at_once=true)
-  spring(root)
   tray_rule(root)
   tray_item(root, fn() { t("设置…") }, "", fn() { tray_do(2) })
+  tray_rule(root)
   tray_item(root, fn() { t("退出") }, "", fn() { tray_do(11) })
 }

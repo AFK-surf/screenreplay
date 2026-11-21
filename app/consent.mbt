@@ -147,11 +147,12 @@ fn consent_button(parent : @view.View, label : () -> String, press : () -> Unit,
     let (hand, _) = answer(b)
     b
     .row(Is(true))
-    .height(Is(Some(34.0)))
+    .height(Is(Some(32.0)))
     .padding(Is((16.0, 0.0, 16.0, 0.0)))
     .gap(Is(8.0))
     .radius(Is(8.0))
     .lines_up(Is(Some(Middle)))
+    .edge(By(fn() { if b.focus_shown() { (1.5, if primary { ui_subtle() } else { focus_ring() }) } else { (0.0, 0L) } }))
     .ground(By(fn() {
       let h = hand.shown(b)
       if primary {
@@ -224,7 +225,9 @@ fn consent_option(parent : @view.View, label : () -> String, control : (@view.Vi
 ///|
 /// 隐私政策: 12, subtle (muted under the pointer), a line 3 under it; the site's page opened, as About's is.
 fn privacy_link(parent : @view.View) -> Unit {
-  pressable(parent, fn() { t("隐私政策") }, fn() { rp_launch(cstr(site_url + "/privacy")) |> ignore }, fn(b) {
+  pressable(parent, fn() { t("隐私政策") }, fn() {
+    rp_launch(cstr(site_url + "/privacy" + (if is_english() { "?lang=en" } else { "" }))) |> ignore
+  }, fn(b) {
     let (hand, _) = answer(b)
     let ink = fn() { mix(ui_subtle(), ui_muted(), hand.shown(b)) }
     b.gap(Is(1.0)) |> ignore
@@ -289,34 +292,41 @@ fn consent_sheet(root : @view.View) -> Unit {
         |> ignore
       })
       |> ignore
-      room(card, 20.0)
-      card.box(fn(rows) {
-        rows
-        .radius(Is(10.0))
-        .ground(By(fn() { tone(c_s2(), 0xF4F5F7FFL) }))
-        .edge(By(fn() { if is_dark() { (0.0, 0L) } else { (1.0, 0x00000014L) } }))
-        .clips(Is(true))
+      room(card, 16.0)
+      card.box(fn(sc) {
+        sc.max_height(Is(Some(440.0))) |> ignore
+        sc.scrolls(@view.Scroll::new(), slop=@ui.touch_slop(), bar=@ui.tree_scroll_bar(), fn(body) {
+          body.box(fn(rows) {
+            rows
+            .radius(Is(10.0))
+            .ground(By(fn() { tone(c_s2(), 0xF4F5F7FFL) }))
+            .edge(By(fn() { if is_dark() { (0.0, 0L) } else { (1.0, 0x00000014L) } }))
+            .clips(Is(true))
+            |> ignore
+            consent_row(rows, true, "screen", fn() { t("录什么") }, fn() {
+              t("主屏幕的画面和系统声音。麦克风默认不录。还会记下每个时刻在前台的应用和各窗口的位置、标题，用来画时间线和按窗口导出。也会记下鼠标、键盘和手柄用得多频繁（只记次数，不记按了哪个键、点在哪里），在时间线上标出忙碌的时段。开始录制时，Windows 可能会问一次是否允许它截屏时不显示黄色边框，允许即可。")
+            })
+            consent_row(rows, false, "disk", fn() { t("存在哪、留多久") }, fn() {
+              t("只存在这台电脑上，不上传。只保留最近一段时间，更早的自动删除。")
+            })
+            consent_row(rows, false, "pause", fn() { t("你随时可以") }, fn() {
+              t("从托盘图标暂停或退出；在「设置 › 存储」里删除全部录像；在设置里关掉声音或整个后台录制。")
+            })
+            consent_row(rows, false, "shield", fn() { t("它不做的") }, fn() { t("这个版本不收集任何使用统计，也不发送崩溃报告。") })
+          })
+          |> ignore
+          body.show(fn() { !consent_reading.get() }, fn(opts) {
+            opts.padding(Is((0.0, 14.0, 0.0, 0.0))).gap(Is(10.0)) |> ignore
+            consent_option(opts, fn() { t("保留最近") }, consent_choice)
+            consent_option(opts, fn() { t("开机时自动启动并开始录制") }, fn(c) {
+              switch(c, fn() { t("开机时自动启动并开始录制") }, fn() { consent_autostart.get() }, fn(v) { consent_autostart.set(v) })
+            })
+          }, at_once=true)
+        })
         |> ignore
-        consent_row(rows, true, "screen", fn() { t("录什么") }, fn() {
-          t("主屏幕的画面和系统声音。麦克风默认不录。还会记下每个时刻在前台的应用和各窗口的位置、标题，用来画时间线和按窗口导出。也会记下鼠标、键盘和手柄用得多频繁（只记次数，不记按了哪个键、点在哪里），在时间线上标出忙碌的时段。开始录制时，Windows 可能会问一次是否允许它截屏时不显示黄色边框，允许即可。")
-        })
-        consent_row(rows, false, "disk", fn() { t("存在哪、留多久") }, fn() {
-          t("只存在这台电脑上，不上传。只保留最近一段时间，更早的自动删除。")
-        })
-        consent_row(rows, false, "pause", fn() { t("你随时可以") }, fn() {
-          t("从托盘图标暂停或退出；在「设置 › 存储」里删除全部录像；在设置里关掉声音或整个后台录制。")
-        })
-        consent_row(rows, false, "shield", fn() { t("它不做的") }, fn() { t("这个版本不收集任何使用统计，也不发送崩溃报告。") })
       })
       |> ignore
-      card.show(fn() { !consent_reading.get() }, fn(opts) {
-        opts.padding(Is((0.0, 16.0, 0.0, 0.0))).gap(Is(10.0)) |> ignore
-        consent_option(opts, fn() { t("保留最近") }, consent_choice)
-        consent_option(opts, fn() { t("开机时自动启动并开始录制") }, fn(c) {
-          switch(c, fn() { t("开机时自动启动并开始录制") }, fn() { consent_autostart.get() }, fn(v) { consent_autostart.set(v) })
-        })
-      }, at_once=true)
-      room(card, 20.0)
+      room(card, 16.0)
       card.box(fn(foot) {
         foot.row(Is(true)).gap(Is(10.0)).lines_up(Is(Some(Middle))) |> ignore
         privacy_link(foot)

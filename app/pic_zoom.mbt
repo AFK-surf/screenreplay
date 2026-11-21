@@ -132,19 +132,19 @@ fn pic_zoomed_node(s : @view.View) -> Unit {
 }
 
 ///|
-/// The pill in the picture's top right corner while it is grown: how large (200%) and 适应窗口; pressed, fitted again.
+/// The pill in the picture's bottom right corner while it is grown (clear of top-left pause badge and top-right saved card): how large (200%) and 适应窗口; pressed, fitted again.
 fn pic_zoom_pill(pic : @view.View) -> Unit {
   pic.box(fn(o) {
     // (the layer itself takes no finger: a press beside the pill is the picture's)
     o
     .over(Is(true))
     .lines_up(Is(Some(End)))
-    .lies_along(Is(Start))
-    .padding(Is((0.0, 10.0, 10.0, 0.0)))
+    .lies_along(Is(End))
+    .padding(Is((0.0, 0.0, 12.0, 12.0)))
     .takes(fn(_, _, _) { [] })
     |> ignore
     o.show(fn() { pic_zoomed() }, fn(b) {
-      pressable(b, fn() { t("适应窗口") + " (0)" }, pic_fit, fn(p) {
+      let k = pressable(b, fn() { t("适应窗口") }, pic_fit, fn(p) {
         let (hand, _) = answer(p)
         p
         .row(Is(true))
@@ -153,13 +153,14 @@ fn pic_zoom_pill(pic : @view.View) -> Unit {
         .gap(Is(7.0))
         .radius(Is(14.0))
         .lines_up(Is(Some(Middle)))
+        .edge(By(fn() { if p.focus_shown() { (1.5, 0xFFFFFFB3L) } else { (0.0, 0L) } }))
         .ground(By(fn() { mix(0x000000A6L, 0x000000D9L, hand.shown(p)) }))
         |> ignore
-        words(p, fn() { (pic_zoom.get().z * 100.0).round().to_int().to_string() + "%" }, 12.5, fn() { 0xFFFFFFFFL }, weight=600) |> ignore
+        words(p, fn() { (pic_zoom.get().z * 100.0).round().to_int().to_string() + "%" }, 12.0, fn() { 0xFFFFFFFFL }, weight=600) |> ignore
         p.box(fn(l) { l.width(Is(Some(1.0))).height(Is(Some(12.0))).ground(Is(0xFFFFFF40L)) |> ignore }) |> ignore
-        words(p, fn() { t("适应窗口") }, 12.5, fn() { mix(0xFFFFFFC0L, 0xFFFFFFFFL, hand.shown(p)) }, weight=500) |> ignore
+        words(p, fn() { t("适应窗口") }, 12.0, fn() { mix(0xFFFFFFC0L, 0xFFFFFFFFL, hand.shown(p)) }, weight=500) |> ignore
       }, keeps_region=true)
-      |> ignore
+      tip(k, fn() { t("适应窗口") }, shortcut="pic-fit")
     }, at_once=true)
     |> ignore
   })

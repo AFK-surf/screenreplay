@@ -192,6 +192,9 @@ fn shown_at(g : Glide, t : Double) -> (Double, Double) {
 /// The view as node `v` draws it (bound: to the clock while it glides).
 fn shown(v : @view.View) -> (Double, Double) {
   let g = view_glide.get()
+  if motion_off() {
+    return (view_from.get(), view_len())
+  }
   let t = v.drawn_while(fn(t) { t < g.at + glide_ms })
   shown_at(g, if t > 1.0e300 { g.at + glide_ms } else { t })
 }
@@ -257,11 +260,11 @@ let menu_up : @signals.Signal[Bool] = @signals.signal(false)
 extern "C" fn rp_animations_off() -> Int = "rp_animations_off"
 
 ///|
-let still_motion : Ref[Bool] = Ref(false)
+let still_motion : @signals.Signal[Bool] = @signals.signal(false)
 
 ///|
 fn motion_off() -> Bool {
-  still_motion.val || @ui.reduced_motion()
+  still_motion.get() || @ui.reduced_motion()
 }
 
 ///|

@@ -537,14 +537,26 @@ fn switch(parent : @view.View, label : () -> String, on : () -> Bool, set : (Boo
     .radius(Is(10.0))
     .lines_up(Is(Some(Start)))
     .cursor(Is(Some(Arrow)))
-    .ground(By(fn() { mix(c_s4(), ui_accent(), way.shown(b)) }))
+    .ground(By(fn() {
+      let off_g = if b.pointed() { tone(0x555860FFL, 0xB8BDC6FFL) } else { tone(0x454850FFL, 0xC5C9D1FFL) }
+      mix(off_g, ui_accent(), way.shown(b))
+    }))
+    .edge(By(fn() {
+      if b.focus_shown() {
+        (1.5, focus_ring())
+      } else if way.shown(b) < 0.5 {
+        (1.0, tone(0xFFFFFF38L, 0x17181B45L))
+      } else {
+        (0.0, 0L)
+      }
+    }))
     |> ignore
     b.box(fn(k) {
       k
       .width(Is(Some(16.0)))
       .height(Is(Some(16.0)))
       .radius(Is(8.0))
-      .ground(By(fn() { mix(tone(ui_muted(), 0xFFFFFFFFL), ui_on_accent(), way.shown(k)) }))
+      .ground(By(fn() { mix(tone(0xD5D8DEFFL, 0xFFFFFFFFL), ui_on_accent(), way.shown(k)) }))
       .offset(By(fn() { (2.0 + 14.0 * way.shown(k), 2.0) }))
       |> ignore
     })

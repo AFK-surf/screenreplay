@@ -6,7 +6,7 @@
 // there.
 
 ///|
-let overview_h : Double = 10.0
+let overview_h : Double = 12.0
 
 ///|
 /// What a press on the overview took: 0 nothing, 1 the frame's start, 2 its end, 3 the frame; and the view's start and
@@ -47,9 +47,9 @@ fn overview_drag(d : @view.Drag, w : Double) -> Unit {
       region_let_go()
       let (fx, fw) = @signals.untracked(fn() { finder(w) })
       let px = d.x
-      let part = if px >= fx - 2.0 && px <= fx + 6.0 {
+      let part = if (px - fx).abs() <= 6.0 {
         1
-      } else if px >= fx + fw - 6.0 && px <= fx + fw + 2.0 {
+      } else if (px - (fx + fw)).abs() <= 6.0 {
         2
       } else if px > fx && px < fx + fw {
         3
@@ -186,8 +186,8 @@ fn overview(parent : @view.View) -> Unit {
               }
             }
             layers.push(layer(rect_d(0.5, 0.5, width - 1.0, 3.0), 0L, stroke=hair(), width=1.0))
-            // (the band 4 high, 3 under the track's top)
-            Some({ w: width, h: overview_h, layers: layers.map(fn(l) { { ..l, ty: 3.0 } }) })
+            // (the band 4 high, centered vertically inside overview_h)
+            Some({ w: width, h: overview_h, layers: layers.map(fn(l) { { ..l, ty: (overview_h - 4.0) / 2.0 } }) })
           }))
           |> ignore
         })
@@ -219,7 +219,7 @@ fn overview(parent : @view.View) -> Unit {
               .ground(By(ui_text))
               .offset(By(fn() {
                 let (fx, fw) = finder(w())
-                (if end == 0 { fx + 4.0 } else { fx + fw - 6.0 }, 3.0)
+                (if end == 0 { fx + 4.0 } else { fx + fw - 6.0 }, (overview_h - 4.0) / 2.0)
               }))
               |> ignore
             })
@@ -256,7 +256,7 @@ fn overview(parent : @view.View) -> Unit {
               .height(Is(Some(12.0)))
               .lines_up(Is(Some(Middle)))
               .lies_along(Is(Middle))
-              .offset(By(fn() { (ax_d(abs - t0(), view_len()) * k() - 6.0, -1.0) }))
+              .offset(By(fn() { (ax_d(abs - t0(), view_len()) * k() - 6.0, 0.0) }))
               |> ignore
               b.box(fn(dot) {
                 let r = fn() { if b.pointed() { 6.0 } else { 4.0 } }

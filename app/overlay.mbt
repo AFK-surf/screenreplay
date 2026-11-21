@@ -32,6 +32,8 @@ fn shortcut_words(action : String) -> String {
     "clip-before" => "["
     "clip-after" => "]"
     "pic-fit" => "0"
+    "save" => "Enter"
+    "settings" => "Ctrl+,"
     _ => ""
   }
 }
@@ -90,7 +92,7 @@ fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> 
   open_menu(x, y, [
     Some({
       label: t(if at_playhead { "在当前位置加标记" } else { "在这里加标记" }),
-      key: "",
+      key: if at_playhead { "M" } else { "" },
       act: fn() { add_marker(at) },
     }),
     Some({
@@ -101,7 +103,7 @@ fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> 
     None,
     Some({
       label: t(if at_playhead { "从当前位置开始剪辑" } else { "从这里开始剪辑" }),
-      key: "I",
+      key: if at_playhead { "I" } else { "" },
       act: fn() {
         let fresh = !clipping.untracked()
         set_clip_start(at)
@@ -113,7 +115,7 @@ fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> 
     }),
     Some({
       label: t(if at_playhead { "剪辑到当前位置结束" } else { "剪辑到这里结束" }),
-      key: "O",
+      key: if at_playhead { "O" } else { "" },
       act: fn() {
         let fresh = !clipping.untracked()
         set_clip_end(at)
@@ -136,6 +138,7 @@ fn kbd(parent : @view.View, key : String) -> Unit {
     .padding(Is((6.0, 0.0, 6.0, 0.0)))
     .radius(Is(5.0))
     .ground(By(c_s3))
+    .edge(By(fn() { (1.0, hair()) }))
     .lines_up(Is(Some(Middle)))
     .lies_along(Is(Middle))
     |> ignore
@@ -160,7 +163,7 @@ fn menu_layer(root : @view.View) -> Unit {
         open.go_ms(panel, 1.0, if motion_off() { 1.0 } else { 120.0 })
         panel
         .alpha(By(fn() { open.shown(panel) }))
-        .scale(By(fn() { 0.96 + 0.04 * open.shown(panel) }), about=At(1.0, 0.0))
+        .scale(By(fn() { if motion_off() { 1.0 } else { 0.96 + 0.04 * open.shown(panel) } }), about=if menu_above.val { At(0.5, 1.0) } else { At(1.0, 0.0) })
         .min_width(Is(Some(200.0)))
         .pad(Is(4.0))
         .ground(By(c_s2))
@@ -191,7 +194,7 @@ fn menu_layer(root : @view.View) -> Unit {
               for e in es {
                 h += if e is Some(_) { 32.0 } else { 9.0 }
               }
-              let x = clamp(x, 8.0, @cmp.maximum(8.0, ww - 208.0))
+              let x = clamp(x, 8.0, @cmp.maximum(8.0, ww - 260.0))
               let y = if y + h > wh - 8.0 { @cmp.maximum(8.0, y - h) } else { y }
               (x, y)
             }
@@ -229,14 +232,20 @@ fn menu_layer(root : @view.View) -> Unit {
                 .radius(Is(6.0))
                 .lines_up(Is(Some(Middle)))
                 .cursor(Is(Some(Arrow)))
+                .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
                 .ground(By(fn() { if b.pointed() || b.focus_shown() { c_s3() } else { 0L } }))
                 |> ignore
                 b.box(fn(l) {
                   l.grow(Is(1.0)) |> ignore
-                  words(l, fn() { e.label }, 13.0, ui_text) |> ignore
+                  words(l, fn() { e.label }, 13.0, ui_text, weight=if e.key == "✓" { 500 } else { 400 }) |> ignore
                 })
                 |> ignore
-                if e.key != "" {
+                if e.key == "✓" {
+                  b.box(fn(ck) {
+                    ck.width(Is(Some(14.0))).height(Is(Some(14.0))).picture(Is(Some(vector("M2.5 7.5l3.2 3.2 5.8-6.4", 14.0, 14.0, stroke=1.7)))).tint(By(ui_text)) |> ignore
+                  })
+                  |> ignore
+                } else if e.key != "" {
                   kbd(b, e.key)
                 }
               })
@@ -302,7 +311,7 @@ fn told_layer(parent : @view.View) -> Unit {
       .shadow(By(fn() { (24.0, 6.0, sheet_shadow()) }))
       .lines_up(Is(Some(Middle)))
       .alpha(By(fn() { way.shown(c) }))
-      .offset(By(fn() { (0.0, -6.0 * (1.0 - way.shown(c))) }))
+      .offset(By(fn() { (0.0, if motion_off() { 0.0 } else { -6.0 * (1.0 - way.shown(c)) }) }))
       .laid_nowhere(By(fn() { way.shown(c) <= 0.0 && told.get().0 == "" }))
       |> ignore
       @sf.icon_node(c, "", 16.0, By(ui_muted), name_now=fn() { told.get().1 }) |> ignore

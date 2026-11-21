@@ -266,8 +266,9 @@ fn title_bar(parent : @view.View) -> Unit {
           |> ignore
           icon_button(tools, fn() { "settings" }, fn() { t("设置") }, fn() {
             load_settings()
+            purge_state.set(0)
             settings_open.set(true)
-          }, side=Bottom)
+          }, shortcut="settings", side=Bottom)
           |> ignore
         })
         |> ignore
@@ -480,7 +481,7 @@ fn controls(parent : @view.View) -> Unit {
           })
           |> ignore
           text_button(b, fn() { t("取消") }, fn() { clipping.set(false) }, ghost=true) |> ignore
-          solid_button(b, fn() { t("保存") }, open_export, icon="download", small=fn() {
+          let save_k = solid_button(b, fn() { t("保存…") }, open_export, icon="download", small=fn() {
             if cropping() {
               let (w, h, _, _, _) = export_plan()
               "\{w}×\{h} · " + size_text()
@@ -488,7 +489,7 @@ fn controls(parent : @view.View) -> Unit {
               clock(clip_kept())
             }
           })
-          |> ignore
+          tip(save_k, fn() { t("保存片段") }, shortcut="save")
         } else {
           // (under a filter of apps: how many of its stretches the timeline shows and how long they come to)
           b.show(fn() { filter_on() && ax_on() }, fn(x) {
@@ -686,6 +687,7 @@ fn key_bindings() -> @view.Keymap {
     ch('c', "clip", 0),
     // (the frame shown, onto the clipboard: the user, 2026-11-16 「copy frame 感觉应该加个快捷键，比如ctrl c」)
     k(@ui.key_code_copy, "copy-frame", @ui.mod_ctrl),
+    ch(',', "settings", @ui.mod_ctrl),
     ch('m', "mark", 0),
   ]
   keys.append(region_bindings())
@@ -721,8 +723,8 @@ fn replay_actions(root : @view.View) -> Unit {
   let on = fn(name : String, f : () -> Unit) {
     actions.set(name, f)
     root.on_action(name, fn(_) {
-      // (Escape closes what is open whether there is anything recorded or not)
-      if (segs.is_empty() || library_open.untracked()) && name != "escape" {
+      // (Escape and Settings work whether there is anything recorded or not)
+      if (segs.is_empty() || library_open.untracked()) && name != "escape" && name != "settings" {
         return false
       }
       f()
@@ -730,13 +732,31 @@ fn replay_actions(root : @view.View) -> Unit {
     })
     |> ignore
   }
-  on("play", fn() { set_playing(!want_play.untracked()) })
+  on("settings", fn() {
+    if !consent_open.untracked() && !export_open.untracked() && clip_playing.untracked() == "" {
+      load_settings()
+      purge_state.set(0)
+      settings_open.set(!settings_open.untracked())
+    }
+  })
+  on("play", fn() {
+    if clipping.untracked() {
+      if want_play.untracked() {
+        set_playing(false)
+      } else {
+        play_clip()
+      }
+    } else {
+      set_playing(!want_play.untracked())
+    }
+  })
   on("full", fn() { set_full_screen(!full_screen.untracked()) })
   on("save", fn() { if export_open.untracked() { export_now(false) } else if clipping.untracked() { open_export() } })
-  // (no window picked nor region: as recorded at once, and copied; a window picked or a region: encoded as the dialog
-  // has it, then copied)
+  // (in export dialog: honor the dialog's chosen mode and copy; outside it: instant lossless save+copy when not cropping)
   on("save-copy", fn() {
-    if clipping.untracked() {
+    if export_open.untracked() {
+      export_now(true)
+    } else if clipping.untracked() {
       if !@signals.untracked(cropping) {
         save_clip(copy=true)
       } else {
@@ -768,13 +788,25 @@ fn replay_actions(root : @view.View) -> Unit {
       } else {
         close_clip_player()
       }
-    } else if settings_open.untracked() {
-      settings_open.set(false)
-    } else if library_open.untracked() {
-      library_open.set(false)
     } else if export_open.untracked() {
-      if export_out.untracked() == "" {
+      if export_out.untracked() != "" {
+        rp_export_cancel()
+        rp_concat_cancel()
+      } else {
         export_open.set(false)
+      }
+    } else if settings_open.untracked() {
+      if purge_state.untracked() == 1 {
+        purge_state.set(0)
+      } else {
+        purge_state.set(0)
+        settings_open.set(false)
+      }
+    } else if library_open.untracked() {
+      if delete_pending.untracked() != "" {
+        delete_pending.set("")
+      } else {
+        library_open.set(false)
       }
     } else if clipping.untracked() && region.untracked() is Some(_) {
       clear_region()
@@ -790,14 +822,56 @@ fn replay_actions(root : @view.View) -> Unit {
     }
   })
   // (the arrows move a selected region, else the playhead)
-  on("back5", fn() { clip_mark(); if !region_nudge(-10.0, 0.0) { jump_to(pos_now() - 5000.0) } })
-  on("on5", fn() { clip_mark(); if !region_nudge(10.0, 0.0) { jump_to(pos_now() + 5000.0) } })
-  on("back1", fn() { clip_mark(); if !region_nudge(-10.0, 0.0) { jump_to(pos_now() - 1000.0) } })
-  on("on1", fn() { clip_mark(); if !region_nudge(10.0, 0.0) { jump_to(pos_now() + 1000.0) } })
+  on("back5", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(-10.0, 0.0) {
+      jump_to(pos_now() - 5000.0)
+    }
+  })
+  on("on5", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(10.0, 0.0) {
+      jump_to(pos_now() + 5000.0)
+    }
+  })
+  on("back1", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(-10.0, 0.0) {
+      jump_to(pos_now() - 1000.0)
+    }
+  })
+  on("on1", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(10.0, 0.0) {
+      jump_to(pos_now() + 1000.0)
+    }
+  })
   on("back15", fn() { jump_by(-15000.0) })
   on("on15", fn() { jump_by(15000.0) })
-  on("frame-back", fn() { clip_mark(); if !region_nudge(-1.0, 0.0) { native_step(-1) } })
-  on("frame-on", fn() { clip_mark(); if !region_nudge(1.0, 0.0) { native_step(1) } })
+  on("frame-back", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(-1.0, 0.0) {
+      native_step(-1)
+    }
+  })
+  on("frame-on", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(1.0, 0.0) {
+      native_step(1)
+    }
+  })
   // (in clip mode Home and End go to the clip's start and end)
   on("home", fn() { jump_to(if clipping.untracked() { clip_a.untracked() } else { 0.0 }) })
   on("latest", fn() { if clipping.untracked() { jump_to(clip_b.untracked()) } else { show_latest() } })

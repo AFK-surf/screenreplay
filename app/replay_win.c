@@ -879,7 +879,12 @@ static VOID CALLBACK rp_tray_primed_timer(HWND h, UINT msg, UINT_PTR id, DWORD a
 int32_t rp_tray_window(double w_pt, double h_pt) {
   HWND h = (HWND)mb_app_hwnd();
   if (!h) return 0;
-  if (rp_tray_prev) return 1;
+  if (rp_tray_prev) {
+    int dpi = (int)GetDpiForWindow(h);
+    SetWindowPos(h, NULL, 0, 0, (int)(w_pt * dpi / 96.0 + 0.5), (int)(h_pt * dpi / 96.0 + 0.5),
+                 SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+    return 1;
+  }
   LONG_PTR style = GetWindowLongPtrW(h, GWL_STYLE);
   style &= ~(LONG_PTR)(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
   SetWindowLongPtrW(h, GWL_STYLE, style | WS_POPUP);

@@ -378,7 +378,44 @@ fn marks_layer(band : @view.View, w : () -> Double) -> Unit {
         .height(Is(Some(21.0)))
         .laid_nowhere(By(fn() { x() < 0.0 || x() > w() }))
         .offset(By(fn() { (x() - 8.0, -21.5) }))
-        .on_menu(fn(_) { remove_marker(abs) })
+        .on_menu(fn(m) {
+          let at = abs - t0()
+          open_menu(m.wx, m.wy, [
+            Some({
+              label: t("移除这里的标记"),
+              key: "",
+              act: fn() {
+                remove_marker(abs)
+                tell(tf("已移除 {0} 的标记", [wall(abs)]), icon="bookmark")
+              },
+            }),
+            None,
+            Some({
+              label: t("从这里开始剪辑"),
+              key: "",
+              act: fn() {
+                let fresh = !clipping.untracked()
+                set_clip_start(at)
+                if fresh {
+                  clip_b.set(@cmp.minimum(span(), clip_a.untracked() + 30000.0))
+                }
+                show_clip()
+              },
+            }),
+            Some({
+              label: t("剪辑到这里结束"),
+              key: "",
+              act: fn() {
+                let fresh = !clipping.untracked()
+                set_clip_end(at)
+                if fresh {
+                  clip_a.set(@cmp.maximum(0.0, clip_b.untracked() - 30000.0))
+                }
+                show_clip()
+              },
+            }),
+          ])
+        })
         |> ignore
         b.box(fn(g) {
           g

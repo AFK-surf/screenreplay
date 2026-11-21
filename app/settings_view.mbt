@@ -49,8 +49,11 @@ let settings_page : @signals.Signal[Int] = @signals.signal(0)
 /// holding its rows.
 fn setting_group(parent : @view.View, title : () -> String, body : (@view.View) -> Unit) -> Unit {
   parent.box(fn(g) {
-    g.gap(Is(8.0)).padding(Is((0.0, 6.0, 0.0, 0.0))) |> ignore
-    words(g, title, 12.0, ui_subtle, weight=500) |> ignore
+    let has_title = @signals.untracked(title) != ""
+    g.gap(Is(if has_title { 8.0 } else { 0.0 })).padding(Is((0.0, if has_title { 6.0 } else { 0.0 }, 0.0, 0.0))) |> ignore
+    if has_title {
+      words(g, title, 12.0, ui_subtle, weight=500) |> ignore
+    }
     g.box(fn(card) {
       card
       .radius(Is(10.0))
@@ -199,11 +202,27 @@ fn storage_card(parent : @view.View) -> Unit {
               rp_write(cstr(root_dir() + "\\purge.request"), b"1") |> ignore
               purge_state.set(2)
               purge_now()
+              match the_root.val {
+                Some(r) =>
+                  again(r, 3000.0, fn() {
+                    if purge_state.untracked() == 2 {
+                      purge_state.set(0)
+                    }
+                  })
+                None => ()
+              }
             }, danger=true)
             |> ignore
           }
           2 => ()
-          _ => text_button(b, fn() { t("删除…") }, fn() { purge_state.set(1) }, danger=true) |> ignore
+          _ => {
+            let k = text_button(b, fn() { t("删除…") }, fn() {
+              if has_segs() {
+                purge_state.set(1)
+              }
+            }, danger=true)
+            k.alpha(By(fn() { if has_segs() { 1.0 } else { 0.35 } })).presses(By(has_segs)) |> ignore
+          }
         }
       })
       |> ignore
@@ -214,7 +233,10 @@ fn storage_card(parent : @view.View) -> Unit {
 ///|
 /// One of the pages in the column: its icon and name; s2 under the one shown, s1 under the pointer.
 fn nav_item(parent : @view.View, i : Int, icon : () -> String, label : () -> String) -> Unit {
-  pressable(parent, label, fn() { settings_page.set(i) }, fn(b) {
+  pressable(parent, label, fn() {
+    purge_state.set(0)
+    settings_page.set(i)
+  }, fn(b) {
     let on = fn() { settings_page.get() == i }
     // (under the pointer a faint tint over the sidebar's ground, coming in and going over 100 ms; the page shown s2)
     let (hand, _) = answer(b)
@@ -228,6 +250,7 @@ fn nav_item(parent : @view.View, i : Int, icon : () -> String, label : () -> Str
     .radius(Is(6.0))
     .lines_up(Is(Some(Middle)))
     .cursor(Is(Some(Arrow)))
+    .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
     .ground(By(fn() { mix(mix(clear(press_ground()), press_ground(), hand.shown(b)), c_s2(), picked.shown(b)) }))
     |> ignore
     @sf.icon_node(b, "", 16.0, By(fn() { if on() { ui_text() } else { ui_muted() } }), name_now=icon) |> ignore
@@ -244,16 +267,33 @@ fn nav_item(parent : @view.View, i : Int, icon : () -> String, label : () -> Str
 }
 
 ///|
+fn settings_page_title(i : Int) -> String {
+  match i {
+    0 => t("录制")
+    1 => t("画质")
+    2 => t("存储")
+    3 => t("外观")
+    4 => t("快捷键")
+    _ => t("关于")
+  }
+}
+
+///|
 fn settings_dialog(root : @view.View) -> Unit {
-  sheet(root, fn() { settings_open.get() }, fn() { settings_open.set(false) }, 760.0, h=560.0, bare=true, fn(card) {
+  let close = fn() {
+    purge_state.set(0)
+    settings_open.set(false)
+  }
+  sheet(root, fn() { settings_open.get() }, close, 760.0, h=560.0, bare=true, keys=["escape", "settings"], fn(card) {
     card.row(Is(true)) |> ignore
     card.box(fn(nav) {
-      nav.width(Is(Some(176.0))).ground(By(c_bg)).padding(Is((10.0, 16.0, 10.0, 16.0))).gap(Is(2.0)) |> ignore
+      nav.width(Is(Some(176.0))).ground(By(c_bg)).padding(Is((10.0, 0.0, 10.0, 16.0))).gap(Is(2.0)) |> ignore
       nav.box(fn(h) {
-        h.padding(Is((10.0, 6.0, 0.0, 14.0))) |> ignore
+        h.row(Is(true)).height(Is(Some(48.0))).padding(Is((10.0, 0.0, 0.0, 0.0))).lines_up(Is(Some(Middle))) |> ignore
         words(h, fn() { t("设置") }, 15.0, ui_text, weight=600) |> ignore
       })
       |> ignore
+      nav.box(fn(sp) { sp.height(Is(Some(6.0))) |> ignore }) |> ignore
       nav_item(nav, 0, fn() { "monitor" }, fn() { t("录制") })
       nav_item(nav, 1, fn() { "image-upload" }, fn() { t("画质") })
       nav_item(nav, 2, fn() { "disk" }, fn() { t("存储") })
@@ -264,7 +304,16 @@ fn settings_dialog(root : @view.View) -> Unit {
     })
     |> ignore
     card.box(fn(right) {
-      right.grow(Is(1.0)).basis(Is(Some(0.0))) |> ignore
+      right.grow(Is(1.0)).basis(Is(Some(0.0))).min_width(Is(Some(0.0))) |> ignore
+      // (sticky top bar: page title + close button, so scrolled content never slides under ×)
+      right.box(fn(head) {
+        head.row(Is(true)).height(Is(Some(48.0))).padding(Is((24.0, 0.0, 14.0, 0.0))).lines_up(Is(Some(Middle))) |> ignore
+        words(head, fn() { settings_page_title(settings_page.get()) }, 15.0, ui_text, weight=600) |> ignore
+        spring(head)
+        icon_button(head, fn() { "close" }, fn() { t("关闭") }, close, size=12.0) |> ignore
+      })
+      |> ignore
+      rule(right, hair)
       // (each page scrolls where it is taller than the card, from its top as it is picked: the user, 2026-11-15
       // 「about 内容过长不能滚动了」)
       right.box(fn(page) {
@@ -272,16 +321,11 @@ fn settings_dialog(root : @view.View) -> Unit {
         page.pick(fn() { settings_page.get() }, fn(sp, i) {
           sp.grow(Is(1.0)).basis(Is(Some(0.0))).min_height(Is(Some(0.0))) |> ignore
           sp.scrolls(@view.Scroll::new(), slop=@ui.touch_slop(), bar=@ui.tree_scroll_bar(), fn(p) {
-            p.padding(Is((24.0, 20.0, 24.0, 20.0))).gap(Is(10.0)) |> ignore
+            p.padding(Is((24.0, 14.0, 24.0, 20.0))).gap(Is(10.0)) |> ignore
             settings_page_body(p, i)
           })
           |> ignore
         }, at_once=true)
-      })
-      |> ignore
-      right.box(fn(o) {
-        o.over(Is(true)).lines_up(Is(Some(End))).padding(Is((0.0, 14.0, 14.0, 0.0))) |> ignore
-        icon_button(o, fn() { "close" }, fn() { t("关闭") }, fn() { settings_open.set(false) }, size=12.0) |> ignore
       })
       |> ignore
     })
@@ -324,7 +368,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
     0 => {
       fast_sync_note(p)
       behind_note(p)
-      setting_group(p, fn() { t("录制") }, fn(g) {
+      setting_group(p, fn() { "" }, fn(g) {
         toggle_row(g, true, fn() { t("后台录制") }, fn() { t("关掉后不再录制，已录的保留到过期") }, fn() { sets().enabled }, fn(v) {
           settings.enabled = v
         })
@@ -347,7 +391,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
         })
         // (the window's own, viewer.json's: applied to its windows at once and each second, replay_win.c)
         setting_row(g, false, fn() { t("不录 ScreenReplay 自己") }, fn() {
-          t("回放窗口不进录像，录到的是它后面的内容；开着时其它截图、录屏工具也截不到它")
+          t("回放窗口不进录像，录到的是它后面的内容；开着时其他截图、录屏工具也截不到它")
         }, fn(c) {
           switch(c, fn() { t("不录 ScreenReplay 自己") }, fn() { hidden_from_capture.get() }, fn(v) {
             hidden_from_capture.set(v)
@@ -366,7 +410,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
       })
     }
     1 => {
-      setting_group(p, fn() { t("画质") }, fn(g) {
+      setting_group(p, fn() { "" }, fn(g) {
         choice_row(g, true, fn() { t("编码") }, fn() {
           if info().codec == "H264" && sets().codec == "hevc" {
             t("这台电脑现在用 H.264 录")
@@ -402,7 +446,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
               ew = ew * s.max_height.to_double() / eh
               eh = s.max_height.to_double()
             }
-            tf("{0}×{1} · 约 {2} Mbps　每小时最多 {3}", [
+            tf("{0}×{1} · 约 {2} Mbps · 每小时最多 {3}", [
               even(ew).to_string(),
               even(eh).to_string(),
               ((rate / 100000.0).round() / 10.0).to_string(),
@@ -416,7 +460,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
       })
     }
     2 => {
-      setting_group(p, fn() { t("存储") }, fn(g) {
+      setting_group(p, fn() { "" }, fn(g) {
         choice_row(g, true, fn() { t("保留多久") }, fn() {
           tf("更早的录像自动删除；约需 {0}", [bytes_text(kept_bytes())])
         }, fn() {
@@ -427,7 +471,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
       storage_card(p)
     }
     3 => {
-      setting_group(p, fn() { t("外观") }, fn(g) {
+      setting_group(p, fn() { "" }, fn(g) {
         let looks = ["system", "dark", "light"]
         setting_row(g, true, fn() { t("主题") }, fn() { "" }, fn(c) {
           segmented(c, fn() { [t("跟随系统"), t("深色"), t("浅色")] }, fn() { looks.search(appearance.get()).unwrap_or(0) }, fn(i) {
@@ -453,7 +497,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
     }
     5 => about_page(p)
     _ =>
-      setting_group(p, fn() { t("快捷键") }, fn(g) {
+      setting_group(p, fn() { "" }, fn(g) {
         g.each(fn() { shortcut_rows() }, fn(r) { r.0 }, fn(row, r) {
           let (label, keys) = r.untracked()
           if label != shortcut_rows()[0].0 {

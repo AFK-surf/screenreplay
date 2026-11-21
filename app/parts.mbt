@@ -114,6 +114,15 @@ fn glyph_vector(name : String) -> @pixels.Vector? {
           ("M8.12 8.12L12 12", 2.25),
         ]),
       )
+    // (warning triangle with exclamation mark: differentiates warning notifications by shape, not color alone)
+    "warn-tri" =>
+      Some(
+        vectors(16.0, 16.0, [
+          ("M7.13 2.5a1 1 0 0 1 1.74 0l5.6 9.8A1 1 0 0 1 13.6 13.8H2.4a1 1 0 0 1-.87-1.5Z", 1.4),
+          ("M8 6.0v3.3", 1.5),
+          ("M8 11.4v0.1", 1.8),
+        ]),
+      )
     _ => None
   }
 }
@@ -148,7 +157,13 @@ fn answer(v : @view.View) -> (@motion.NodeWay, @motion.NodeWay) {
   v.reacts(fn() { v.pointed() || v.pressed() || v.focus_shown() }, fn(on) {
     hand.go_ms(v, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 100.0 })
   })
-  v.reacts(fn() { v.pressed() }, fn(on) { held.go_ms(v, if on { 0.97 } else { 1.0 }, if motion_off() { 1.0 } else { 100.0 }) })
+  v.reacts(fn() { v.pressed() }, fn(on) {
+    if motion_off() {
+      held.put(1.0)
+    } else {
+      held.go_ms(v, if on { 0.97 } else { 1.0 }, 100.0)
+    }
+  })
   v.scale(By(fn() { held.shown(v) })) |> ignore
   (hand, held)
 }
@@ -222,6 +237,7 @@ fn icon_button_bare(
     .radius(Is(6.0))
     .lines_up(Is(Some(Middle)))
     .lies_along(Is(Middle))
+    .edge(By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))
     .ground(By(fn() {
       let on = if stage { stage_hover } else { c_s3() }
       mix(clear(on), on, hand.shown(b))
@@ -259,6 +275,7 @@ fn text_button(
     .gap(Is(if small { 6.0 } else { 7.0 }))
     .radius(Is(if small { 6.0 } else { 8.0 }))
     .lines_up(Is(Some(Middle)))
+    .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
     .ground(By(fn() {
       let h = hand.shown(b)
       if danger {
@@ -304,6 +321,7 @@ fn solid_button(
     .gap(Is(7.0))
     .radius(Is(8.0))
     .lines_up(Is(Some(Middle)))
+    .edge(By(fn() { if b.focus_shown() { (1.5, ui_subtle()) } else { (0.0, 0L) } }))
     .ground(By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
     |> ignore
     if icon != "" {
@@ -369,6 +387,7 @@ fn play_button(
     .radius(Is(6.0))
     .lines_up(Is(Some(Middle)))
     .lies_along(Is(Middle))
+    .edge(By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))
     .ground(By(fn() {
       let on = if stage { stage_hover } else { c_s3() }
       mix(clear(on), on, hand.shown(b))

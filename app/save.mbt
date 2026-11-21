@@ -717,6 +717,9 @@ fn open_export() -> Unit {
 ///|
 /// The clip saved as the dialog says: as recorded at once, else its encode started (and followed: follow_export).
 fn export_now(copy : Bool) -> Unit {
+  if export_out.untracked() != "" {
+    return
+  }
   if @signals.untracked(mode) == 0 {
     save_clip(copy~)
     return
@@ -769,9 +772,8 @@ fn follow_export(root : @view.View) -> Unit {
       let copied = export_copy.val && rp_copy_file(cstr(out)) == 1
       let len = @signals.untracked(clip_kept)
       saved.set(
-        tf(if copied { "已保存并复制 {0} 的片段 · {1}" } else { "已保存 {0} 的片段 · {1}" }, [
+        tf(if copied { "已保存并复制 {0} 的片段" } else { "已保存 {0} 的片段" }, [
           clock(len),
-          bytes_text(rp_size(cstr(out))),
         ]),
       )
       saved_path.set(out)
@@ -868,6 +870,7 @@ fn segmented_track(parent : @view.View, labels : () -> Array[String], chosen : (
         .lines_up(Is(Some(Middle)))
         .lies_along(Is(Middle))
         .cursor(Is(Some(Arrow)))
+        .edge(By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
         .ground(By(fn() { if chosen() != i && b.pointed() { tone(c_s2(), c_s3()) } else { 0L } }))
         |> ignore
         b.box(fn(w) {
@@ -894,8 +897,8 @@ fn setting_row(parent : @view.View, first : Bool, title : () -> String, note : (
   parent.box(fn(r) {
     r.row(Is(true)).min_height(Is(Some(52.0))).padding(Is((14.0, 8.0, 14.0, 8.0))).gap(Is(16.0)).lines_up(Is(Some(Middle))) |> ignore
     r.box(fn(l) {
-      l.grow(Is(1.0)).basis(Is(Some(0.0))).gap(Is(1.0)) |> ignore
-      words(l, title, 13.0, ui_text, weight=500) |> ignore
+      l.grow(Is(1.0)).basis(Is(Some(0.0))).min_width(Is(Some(0.0))).gap(Is(1.0)) |> ignore
+      words(l, title, 13.0, ui_text, weight=500).min_width(Is(Some(0.0))).allow_ellipsis(Is(true)) |> ignore
       l.show(fn() { note() != "" }, fn(n) {
         n.box(fn(w) {
           w.words(By(note), look={ ..@view.words_plain, size: 12.0, line: 17.0, wrap: true }).ink(By(ui_subtle)) |> ignore
@@ -979,7 +982,7 @@ fn sheet(
         .on_press(fn() {  })
         .shadow(By(fn() { (60.0, 20.0, sheet_shadow()) }))
         .alpha(By(fn() { way.shown(card) }))
-        .scale(By(fn() { 0.97 + 0.03 * way.shown(card) }))
+        .scale(By(fn() { if motion_off() { 1.0 } else { 0.97 + 0.03 * way.shown(card) } }))
         |> ignore
         body(card)
       })
@@ -1022,7 +1025,15 @@ fn export_dialog(root : @view.View) -> Unit {
     })
     |> ignore
     card.box(fn(info) {
-      info.row(Is(true)).pad(Is(10.0)).gap(Is(16.0)).radius(Is(10.0)).ground(By(c_s2)).lines_up(Is(Some(Middle))) |> ignore
+      info
+      .row(Is(true))
+      .pad(Is(10.0))
+      .gap(Is(16.0))
+      .radius(Is(10.0))
+      .ground(By(fn() { tone(c_s2(), 0xF4F5F7FFL) }))
+      .edge(By(fn() { if is_dark() { (0.0, 0L) } else { (1.0, 0x00000014L) } }))
+      .lines_up(Is(Some(Middle)))
+      |> ignore
       info.box(fn(pic) {
         pic
         .width(Is(Some(160.0)))
@@ -1111,22 +1122,26 @@ fn export_dialog(root : @view.View) -> Unit {
       |> ignore
     })
     |> ignore
-    segmented(
-      card,
-      fn() {
-        if cropping() {
-          [t("按大小"), t("自定义")]
-        } else {
-          [t("原样"), t("按大小"), t("自定义")]
-        }
-      },
-      fn() { if cropping() { mode() - 1 } else { export_mode.get() } },
-      fn(i) {
-        if export_out.untracked() == "" {
-          export_mode.set(if @signals.untracked(cropping) { i + 1 } else { i })
-        }
-      },
-    )
+    card.box(fn(modes) {
+      modes.alpha(By(fn() { if running() { 0.45 } else { 1.0 } })) |> ignore
+      segmented(
+        modes,
+        fn() {
+          if cropping() {
+            [t("按大小"), t("自定义")]
+          } else {
+            [t("原样"), t("按大小"), t("自定义")]
+          }
+        },
+        fn() { if cropping() { mode() - 1 } else { export_mode.get() } },
+        fn(i) {
+          if export_out.untracked() == "" {
+            export_mode.set(if @signals.untracked(cropping) { i + 1 } else { i })
+          }
+        },
+      )
+    })
+    |> ignore
     card.pick(fn() { mode() }, fn(b, m) {
       if m == 0 {
         b.box(fn(w) {
@@ -1144,9 +1159,14 @@ fn export_dialog(root : @view.View) -> Unit {
         })
         |> ignore
       } else {
-        b.gap(Is(12.0)) |> ignore
+        b.gap(Is(12.0)).alpha(By(fn() { if running() { 0.45 } else { 1.0 } })) |> ignore
         b.box(fn(rows) {
-          rows.radius(Is(10.0)).ground(By(c_s2)).clips(Is(true)) |> ignore
+          rows
+          .radius(Is(10.0))
+          .ground(By(fn() { tone(c_s2(), 0xF4F5F7FFL) }))
+          .edge(By(fn() { if is_dark() { (0.0, 0L) } else { (1.0, 0x00000014L) } }))
+          .clips(Is(true))
+          |> ignore
           if m == 1 {
             size_slider(rows)
           } else {
@@ -1156,6 +1176,9 @@ fn export_dialog(root : @view.View) -> Unit {
             let gif = fn() { format() == 3 }
             format_row(rows, fn() { format_hint(format()) }, fn(c) {
               segmented(c, fn() { formats().map(format_label) }, fn() { index_of(formats(), format(), 0) }, fn(i) {
+                if export_out.untracked() != "" {
+                  return
+                }
                 export_format.set(@signals.untracked(formats)[i])
                 save_prefs()
               })
@@ -1167,6 +1190,9 @@ fn export_dialog(root : @view.View) -> Unit {
                   segmented(c, fn() { [t("原始"), "1440p", "1080p", "720p"] }, fn() { index_of(opts, export_height.get(), 0) }, fn(
                     i,
                   ) {
+                    if export_out.untracked() != "" {
+                      return
+                    }
                     export_height.set(opts[i])
                   })
                 })
@@ -1191,6 +1217,9 @@ fn export_dialog(root : @view.View) -> Unit {
                 },
                 fn() { if gif() { index_of(gif_opts, gif_fps.get(), 0) } else { index_of(opts(), export_fps.get(), 0) } },
                 fn(i) {
+                  if export_out.untracked() != "" {
+                    return
+                  }
                   if @signals.untracked(gif) {
                     gif_fps.set(gif_opts[i])
                     save_prefs()
@@ -1202,7 +1231,11 @@ fn export_dialog(root : @view.View) -> Unit {
             })
             rows.show(fn() { !gif() }, fn(b) {
               setting_row(b, false, fn() { t("画质") }, fn() { t("这次导出压缩得多细；不会比录像本身更清楚") }, fn(c) {
-                segmented(c, fn() { [t("低"), t("中"), t("高")] }, fn() { export_quality.get() }, fn(i) { export_quality.set(i) })
+                segmented(c, fn() { [t("低"), t("中"), t("高")] }, fn() { export_quality.get() }, fn(i) {
+                  if export_out.untracked() == "" {
+                    export_quality.set(i)
+                  }
+                })
               })
             }, at_once=true)
           }
@@ -1272,8 +1305,24 @@ fn export_dialog(root : @view.View) -> Unit {
         |> ignore
       } else {
         b.row(Is(true)).gap(Is(8.0)).padding(Is((0.0, 4.0, 0.0, 0.0))).lines_up(Is(Some(Middle))) |> ignore
-        b.box(fn(w) {
-          w.grow(Is(1.0)).basis(Is(Some(0.0))).shrink(Is(1.0)).cuts(Is(true)) |> ignore
+        let dest = pressable(b, fn() { t("打开文件夹") }, fn() {
+          rp_mkdirs(cstr(clips_dir())) |> ignore
+          rp_launch(cstr(clips_dir())) |> ignore
+        }, fn(w) {
+          w
+          .row(Is(true))
+          .grow(Is(1.0))
+          .basis(Is(Some(0.0)))
+          .shrink(Is(1.0))
+          .min_width(Is(Some(0.0)))
+          .height(Is(Some(28.0)))
+          .padding(Is((4.0, 0.0, 4.0, 0.0)))
+          .radius(Is(6.0))
+          .lines_up(Is(Some(Middle)))
+          .lies_along(Is(Start))
+          .edge(By(fn() { if w.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+          .ground(By(fn() { if w.pointed() { press_ground() } else { 0L } }))
+          |> ignore
           words(w, fn() {
               if export_error.get() != "" {
                 export_error.get()
@@ -1283,15 +1332,20 @@ fn export_dialog(root : @view.View) -> Unit {
             }, 12.0, fn() {
               if export_error.get() != "" {
                 warn()
+              } else if w.pointed() {
+                ui_muted()
               } else {
                 ui_subtle()
               }
             })
+          .min_width(Is(Some(0.0)))
+          .allow_ellipsis(Is(true))
           |> ignore
         })
-        |> ignore
+        tip(dest, fn() { clips_dir() })
         b.box(fn(k) {
           k.row(Is(true)).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
+          text_button(k, fn() { t("取消") }, fn() { export_open.set(false) }, ghost=true) |> ignore
           text_button(k, fn() { t("保存并复制") }, fn() { export_now(true) }, icon="copy") |> ignore
           solid_button(k, fn() { t("保存") }, fn() { export_now(false) }, icon="download") |> ignore
         })
@@ -1331,7 +1385,7 @@ fn saved_note(parent : @view.View) -> Unit {
       .presses(By(fn() { saved.get() != "" }))
       .alpha(By(fn() { way.shown(n) }))
       .laid_nowhere(By(fn() { way.shown(n) <= 0.0 && saved.get() == "" }))
-      .offset(By(fn() { (0.0, -8.0 * (1.0 - way.shown(n))) }))
+      .offset(By(fn() { (0.0, if motion_off() { 0.0 } else { -8.0 * (1.0 - way.shown(n)) }) }))
       |> ignore
       n.pick(fn() { now_said().1 }, fn(b, path) {
         b.height(Is(Some(if path == "" { note_line_h } else { note_clip_h }))) |> ignore
@@ -1389,7 +1443,11 @@ fn size_slider(parent : @view.View) -> Unit {
         step=1.0,
         thumb_room=knob,
         value_text=fn(v) { size_label(size_choices[clamp(v, 0.0, (n - 1).to_double()).to_int()]) },
-        fn(v) { export_size.set(clamp(v.round(), 0.0, (n - 1).to_double()).to_int()) },
+        fn(v) {
+          if export_out.untracked() == "" {
+            export_size.set(clamp(v.round(), 0.0, (n - 1).to_double()).to_int())
+          }
+        },
         fn(s, state) {
           s.height(Is(Some(20.0))).cursor(Is(Some(Arrow))) |> ignore
           // the track, its part up to the knob filled
