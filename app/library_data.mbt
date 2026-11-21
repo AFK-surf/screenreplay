@@ -291,13 +291,24 @@ fn is_av1_clip(path : String) -> Bool {
   if path.has_suffix(".gif") {
     return false
   }
-  for t in tracks_of(path) {
-    if t.kind == "vide" {
-      return t.codec == "av01"
+  // (its sample entry alone, read once a clip: each card asked it twice as it was made, and each time its whole sample
+  // tables were read where the 64 files' tracks kept had let it go)
+  match saved_clip_codecs.get(path) {
+    Some(c) => c == "av01"
+    None => {
+      let c = mp4_video_codec(path)
+      // (one still being written has none yet: read again next time)
+      if c != "" {
+        saved_clip_codecs[path] = c
+      }
+      c == "av01"
     }
   }
-  false
 }
+
+///|
+/// Each saved clip's picture codec (its sample entry), read once.
+let saved_clip_codecs : Map[String, String] = Map([])
 
 ///|
 /// An AV1 clip where the system decodes no AV1 (MBUI_NO_AV1=1 makes mbui's stream say so, to see it).

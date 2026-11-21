@@ -131,6 +131,10 @@ internal sealed class RecorderApp : IDisposable
     private DateTimeOffset? pausedUntil;
     private string lastApp = "";
 
+    /// <summary>The window in front (and its process) whose app was found noted already (NoteForegroundApp).</summary>
+    private IntPtr frontNoted;
+    private uint frontNotedPid;
+
     public RecorderApp(RecorderPaths paths, bool wasUpdated = false)
     {
         this.paths = paths;
@@ -281,7 +285,10 @@ internal sealed class RecorderApp : IDisposable
         asks = new FileSystemWatcher(paths.Root) { NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite, EnableRaisingEvents = true };
         FileSystemEventHandler asked = (_, e) =>
         {
-            if (e.Name is "pause.request" or "settings.json" or "purge.request" or "quit.request" or "update.request")
+            // (every ask the window or a test writes taken at once: open, save and flush too, which waited for the next
+            // 2 s look before)
+            if (e.Name is "pause.request" or "settings.json" or "purge.request" or "quit.request" or "update.request" or
+                "open.request" or "save.request" or "flush.request" or "capture-diag.request")
             {
                 ui?.Post(_ => _ = CheckAsync(), null);
             }
@@ -407,17 +414,27 @@ internal sealed class RecorderApp : IDisposable
 
     private bool checking;
 
+    /// <summary>Asked again while a look was under way: one more look as it ends (an ask then was dropped before, and
+    /// waited for the next 2 s look).</summary>
+    private bool checkAgain;
+
     private async Task CheckAsync()
     {
         if (checking)
         {
+            checkAgain = true;
             return;
         }
 
         checking = true;
         try
         {
-            await CheckOnceAsync();
+            do
+            {
+                checkAgain = false;
+                await CheckOnceAsync();
+            }
+            while (checkAgain && !exiting);
         }
         finally
         {
@@ -484,7 +501,7 @@ internal sealed class RecorderApp : IDisposable
             Purge();
         }
 
-        var wanted = RecorderSettings.Read(paths.Settings);
+        var wanted = RecorderSettings.ReadCached(paths.Settings);
         updater.Poll(wanted.AutoUpdate, DateTimeOffset.UtcNow - startedAt >= TimeSpan.FromSeconds(60));
         ApplyAutostart(wanted.Consented && wanted.Autostart);
         if (wanted.Consented)
@@ -1226,15 +1243,53 @@ internal sealed class RecorderApp : IDisposable
 
             (int Encoded, int Skipped) pace = recorder?.IsRunning == true ? recorder.Pace : (0, 0);
             var bitrate = recorder?.ActualBitrate is > 0 and var b ? b : size is { } d ? Bitrate.For(d.Width, d.Height, settings.FrameRate, settings.Quality, recorder?.ActualCodec ?? settings.Codec) : 0;
-            File.WriteAllText(paths.State,
-                $"{{\"status\":{Json(text)},\"statusCode\":{Json(code)},\"audioTrouble\":{Json(audioTrouble)},\"statusArg\":{Json(statusArg)},\"recording\":{(recorder?.IsRunning == true ? "true" : "false")},\"at\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}," +
+            var head = $"{{\"status\":{Json(text)},\"statusCode\":{Json(code)},\"audioTrouble\":{Json(audioTrouble)},\"statusArg\":{Json(statusArg)},\"recording\":{(recorder?.IsRunning == true ? "true" : "false")},";
+            var body =
                 $"\"codec\":{Json(recorder?.ActualCodec ?? "")},\"codecWhy\":{Json(recorder?.FellBack == true ? "fallback" : EffectiveCodec().Why)},\"width\":{size?.Width ?? 0},\"height\":{size?.Height ?? 0},\"fps\":{recorder?.ActualFrameRate ?? settings.FrameRate},\"fpsAsked\":{settings.FrameRate},\"fpsWhy\":{Json(recorder?.FrameRateFellBack == true ? "fallback" : "")},\"displayHz\":{DisplayHz()}," +
                 $"\"bitrate\":{bitrate},\"diskFree\":{free},\"screenWidth\":{recorder?.Target?.Width ?? 0},\"screenHeight\":{recorder?.Target?.Height ?? 0}," +
                 $"\"bufferDir\":{Json(paths.Buffer)},\"bufferTrouble\":{Json(bufferTrouble)},\"diskTight\":{(diskTight ? "true" : "false")},\"fastSync\":{Json(fastSync)}," +
-                $"\"sharedGpu\":{(Replay.Recording.Graphics.Shared ? "true" : "false")},\"framesEncoded\":{pace.Encoded},\"framesSkipped\":{pace.Skipped}}}");
+                $"\"sharedGpu\":{(Replay.Recording.Graphics.Shared ? "true" : "false")},\"framesEncoded\":{pace.Encoded},\"framesSkipped\":{pace.Skipped}}}";
+            // (written only where what it says changed, or 5 s after it was last written: its "at" is the window's sign that
+            // the recorder runs, taken as gone past 10 s. Before, it was written every 2 s whatever it said.)
+            var now = DateTimeOffset.UtcNow;
+            var said = head + body;
+            if (said == stateSaid && now - stateWritten < TimeSpan.FromSeconds(5))
+            {
+                return;
+            }
+
+            var json = head + $"\"at\":{now.ToUnixTimeMilliseconds()}," + body;
+            WriteWhole(paths.State, json);
+            stateSaid = said;
+            stateWritten = now;
         }
         catch (IOException)
         {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>What state.json said when last written (but its time), and when.</summary>
+    private string stateSaid = "";
+    private DateTimeOffset stateWritten = DateTimeOffset.MinValue;
+
+    /// <summary>`text` written to `path` whole: into a file beside it, then moved over it, so a reader never reads it half
+    /// written (the replay window reads state.json and settings.json at any moment). Where the move cannot be made (the
+    /// file held by a reader that shares no deleting), written in place, as before.</summary>
+    internal static void WriteWhole(string path, string text)
+    {
+        var part = path + ".part";
+        File.WriteAllText(part, text);
+        try
+        {
+            File.Move(part, path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            File.WriteAllText(path, text);
+            try { File.Delete(part); } catch (Exception) { }
         }
     }
 
@@ -1277,7 +1332,7 @@ internal sealed class RecorderApp : IDisposable
                 : null;
             node ??= new System.Text.Json.Nodes.JsonObject();
             node["enabled"] = on;
-            File.WriteAllText(paths.Settings, node.ToJsonString());
+            WriteWhole(paths.Settings, node.ToJsonString());
         }
         catch (Exception e)
         {
@@ -1399,12 +1454,28 @@ internal sealed class RecorderApp : IDisposable
         // (the process, its program and its window's title read from one window, at one time: read one by one, the
         // window in front could change between them, and an app was kept under another's name (youdid.wtf as
         // 「PixPin」, PixPin as 「主窗口」, the user, 2026-11-14))
+        // (the window in front the same one as when its app was last found noted already: not read again. Each read
+        // opened the process, read its program's version block and walked its parents, every 2 s. Not where it is a
+        // window kept out of capture (ScreenReplay's own): the app under it may change while it stays in front)
+        var front = ForegroundApp.Front();
+        var frontPid = ForegroundApp.PidOf(front);
+        if (front != IntPtr.Zero && front == frontNoted && frontPid == frontNotedPid && !ForegroundApp.Unseen(front))
+        {
+            return;
+        }
+
+        frontNotedPid = frontPid;
+
         var (name, exe, title, helper) = ForegroundApp.Now();
         // (nothing noted before the first-run sheet is said yes to, nor while recording is turned off)
         if (name.Length == 0 || name == lastApp || locked || !(settings.Enabled && settings.Consented))
         {
+            // (its app noted already: this window need not be looked at again; held (locked, off): looked at again)
+            frontNoted = name.Length > 0 && name == lastApp ? front : IntPtr.Zero;
             return;
         }
+
+        frontNoted = front;
 
         lastApp = name;
         Append(paths.Apps, $"{{\"at\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"app\":{Json(name)}}}");
@@ -1881,6 +1952,34 @@ internal sealed record RecorderSettings(
     // reviewer's 98th, the user 2026-11-14)
     public static RecorderSettings Default { get; } = new(false, TimeSpan.FromHours(2), 20L << 30, false, true, false, false);
 
+    private static (string Path, DateTime Written, long Length, RecorderSettings Read)? cached;
+
+    /// <summary>As Read, the file read and parsed again only where its time or length changed since (asked every 2 s).</summary>
+    public static RecorderSettings ReadCached(string path)
+    {
+        DateTime written;
+        long length;
+        try
+        {
+            var info = new FileInfo(path);
+            written = info.Exists ? info.LastWriteTimeUtc : DateTime.MinValue;
+            length = info.Exists ? info.Length : -1;
+        }
+        catch (Exception)
+        {
+            return Read(path);
+        }
+
+        if (cached is { } c && c.Path == path && c.Written == written && c.Length == length)
+        {
+            return c.Read;
+        }
+
+        var read = Read(path);
+        cached = (path, written, length, read);
+        return read;
+    }
+
     public static RecorderSettings Read(string path)
     {
         try
@@ -2021,6 +2120,21 @@ internal static class ForegroundApp
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, int cmd);
+
+    /// <summary>The window in front (zero: none).</summary>
+    public static IntPtr Front() => GetForegroundWindow();
+
+    /// <summary>The process a window is of (0: none).</summary>
+    public static uint PidOf(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return 0;
+        }
+
+        GetWindowThreadProcessId(hwnd, out var pid);
+        return pid;
+    }
 
     public static string Name()
     {

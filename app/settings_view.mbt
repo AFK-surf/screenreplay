@@ -103,6 +103,10 @@ fn choice_row(
 }
 
 ///|
+/// The scrub index's folder's size as last walked, and when (rp_now's ms; 0 never).
+let thumbs_size : Ref[(Double, Double)] = Ref((0.0, 0.0))
+
+///|
 /// 删除全部录像: 0 its key, 1 asked again, 2 asked of the recorder.
 let purge_state : @signals.Signal[Int] = @signals.signal(0)
 
@@ -117,7 +121,15 @@ fn storage_card(parent : @view.View) -> Unit {
   }
   let thumbs = fn() {
     status_rev.get() |> ignore
-    @cmp.maximum(0.0, rp_dir_size(cstr(root_dir() + "\\Thumbs")))
+    // (the folder walked at most once in 30 s: status_rev moves every 3 s while the window shows, and each walk
+    // read every thumbnail file's entry)
+    let (at, bytes) = thumbs_size.val
+    if at > 0.0 && rp_now() - at < 30000.0 {
+      return bytes
+    }
+    let b = @cmp.maximum(0.0, rp_dir_size(cstr(root_dir() + "\\Thumbs")))
+    thumbs_size.val = (rp_now(), b)
+    b
   }
   let hourly = fn() {
     sets() |> ignore
@@ -658,7 +670,8 @@ fn fps_note() -> String {
   if fps <= 60 {
     return ""
   }
-  let info = recording_info()
+  // (bound to the recorder's word as it is read again: info(), not recording_info(), which it read once and kept)
+  let info = info()
   if info.fps_fell_back {
     return t("显卡编码器不支持这个帧率，正在按 60 帧录制")
   }

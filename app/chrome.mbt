@@ -260,7 +260,7 @@ fn real_code() -> String {
 ///|
 fn real_status() -> (String, Bool) {
   status_rev.get() |> ignore
-  match parse(read_text(root_dir() + "\\state.json")) {
+  match state_json() {
     // (the recorder says how it stands every 2 s: older than 10 s, it is not running)
     Some({ "at": Number(at, ..), .. }) if rp_now() - at > 10000.0 => (t("录制程序没在运行"), false)
     // (the recorder's code said in the window's language; its own words from a recorder from before codes)
@@ -418,7 +418,7 @@ fn recorder_chip(parent : @view.View) -> Unit {
 /// The recorder's state's code as it last said it ("" not running).
 fn recorder_code() -> String {
   status_rev.get() |> ignore
-  match parse(read_text(root_dir() + "\\state.json")) {
+  match state_json() {
     Some({ "at": Number(at, ..), .. }) if rp_now() - at > 10000.0 => ""
     Some({ "statusCode": String(code), .. }) => code
     _ => ""

@@ -123,8 +123,11 @@ Gif *gif_of(const char *path) {
     }
     if (g->w <= 0 || g->h <= 0 || (int64_t)g->w * g->h > 16 * 1024 * 1024) break;
     g->base.assign((size_t)g->w * g->h * 4, 0);
-    // (about 30 canvases kept at most: a 960 x 540 GIF's ~60 MB)
-    g->step = std::max(16, (int)(n + 29) / 30);
+    // (about 30 canvases kept at most: a 960 x 540 GIF's ~60 MB; fewer of a large one, 256 MB of them at most: a 4K
+    // GIF's 30 were 1 GB)
+    const size_t canvas = (size_t)g->w * g->h * 4;
+    const int most = (int)std::max<size_t>(2, std::min<size_t>(30, (256u << 20) / std::max<size_t>(1, canvas)));
+    g->step = std::max(16, (int)(n + most - 1) / most);
     g->kept[0] = g->base;
     ok = true;
   } while (false);

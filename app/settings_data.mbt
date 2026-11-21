@@ -261,6 +261,25 @@ fn fps_of(v : Double) -> Int {
 }
 
 ///|
+/// The recorder's state.json as last read: read and parsed once each time status_rev moves (each read of the folder,
+/// 3 s; every 250 ms while an ask of the recorder is followed), not by each who asks. Before, the recording's size
+/// (rec_size, under the region and the window picker) read and parsed the file at each move of the pointer, and the
+/// title bar's chip twice a read.
+let state_read : Ref[(Int, Json?)] = Ref((-1, None))
+
+///|
+fn state_json() -> Json? {
+  let rev = status_rev.untracked()
+  let (at, j) = state_read.val
+  if at == rev {
+    return j
+  }
+  let j = parse(read_text(root_dir() + "\\state.json"))
+  state_read.val = (rev, j)
+  j
+}
+
+///|
 fn recording_info() -> RecordingInfo {
   let mut info = {
     codec: "",
@@ -279,7 +298,7 @@ fn recording_info() -> RecordingInfo {
     frames_encoded: 0,
     frames_skipped: 0,
   }
-  match parse(read_text(root_dir() + "\\state.json")) {
+  match state_json() {
     Some(Object(o)) => {
       let num = fn(k : String) {
         match o.get(k) {

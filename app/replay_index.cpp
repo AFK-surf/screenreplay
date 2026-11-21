@@ -64,10 +64,83 @@ struct Seg {
   std::wstring file;  // where its thumbnails are read from ("": in memory, a clip's)
 };
 
-std::mutex mu;
-std::condition_variable work;
-std::map<std::string, Seg> segs;  // by the segment's path (UTF-8), so newest last
-std::wstring cache_dir;
+// (made once and never let go of: the workers are detached and may still wait on them as the process ends, after the
+// globals' destructors have run)
+std::mutex &mu = *new std::mutex;
+std::condition_variable &work = *new std::condition_variable;
+std::map<std::string, Seg> &segs = *new std::map<std::string, Seg>;  // by the segment's path (UTF-8), so newest last
+std::wstring &cache_dir = *new std::wstring;
+// How many segments wait or are being made (rp_idx_pending, asked by the window often): counted again under `mu` as
+// each changes, read without it.
+std::atomic<int> pending_n{0};
+
+// (under mu)
+void recount() {
+  int n = 0;
+  for (auto &kv : segs)
+    if (kv.second.state == 0 || kv.second.state == 1) n++;
+  pending_n.store(n);
+}
+
+// The thumbnails' files read last, kept open (a hover's and a filmstrip's pictures read one by one: each opened and
+// closed before). Opened sharing delete, so the recorder's housekeeping can still remove one; one written anew or let
+// go of is closed first (forget_open).
+struct OpenThumbs {
+  std::mutex mu;
+  struct Entry {
+    std::wstring file;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    uint64_t used = 0;
+  } e[4];
+  uint64_t clock = 0;
+};
+OpenThumbs &open_thumbs = *new OpenThumbs;
+
+void forget_open(const std::wstring &file) {
+  std::lock_guard<std::mutex> lock(open_thumbs.mu);
+  for (auto &x : open_thumbs.e) {
+    if (x.h != INVALID_HANDLE_VALUE && x.file == file) {
+      CloseHandle(x.h);
+      x.h = INVALID_HANDLE_VALUE;
+      x.file.clear();
+    }
+  }
+}
+
+// `len` bytes of `file` at `off` (false: not read).
+bool read_thumb(const std::wstring &file, int64_t off, uint32_t len, std::vector<uint8_t> &bytes) {
+  std::lock_guard<std::mutex> lock(open_thumbs.mu);
+  OpenThumbs::Entry *at = nullptr;
+  for (auto &x : open_thumbs.e)
+    if (x.h != INVALID_HANDLE_VALUE && x.file == file) at = &x;
+  if (!at) {
+    HANDLE h = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    at = &open_thumbs.e[0];
+    for (auto &x : open_thumbs.e) {
+      if (x.h == INVALID_HANDLE_VALUE) {
+        at = &x;
+        break;
+      }
+      if (x.used < at->used) at = &x;
+    }
+    if (at->h != INVALID_HANDLE_VALUE) CloseHandle(at->h);
+    at->h = h;
+    at->file = file;
+  }
+  at->used = ++open_thumbs.clock;
+  bytes.resize(len);
+  OVERLAPPED o = {};
+  o.Offset = (DWORD)off;
+  o.OffsetHigh = (DWORD)((uint64_t)off >> 32);
+  DWORD got = 0;
+  if (!ReadFile(at->h, bytes.data(), len, &got, &o) || got != len) {
+    bytes.clear();
+    return false;
+  }
+  return true;
+}
 int64_t prefer_clock = 0;
 bool started = false;
 std::atomic<int> made{0};
@@ -149,6 +222,8 @@ void save_cache(const std::wstring &stem, std::vector<Thumb> &thumbs, std::wstri
   }
   bool ok = ferror(f) == 0;
   fclose(f);
+  // (one kept open of the file it replaces closed first: its pictures' places are of the new one)
+  forget_open(file);
   // (kept, its thumbnails are read from it from now on: their bytes let go here)
   if (ok && MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) {
     for (size_t k = 0; k < thumbs.size(); k++) {
@@ -310,6 +385,9 @@ struct GpuIndexer {
   ID3D11VideoProcessorOutputView *out_view = nullptr;
   ID3D11Texture2D *staging = nullptr;
   UINT32 vp_in_w = 0, vp_in_h = 0, vp_out_w = 0, vp_out_h = 0;
+
+  // Whether it holds a device now.
+  bool holds() const { return manager != nullptr || dev != nullptr; }
 
   bool ensure() {
     if (manager) return true;
@@ -768,8 +846,14 @@ void worker() {
           plain = best->plain != 0;
           break;
         }
-        // (nothing waiting: let go of the GPU device so no decoder memory stays held while idle)
-        gpu.drop();
+        // (nothing waiting: let go of the GPU device so no decoder memory stays held while idle; outside the lock,
+        // which the window's thread takes for every picture it asks for)
+        if (gpu.holds()) {
+          lock.unlock();
+          gpu.drop();
+          lock.lock();
+          continue;
+        }
         work.wait(lock);
       }
     }
@@ -811,17 +895,24 @@ void worker() {
       }
     }
     if (ok && !cached) save_cache(stem, thumbs, &file);
+    std::wstring gone;
     {
       std::lock_guard<std::mutex> lock(mu);
       auto it = segs.find(key);
       if (it != segs.end() && it->second.dropped) {
-        if (!cache_dir.empty() && !it->second.stem.empty()) DeleteFileW((cache_dir + L"\\" + it->second.stem + L".thumbs").c_str());
+        if (!cache_dir.empty() && !it->second.stem.empty()) gone = cache_dir + L"\\" + it->second.stem + L".thumbs";
         segs.erase(it);
       } else if (it != segs.end()) {
         it->second.thumbs = std::move(thumbs);
         it->second.file = file;
         it->second.state = ok ? 2 : -1;
       }
+      recount();
+    }
+    // (deleted outside the lock)
+    if (!gone.empty()) {
+      forget_open(gone);
+      DeleteFileW(gone.c_str());
     }
     made++;
   }
@@ -833,14 +924,17 @@ void start() {
   for (int i = 0; i < 3; i++) std::thread(worker).detach();
 }
 
+// The last thumbnail at or before `ms` (+1), else the first: found by halving (they are in time's order), not by a walk
+// over the segment's up to 60.
 const Thumb *nearest(const Seg &s, double ms) {
-  const Thumb *best = nullptr;
-  for (auto &t : s.thumbs) {
-    if (t.ms <= ms + 1) best = &t;
-    else break;
+  if (s.thumbs.empty()) return nullptr;
+  size_t lo = 0, hi = s.thumbs.size();
+  while (lo < hi) {
+    size_t mid = (lo + hi) / 2;
+    if (s.thumbs[mid].ms <= ms + 1) lo = mid + 1;
+    else hi = mid;
   }
-  if (!best && !s.thumbs.empty()) best = &s.thumbs[0];
-  return best;
+  return lo == 0 ? &s.thumbs[0] : &s.thumbs[lo - 1];
 }
 
 }  // namespace
@@ -861,6 +955,7 @@ extern "C" void rp_idx_add(moonbit_bytes_t path, double dur) {
   s.stem = stem_of(s.path);
   s.dur = dur;
   segs.emplace(key, std::move(s));
+  recount();
   start();
   work.notify_all();
 }
@@ -876,22 +971,34 @@ extern "C" void rp_idx_add_clip(moonbit_bytes_t path, double dur) {
   s.dur = dur;
   s.prefer = ++prefer_clock;
   segs.emplace(key, std::move(s));
+  recount();
   start();
   work.notify_all();
 }
 
 // A segment gone from the buffer: its thumbnails let go, its file on disk removed.
 extern "C" void rp_idx_drop(moonbit_bytes_t path) {
-  std::lock_guard<std::mutex> lock(mu);
-  auto it = segs.find(std::string((const char *)path));
-  if (it == segs.end()) return;
-  // (one being made: let go as it is done, its thumbnails never shown)
-  if (it->second.state == 1) {
-    it->second.dropped = 1;
-    return;
+  std::wstring gone, read_from;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    auto it = segs.find(std::string((const char *)path));
+    if (it == segs.end()) return;
+    // (one being made: let go as it is done, its thumbnails never shown)
+    if (it->second.state == 1) {
+      it->second.dropped = 1;
+      return;
+    }
+    if (!cache_dir.empty() && !it->second.stem.empty()) gone = cache_dir + L"\\" + it->second.stem + L".thumbs";
+    read_from = it->second.file;
+    segs.erase(it);
+    recount();
   }
-  if (!cache_dir.empty() && !it->second.stem.empty()) DeleteFileW((cache_dir + L"\\" + it->second.stem + L".thumbs").c_str());
-  segs.erase(it);
+  // (its file closed and deleted outside the lock, which the workers and every picture asked for take)
+  if (!read_from.empty()) forget_open(read_from);
+  if (!gone.empty()) {
+    forget_open(gone);
+    DeleteFileW(gone.c_str());
+  }
 }
 
 // The window looks at this segment now: made before the others still waiting.
@@ -930,28 +1037,15 @@ extern "C" moonbit_bytes_t rp_idx_jpeg(moonbit_bytes_t path, double ms) {
       len = t->len;
     }
   }
-  // (read from its file outside the lock: some tens of KB, the system's cache's)
-  if (len) {
-    FILE *f = _wfopen(file.c_str(), L"rb");
-    if (f) {
-      bytes.resize(len);
-      if (_fseeki64(f, off, SEEK_SET) != 0 || fread(bytes.data(), 1, len, f) != len) bytes.clear();
-      fclose(f);
-    }
-  }
+  // (read from its file outside the lock: some tens of KB, the system's cache's; the file kept open for the next)
+  if (len) read_thumb(file, off, len, bytes);
   moonbit_bytes_t out = moonbit_make_bytes((int32_t)bytes.size(), 0);
   if (!bytes.empty()) memcpy(out, bytes.data(), bytes.size());
   return out;
 }
 
 // How many segments are still waiting or being made.
-extern "C" int32_t rp_idx_pending(void) {
-  std::lock_guard<std::mutex> lock(mu);
-  int32_t n = 0;
-  for (auto &kv : segs)
-    if (kv.second.state == 0 || kv.second.state == 1) n++;
-  return n;
-}
+extern "C" int32_t rp_idx_pending(void) { return pending_n.load(); }
 
 // How many segments have been made (or read from disk) since the start: a frame asks again when it grew.
 extern "C" int32_t rp_idx_made(void) { return made.load(); }

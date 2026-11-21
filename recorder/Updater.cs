@@ -458,7 +458,11 @@ internal sealed class Updater : IDisposable
         }
     }
 
-    private void InstallNow()
+    /// <summary>The installer checked once more and started, off the recorder's thread: its SHA-256 over the whole
+    /// installer (tens of MB) was read on it, the tray and its timers waiting.</summary>
+    private void InstallNow() => _ = Task.Run(InstallNowCore);
+
+    private void InstallNowCore()
     {
         if (state != "ready" || string.IsNullOrEmpty(downloadedFile) || !File.Exists(downloadedFile))
         {

@@ -130,26 +130,31 @@ static HANDLE rp_open(moonbit_bytes_t path) {
   return h;
 }
 
-// A file's size in bytes, -1 when it cannot be opened.
+// A file's attributes as its folder has them (no handle opened: opening one cost the system's scan of the file, for
+// each of the many files whose size or time is asked); false where there is none, or it is a folder (as before, when a
+// folder could not be opened as a file).
+static BOOL rp_attributes(moonbit_bytes_t path, WIN32_FILE_ATTRIBUTE_DATA *a) {
+  wchar_t *w = rp_wide((const char *)path);
+  BOOL ok = GetFileAttributesExW(w, GetFileExInfoStandard, a);
+  free(w);
+  return ok && !(a->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// A file's size in bytes, -1 when there is none.
 double rp_size(moonbit_bytes_t path) {
-  HANDLE h = rp_open(path);
-  if (h == INVALID_HANDLE_VALUE) return -1.0;
-  LARGE_INTEGER s;
-  BOOL ok = GetFileSizeEx(h, &s);
-  CloseHandle(h);
-  return ok ? (double)s.QuadPart : -1.0;
+  WIN32_FILE_ATTRIBUTE_DATA a;
+  if (!rp_attributes(path, &a)) return -1.0;
+  return (double)(((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow);
 }
 
 // Last-write time helps invalidate a preview when a clip is replaced in place.
 double rp_modified(moonbit_bytes_t path) {
-  HANDLE h = rp_open(path);
-  if (h == INVALID_HANDLE_VALUE) return -1.0;
-  FILETIME ft = {0};
-  BOOL ok = GetFileTime(h, NULL, NULL, &ft);
-  CloseHandle(h);
+  WIN32_FILE_ATTRIBUTE_DATA a;
+  if (!rp_attributes(path, &a)) return -1.0;
   ULARGE_INTEGER t;
-  t.LowPart = ft.dwLowDateTime; t.HighPart = ft.dwHighDateTime;
-  return ok ? (double)(t.QuadPart / 10000ULL) : -1.0;
+  t.LowPart = a.ftLastWriteTime.dwLowDateTime;
+  t.HighPart = a.ftLastWriteTime.dwHighDateTime;
+  return (double)(t.QuadPart / 10000ULL);
 }
 
 // At most `length` bytes of a file from `offset`; none when it cannot be read.
@@ -160,7 +165,12 @@ moonbit_bytes_t rp_read(moonbit_bytes_t path, double offset, int32_t length) {
     return moonbit_make_bytes(0, 0);
   }
   LARGE_INTEGER sz;
-  if (GetFileSizeEx(h, &sz)) {
+  // (its size not known: nothing read, rather than `length` made ready for a whole file asked for: read_text's)
+  if (!GetFileSizeEx(h, &sz)) {
+    CloseHandle(h);
+    return moonbit_make_bytes(0, 0);
+  }
+  {
     LONGLONG rem = sz.QuadPart - (LONGLONG)offset;
     if (rem <= 0) {
       CloseHandle(h);
@@ -439,8 +449,22 @@ static BOOL CALLBACK rp_affinity_one(HWND hwnd, LPARAM on) {
   return TRUE;
 }
 
+// (asked every second, in each of the program's three processes: every window of the desktop walked each time before;
+// now this thread's own windows, where its windows are made, and the whole desktop's only as the switch turns or
+// every 30 s for a window another thread of the process made)
+static BOOL CALLBACK rp_affinity_thread(HWND hwnd, LPARAM on) { return rp_affinity_one(hwnd, on); }
+
 void rp_hide_from_capture(int32_t on) {
-  EnumWindows(rp_affinity_one, (LPARAM)on);
+  static int last = -1;
+  static ULONGLONG walked = 0;
+  ULONGLONG now = GetTickCount64();
+  if (last != on || now - walked >= 30000) {
+    last = on;
+    walked = now;
+    EnumWindows(rp_affinity_one, (LPARAM)on);
+    return;
+  }
+  EnumThreadWindows(GetCurrentThreadId(), rp_affinity_thread, (LPARAM)on);
 }
 
 // The pointer hidden till it moves (full screen, the bars gone): the window shows its own again at the next move.
@@ -735,7 +759,9 @@ static LRESULT CALLBACK rp_tray_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_WINDOWPOSCHANGED) {
     const WINDOWPOS *pos = (const WINDOWPOS *)lp;
     if ((pos->flags & SWP_SHOWWINDOW) && !rp_tray_priming) rp_tray_asked = 1;
-    if ((pos->flags & SWP_SHOWWINDOW) && !rp_tray_mouse) {
+    // (not for its showing cloaked to be drawn once (priming): the hook then hid it at the first press anywhere on the
+    // desktop in those 2.5 s, its first frame not drawn yet, and watched every press of the whole desktop meanwhile)
+    if ((pos->flags & SWP_SHOWWINDOW) && !rp_tray_mouse && !rp_tray_priming) {
       rp_tray_mouse = SetWindowsHookExW(WH_MOUSE_LL, rp_tray_mouse_proc, GetModuleHandleW(NULL), 0);
     } else if ((pos->flags & SWP_HIDEWINDOW) && rp_tray_mouse) {
       UnhookWindowsHookEx(rp_tray_mouse);

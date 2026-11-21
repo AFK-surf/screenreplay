@@ -121,6 +121,12 @@ internal sealed class Tray : IDisposable
         get => icon;
         set
         {
+            // (the same as it is, shown: the shell not told again; the status is set every 2 s. Not shown yet (no taskbar at sign-in): tried again, as before)
+            if (value == icon && (added || !visible))
+            {
+                return;
+            }
+
             icon = value;
             Update();
         }
@@ -132,7 +138,13 @@ internal sealed class Tray : IDisposable
         get => text;
         set
         {
-            text = value.Length > 127 ? value[..127] : value;
+            var cut = value.Length > 127 ? value[..127] : value;
+            if (cut == text && (added || !visible))
+            {
+                return;
+            }
+
+            text = cut;
             Update();
         }
     }

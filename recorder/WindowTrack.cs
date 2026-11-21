@@ -115,13 +115,36 @@ internal sealed class WindowTrack : IDisposable
     private readonly WinEventProc proc;
     private readonly List<IntPtr> hooks = [];
     private readonly MessageWindow window;
-    private readonly nuint timer;
+    private nuint timer;
     private readonly Dictionary<uint, string> processNames = [];
     private bool dirty = true;
     private string last = "";
+    private bool active;
 
-    /// <summary>Whether lines are written (not while recording is held: locked, paused).</summary>
-    public bool Active { get; set; } = true;
+    /// <summary>Whether lines are written (not while recording is held: locked, paused, turned off). Held, nothing of
+    /// the desktop is watched: its six hooks let go of (each called for every window's every move and name change on the
+    /// desktop) and its 100 ms timer stopped; taken again as it goes on.</summary>
+    public bool Active
+    {
+        get => active;
+        set
+        {
+            if (value == active)
+            {
+                return;
+            }
+
+            active = value;
+            if (value)
+            {
+                Watch();
+            }
+            else
+            {
+                Unwatch();
+            }
+        }
+    }
 
     public WindowTrack(MessageWindow window, string path, Action<string> log, Action<IntPtr> foreground)
     {
@@ -130,6 +153,17 @@ internal sealed class WindowTrack : IDisposable
         this.log = log;
         this.foreground = foreground;
         proc = OnEvent;
+        active = true;
+        Watch();
+    }
+
+    private void Watch()
+    {
+        if (hooks.Count > 0)
+        {
+            return;
+        }
+
         foreach (var (min, max) in new[]
                  {
                      (EventSystemForeground, EventSystemForeground),
@@ -148,6 +182,23 @@ internal sealed class WindowTrack : IDisposable
         }
 
         timer = window.Every(100, () => Flush(false));
+        dirty = true;
+    }
+
+    private void Unwatch()
+    {
+        if (timer != 0)
+        {
+            window.Stop(timer);
+            timer = 0;
+        }
+
+        foreach (var hook in hooks)
+        {
+            UnhookWinEvent(hook);
+        }
+
+        hooks.Clear();
     }
 
     private void OnEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
@@ -424,10 +475,7 @@ internal sealed class WindowTrack : IDisposable
 
     public void Dispose()
     {
-        window.Stop(timer);
-        foreach (var hook in hooks)
-        {
-            UnhookWinEvent(hook);
-        }
+        active = false;
+        Unwatch();
     }
 }

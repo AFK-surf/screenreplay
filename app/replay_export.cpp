@@ -26,6 +26,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <algorithm>
 #include <climits>
 #include <cstdlib>
@@ -1615,10 +1616,43 @@ HRESULT estimate(const Job &job, const std::atomic<bool> &stop, double *bytes) {
   return S_OK;
 }
 
-// The estimate under way: its thread, its stop, its answer (-1 while it runs; -2 failed).
+// The estimates: one thread of their own, kept (started at the first), given the newest asked for; what it makes
+// stopped as a newer one is asked for (`estimate_stop`); its answer (-1 while it runs; -2 failed), kept only where it is
+// of the newest ask (`estimate_gen`). Before, each ask waited on the window's thread for the one before to stop
+// (estimator.join), its device and reader being made: the window stood still while a clip's end was dragged.
 std::thread estimator;
 std::atomic<bool> estimate_stop{false};
 std::atomic<double> estimated{-2.0};
+std::mutex estimate_mu;
+std::condition_variable estimate_wake;
+Job estimate_job;
+uint64_t estimate_gen = 0;   // (under estimate_mu) the newest ask's number
+uint64_t estimate_taken = 0; // (under estimate_mu) the one the thread took last
+bool estimate_quit = false;
+
+void estimate_loop() {
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  MFStartup(MF_VERSION, MFSTARTUP_LITE);
+  for (;;) {
+    Job job;
+    uint64_t gen = 0;
+    {
+      std::unique_lock<std::mutex> lock(estimate_mu);
+      estimate_wake.wait(lock, [] { return estimate_quit || estimate_taken != estimate_gen; });
+      if (estimate_quit) break;
+      job = estimate_job;
+      gen = estimate_gen;
+      estimate_taken = gen;
+      estimate_stop.store(false);
+    }
+    double bytes = 0;
+    HRESULT hr = estimate(job, estimate_stop, &bytes);
+    std::lock_guard<std::mutex> lock(estimate_mu);
+    if (gen == estimate_gen && !estimate_stop.load()) estimated.store(SUCCEEDED(hr) ? bytes : -2.0);
+  }
+  MFShutdown();
+  CoUninitialize();
+}
 
 }  // namespace
 
@@ -1676,26 +1710,30 @@ extern "C" int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output,
 // A GIF's size estimated on a thread of its own (the words as rp_export_start's, no bitrate), one before it stopped;
 // asked for by rp_gif_estimate.
 extern "C" void rp_gif_estimate_start(moonbit_bytes_t plan, int32_t width, int32_t height, int32_t fps, moonbit_bytes_t crops, double scale) {
-  std::lock_guard<std::mutex> lock(mu);
-  estimate_stop.store(true);
-  if (estimator.joinable()) estimator.join();
   Job job;
-  if (!make_job((const char *)plan, (const char *)crops, width, height, fps, 0, kGif, scale, job)) {
+  const bool made = make_job((const char *)plan, (const char *)crops, width, height, fps, 0, kGif, scale, job);
+  std::lock_guard<std::mutex> lock(estimate_mu);
+  // (the one under way given up; the thread takes this one as it has stopped: nothing waited for here)
+  estimate_stop.store(true);
+  estimate_gen++;
+  if (!made) {
+    // (nothing to estimate: the thread takes nothing new)
+    estimate_taken = estimate_gen;
     estimated.store(-2.0);
     return;
   }
-  estimate_stop.store(false);
+  estimate_job = job;
   estimated.store(-1.0);
-  exit_registered();
-  estimator = std::thread([job]() {
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    MFStartup(MF_VERSION, MFSTARTUP_LITE);
-    double bytes = 0;
-    HRESULT hr = estimate(job, estimate_stop, &bytes);
-    MFShutdown();
-    CoUninitialize();
-    if (!estimate_stop.load()) estimated.store(SUCCEEDED(hr) ? bytes : -2.0);
-  });
+  if (!estimator.joinable()) {
+    exit_registered();
+    try {
+      estimator = std::thread(estimate_loop);
+    } catch (...) {
+      estimated.store(-2.0);
+      return;
+    }
+  }
+  estimate_wake.notify_one();
 }
 
 // The estimate's bytes; -1 while it is made, -2 none (it failed, or nothing to estimate).
@@ -1704,7 +1742,12 @@ extern "C" double rp_gif_estimate(void) { return estimated.load(); }
 // Registered once: at exit an export under way is cancelled and its thread waited for (an estimate's too).
 void rp_export_at_exit(void) {
   cancel.store(true);
-  estimate_stop.store(true);
+  {
+    std::lock_guard<std::mutex> lock(estimate_mu);
+    estimate_quit = true;
+    estimate_stop.store(true);
+  }
+  estimate_wake.notify_one();
   if (worker.joinable()) worker.join();
   if (estimator.joinable()) estimator.join();
 }

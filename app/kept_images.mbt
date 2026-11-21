@@ -118,7 +118,13 @@ fn clips_gone_forget(dir : String, names : Array[String]) -> Unit {
       stale.push(path)
     }
   }
+  for path, _ in saved_clip_codecs {
+    if !here.contains(path) {
+      stale.push(path)
+    }
+  }
   for path in stale {
+    saved_clip_codecs.remove(path)
     clip_durations.remove(path)
     clip_leads.remove(path)
     gif_lengths.remove(path)

@@ -1196,43 +1196,155 @@ static std::vector<uint8_t> rp_gif_pixels(const std::wstring &file, int32_t max_
 // How long a GIF plays, in ms: its frames' delays added up (read from its blocks, its pictures skipped); -1 when it
 // is not one.
 static double rp_gif_duration(const std::wstring &file) {
-  HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                         FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
   if (f == INVALID_HANDLE_VALUE) return -1;
-  LARGE_INTEGER size{};
-  GetFileSizeEx(f, &size);
-  std::vector<uint8_t> b((size_t)std::min<LONGLONG>(size.QuadPart, 512LL << 20));
-  DWORD got = 0;
-  const bool read = ReadFile(f, b.data(), (DWORD)b.size(), &got, nullptr) && got == b.size();
-  CloseHandle(f);
-  if (!read || b.size() < 13 || memcmp(b.data(), "GIF8", 4) != 0) return -1;
-  size_t p = 13;
-  if (b[10] & 0x80) p += 3 * ((size_t)2 << (b[10] & 7));
-  double cs = 0;
-  // (sub-blocks skipped from `q`: where they end)
-  auto skip = [&](size_t q) {
-    while (q < b.size() && b[q]) q += 1 + (size_t)b[q];
-    return q + 1;
+  // (read through in 1 MB pieces, never the whole file at once: a 4K GIF of some minutes is hundreds of MB, and the
+  // whole of it was read into memory for its length)
+  std::vector<uint8_t> buf(1 << 20);
+  size_t have = 0, at = 0;
+  bool end = false;
+  // byte `i` ahead of where it reads (false: the file ends first)
+  auto peek = [&](size_t i, uint8_t &out) -> bool {
+    while (at + i >= have && !end) {
+      if (at > 0) {
+        memmove(buf.data(), buf.data() + at, have - at);
+        have -= at;
+        at = 0;
+      }
+      if (have == buf.size()) buf.resize(buf.size() * 2);
+      DWORD got = 0;
+      if (!ReadFile(f, buf.data() + have, (DWORD)(buf.size() - have), &got, nullptr) || got == 0) end = true;
+      have += got;
+    }
+    if (at + i >= have) return false;
+    out = buf[at + i];
+    return true;
   };
-  while (p < b.size()) {
-    if (b[p] == 0x3B) break;
-    if (b[p] == 0x21 && p + 1 < b.size()) {
-      if (b[p + 1] == 0xF9 && p + 7 < b.size()) cs += b[p + 4] | (b[p + 5] << 8);
-      p = skip(p + 2);
-    } else if (b[p] == 0x2C && p + 10 < b.size()) {
-      const uint8_t flags = b[p + 9];
-      p += 10;
-      if (flags & 0x80) p += 3 * ((size_t)2 << (flags & 7));
-      p = skip(p + 1);
+  // `n` bytes passed over (false: the file ends first)
+  auto skip_n = [&](size_t n) -> bool {
+    uint8_t b;
+    while (n > 0) {
+      size_t step = std::min(n, have - at);
+      at += step;
+      n -= step;
+      if (n > 0 && !peek(0, b)) return false;
+    }
+    return true;
+  };
+  // sub-blocks passed over, the terminator with them
+  auto skip_blocks = [&]() -> bool {
+    uint8_t len;
+    for (;;) {
+      if (!peek(0, len)) return false;
+      if (!skip_n(1)) return false;
+      if (len == 0) return true;
+      if (!skip_n(len)) return false;
+    }
+  };
+  double cs = 0;
+  uint8_t h[13];
+  bool ok = true;
+  for (int i = 0; i < 13 && ok; i++) ok = peek(i, h[i]);
+  if (!ok || memcmp(h, "GIF8", 4) != 0) {
+    CloseHandle(f);
+    return -1;
+  }
+  skip_n(13);
+  if (h[10] & 0x80) skip_n(3 * ((size_t)2 << (h[10] & 7)));
+  uint8_t b0, b1;
+  while (peek(0, b0)) {
+    if (b0 == 0x3B) break;
+    if (b0 == 0x21 && peek(1, b1)) {
+      if (b1 == 0xF9) {
+        uint8_t lo, hi;
+        if (peek(4, lo) && peek(5, hi)) cs += lo | (hi << 8);
+      }
+      if (!skip_n(2) || !skip_blocks()) break;
+    } else if (b0 == 0x2C) {
+      uint8_t flags;
+      if (!peek(9, flags) || !skip_n(10)) break;
+      if ((flags & 0x80) && !skip_n(3 * ((size_t)2 << (flags & 7)))) break;
+      if (!skip_n(1) || !skip_blocks()) break;
     } else {
       break;
     }
   }
+  CloseHandle(f);
   return cs * 10.0;
+}
+
+// A video file's length (ms) as its movie header says (moov's mvhd: its duration over its timescale), read from the
+// boxes' heads alone; -1 where it cannot be (then asked of Media Foundation). The library asks it of each saved clip as
+// its card is made, on the window's thread: a source reader made for each took tens of ms a clip.
+static double rp_mp4_header_duration(const std::wstring &file) {
+  HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return -1;
+  auto read_at = [&](uint64_t at, uint8_t *to, DWORD n) -> bool {
+    OVERLAPPED o = {};
+    o.Offset = (DWORD)at;
+    o.OffsetHigh = (DWORD)(at >> 32);
+    DWORD got = 0;
+    return ReadFile(f, to, n, &got, &o) && got == n;
+  };
+  auto be = [](const uint8_t *p, int n) {
+    uint64_t v = 0;
+    for (int i = 0; i < n; i++) v = v << 8 | p[i];
+    return v;
+  };
+  LARGE_INTEGER size{};
+  GetFileSizeEx(f, &size);
+  const uint64_t end = (uint64_t)size.QuadPart;
+  double ms = -1;
+  // the top level's boxes, then moov's, to its mvhd
+  uint64_t at = 0, stop = end;
+  bool in_moov = false;
+  for (int guard = 0; guard < 4096 && at + 8 <= stop; guard++) {
+    uint8_t hd[16];
+    if (!read_at(at, hd, 8)) break;
+    uint64_t len = be(hd, 4);
+    uint32_t head = 8;
+    if (len == 1) {
+      if (!read_at(at + 8, hd + 8, 8)) break;
+      len = be(hd + 8, 8);
+      head = 16;
+    } else if (len == 0) {
+      len = stop - at;
+    }
+    if (len < head || at + len > stop) break;
+    if (!in_moov && memcmp(hd + 4, "moov", 4) == 0) {
+      in_moov = true;
+      stop = at + len;
+      at += head;
+      continue;
+    }
+    if (in_moov && memcmp(hd + 4, "mvhd", 4) == 0) {
+      uint8_t m[32];
+      if (!read_at(at + head, m, 32)) break;
+      // version 0: 32-bit times; 1: 64-bit
+      uint64_t scale, dur;
+      if (m[0] == 1) {
+        scale = be(m + 20, 4);
+        dur = be(m + 24, 8);
+      } else {
+        scale = be(m + 12, 4);
+        dur = be(m + 16, 4);
+      }
+      if (scale > 0 && dur > 0 && dur != 0xFFFFFFFFull && dur != ~0ull) ms = (double)dur * 1000.0 / (double)scale;
+      break;
+    }
+    at += len;
+  }
+  CloseHandle(f);
+  return ms;
 }
 
 // How long a video file plays, in ms (its presentation's duration); -1 when it cannot be read.
 extern "C" double rp_duration(moonbit_bytes_t path) {
   if (rp_is_gif(rp_w((const char *)path))) return rp_gif_duration(rp_w((const char *)path));
+  const double header = rp_mp4_header_duration(rp_w((const char *)path));
+  if (header > 0) return header;
   if (!rp_mf_ready()) return -1;
   IMFSourceReader *reader = nullptr;
   double ms = -1;

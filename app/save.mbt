@@ -481,16 +481,36 @@ fn gif_crops() -> (String, Double) {
 /// The estimate made again as what it is made for changes, and followed (asked every 100 ms) till it is there.
 fn keep_gif_estimate(root : @view.View) -> Unit {
   root.reacts(gif_estimate_key, fn(key) {
+    match gif_estimate_due.val {
+      Some(stop) => stop()
+      None => ()
+    }
+    gif_estimate_due.val = None
     if key == "" {
       return
     }
-    let (w, h, fps, _, _) = @signals.untracked(export_plan)
-    let (crops, scale) = @signals.untracked(gif_crops)
-    rp_gif_estimate_start(cstr(clip_plan(clip_a.untracked(), clip_b.untracked())), w, h, fps, cstr(crops), scale)
     gif_estimate.set(-1.0)
-    follow_gif_estimate(root, key)
+    // (with the save dialog closed, made once the clip has rested 600 ms: each move of a clip's end dragged in clip mode
+    // started one, and a GIF's estimate decodes and encodes up to 8 seconds of it)
+    let wait = if export_open.untracked() { 0.0 } else { 600.0 }
+    gif_estimate_due.val = Some(
+      root.at_moment(now() + wait, fn() {
+        gif_estimate_due.val = None
+        if @signals.untracked(gif_estimate_key) != key {
+          return
+        }
+        let (w, h, fps, _, _) = @signals.untracked(export_plan)
+        let (crops, scale) = @signals.untracked(gif_crops)
+        rp_gif_estimate_start(cstr(clip_plan(clip_a.untracked(), clip_b.untracked())), w, h, fps, cstr(crops), scale)
+        follow_gif_estimate(root, key)
+      }),
+    )
   })
 }
+
+///|
+/// The estimate asked for once the clip rests (its cancel).
+let gif_estimate_due : Ref[(() -> Unit)?] = Ref(None)
 
 ///|
 fn follow_gif_estimate(root : @view.View, key : String) -> Unit {

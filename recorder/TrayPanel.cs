@@ -56,6 +56,9 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
     /// <summary>Let go of (the recorder quits): never started again after.</summary>
     private volatile bool disposed;
 
+    /// <summary>Started anew (Renew): the one before still ending; none started meanwhile (the icon's own menu opens).</summary>
+    private volatile bool renewing;
+
     /// <summary>Whether `pid` is the panel's (not the replay window's).</summary>
     public bool Owns(int pid)
     {
@@ -72,7 +75,7 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
     /// <summary>Started now if it is not running, so the first press shows it at once.</summary>
     public void Warm()
     {
-        if (disposed)
+        if (disposed || renewing)
         {
             return;
         }
@@ -176,11 +179,39 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
             }
 
             Note("renewed: " + why);
-            process.Kill();
-            process.WaitForExit(2000);
-            process.Dispose();
+            var old = process;
             process = null;
-            Warm();
+            renewing = true;
+            old.Kill();
+            // (its end waited for off the recorder's thread (up to 2 s, the tray and its timers going on meanwhile), then
+            // the new one started on it: one started while the old still ran would be handed to it, as the same program
+            // started again is)
+            var ui = SynchronizationContext.Current;
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    old.WaitForExit(2000);
+                }
+                catch (Exception)
+                {
+                }
+
+                old.Dispose();
+                if (ui is null)
+                {
+                    renewing = false;
+                    Warm();
+                }
+                else
+                {
+                    ui.Post(_ =>
+                    {
+                        renewing = false;
+                        Warm();
+                    }, null);
+                }
+            });
         }
         catch (Exception ex)
         {

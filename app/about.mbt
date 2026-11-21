@@ -162,7 +162,7 @@ let about_note : @signals.Signal[String] = @signals.signal("")
 fn diagnostics_text() -> String {
   let info = recording_info()
   let codec = if info.codec == "" { "-" } else { info.codec }
-  let why = match parse(read_text(root_dir() + "\\state.json")) {
+  let why = match state_json() {
     Some({ "codecWhy": String(w), .. }) => w
     _ => ""
   }

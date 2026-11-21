@@ -784,8 +784,10 @@ fn clip_progress(parent : @view.View, d : Deck, path : String, moved : () -> Uni
             .image(By(fn() {
               idx_tick.get() |> ignore
               let a = at()
-              // (the seconds round it asked ahead, there as the pointer comes to them)
-              for step in [1000.0, -1000.0, 2000.0, -2000.0] {
+              // (the seconds round it asked ahead, there as the pointer comes to them; a GIF's next second alone: each
+              // of its frames is composed here, on the window's thread, from the canvas kept before it)
+              let steps = if is_gif_path(path) { [1000.0] } else { [1000.0, -1000.0, 2000.0, -2000.0] }
+              for step in steps {
                 let k = clip_frame_key(path, a + step)
                 if k != "" {
                   p.image_ask(k, clip_card_px)

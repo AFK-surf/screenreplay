@@ -223,11 +223,12 @@ fn start_of(name : String) -> Double? {
 
 ///|
 fn read_text(path : String) -> String {
-  let n = rp_size(cstr(path))
-  if n <= 0.0 {
+  // (opened once: its size and its bytes from the one handle, rp_read reading no more than the file holds)
+  let bytes = rp_read(cstr(path), 0.0, 256 * 1024 * 1024)
+  if bytes.length() == 0 {
     return ""
   }
-  let text = @utf8.decode_lossy(rp_read(cstr(path), 0.0, n.to_int())[:])
+  let text = @utf8.decode_lossy(bytes[:])
   // (a byte-order mark first, as .NET's UTF-8 writes one, is not part of the words)
   if text.has_prefix("\u{FEFF}") {
     text[1:].to_owned()
