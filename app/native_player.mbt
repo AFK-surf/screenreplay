@@ -73,6 +73,10 @@ struct Sound {
   /// when the trace last said how far the clock was off it
   mut told_at : Double
   mut due : (() -> Unit)?
+  /// whether anything of it has been heard since it started (the clock goes by it only then)
+  mut heard_any : Bool
+  /// its start asked for again, a while after it was given up (its cancel)
+  mut retry : (() -> Unit)?
 }
 
 ///|
@@ -96,6 +100,8 @@ fn Sound::new() -> Sound {
     seen_at: 0.0,
     told_at: 0.0,
     due: None,
+    heard_any: false,
+    retry: None,
   }
 }
 
@@ -865,6 +871,11 @@ fn Deck::sound_stop(self : Deck) -> Unit {
     None => ()
   }
   s.due = None
+  match s.retry {
+    Some(stop) => stop()
+    None => ()
+  }
+  s.retry = None
   if s.on {
     // (an empty packet: what is queued stops at once)
     self.stream().audio(b"")
@@ -901,6 +912,7 @@ fn Deck::sound_start(self : Deck, at : Double) -> Unit {
   s.zero = st.audio_played()
   s.seen = 0.0
   s.seen_at = now()
+  s.heard_any = false
   s.anchors.clear()
   s.anchors.push((0.0, (self.start)(i) + sample_ms(t, from) + skip_ms))
   s.ends = -1.0
@@ -1013,13 +1025,22 @@ fn Deck::sound_pos(self : Deck) -> Double? {
     return None
   }
   // (what the stream has played not moving on by at least 1 ms for 500 ms while there is sound queued: nothing plays it;
-  // requiring +48 samples prevents +/-2 sample output-latency jitter on a stopped voice from resetting the watchdog)
+  // requiring +48 samples prevents +/-2 sample output-latency jitter on a stopped voice from resetting the watchdog.
+  // Before the first of it is heard, 2 s: what lies between the voice and the ear (a Bluetooth headset's buffer, a
+  // device waking) is not counted as played, and a slow first sound was taken for none, the rest of the piece silent:
+  // the user, 2026-11-21, 「只有前0.5秒才有声音」. Given up, it is asked for again a second later, not left silent)
   if played > s.seen + 48.0 {
     s.seen = played
     s.seen_at = now()
-  } else if now() - s.seen_at > 500.0 {
-    ntrace("sound: not played, the clock alone")
+    s.heard_any = true
+  } else if now() - s.seen_at > (if s.heard_any { 500.0 } else { 2000.0 }) {
+    ntrace("sound: not played, the clock alone (asked again in 1 s)")
     self.sound_stop()
+    self.sound_retry()
+    return None
+  }
+  // (nothing heard yet: the clock alone, not put back to where the sound starts while what was sent is on its way)
+  if !s.heard_any {
     return None
   }
   while s.anchors.length() > 1 && s.anchors[1].0 <= played {
@@ -1063,7 +1084,10 @@ fn Deck::sound_tick(self : Deck) -> Unit {
   }
   let st = self.stream()
   let want_ms = @cmp.maximum(160.0, st.audio_wanted() + 40.0)
-  let max_ahead = 48.0 * (want_ms + 120.0)
+  // (what is queued says when more is wanted; this bound only keeps a voice that takes nothing from being sent
+  // without end. It counts what was sent and not heard yet, so it holds the output's own delay too: 120 ms over what
+  // is wanted cut a headset's sound off for good where its delay was more, nothing sent once the first was queued)
+  let max_ahead = 48.0 * (want_ms + 1000.0)
   let mut n = 0
   while s.ends < 0.0 && st.audio_queued() < want_ms && s.sent - (st.audio_played() - s.zero) < max_ahead && n < 24 {
     if !self.sound_more() {
@@ -1100,6 +1124,27 @@ fn Deck::sound_tick(self : Deck) -> Unit {
     Some(r) => {
       let d = self
       s.due = Some(r.at_moment(now() + 40.0, fn() { d.sound_tick() }, later=true))
+    }
+    None => ()
+  }
+}
+
+///|
+/// Its sound asked for again in a second (given up as not playing: a device changed or woke slowly), where it still
+/// plays at its own speed then; once each time it is given up.
+fn Deck::sound_retry(self : Deck) -> Unit {
+  match the_root.val {
+    Some(r) => {
+      let d = self
+      self.sound.retry = Some(
+        r.at_moment(now() + 1000.0, fn() {
+          d.sound.retry = None
+          let p = d.play.untracked()
+          if p.going && !d.sound.on && (d.speed)() == 1.0 && (d.wants)() && !(d.held)() {
+            d.sound_start(d.pos())
+          }
+        }),
+      )
     }
     None => ()
   }
