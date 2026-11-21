@@ -51,6 +51,15 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.16</h2><span>2026-11-21</span></div>
+      <ul>
+        <li data-zh="回放声音与录制帧率：修复蓝牙耳机等高延迟设备回放约 0.5 秒后断声，并支持切换默认输出设备或耳机重连后自动重建音频引擎；修复 240 Hz 屏上 60 fps 录制因采样间隔拍频掉到 ~49 fps 的问题，持续画面稳定跑满 60 fps。" data-en="Playback audio &amp; 60 fps capture: fixed playback audio cutting out after ~0.5 s on high-latency Bluetooth headsets and automatically rebuild Windows XAudio2 output after device switches or reconnects; fixed 60 fps capture dropping to ~48–50 fps on 240 Hz displays so motion stays at a steady 60 fps.">回放声音与录制帧率：修复蓝牙耳机等高延迟设备回放约 0.5 秒后断声，并支持切换默认输出设备或耳机重连后自动重建音频引擎；修复 240 Hz 屏上 60 fps 录制因采样间隔拍频掉到 ~49 fps 的问题，持续画面稳定跑满 60 fps。</li>
+        <li data-zh="性能、占用与流畅度：常驻回放、托盘面板与保存卡片由 Job Object 托管杜绝孤儿残留，隐藏常驻内存/显存/句柄/线程大幅下降并即时释放滞留分段文件句柄；消除首次激活窗口约半秒白屏；消除 GIF 估算与素材库读盘导致的 UI 卡顿，停录时自动卸载桌面钩子与定时器。" data-en="Performance &amp; responsiveness: resident replay window, tray panel and save card are bound to a Win32 Job Object for zero orphan processes; hidden idle RAM, VRAM, handles and threads drop sharply with immediate segment handle release; eliminated the ~0.5 s white flash on first activation; moved GIF estimation and heavy I/O off the UI thread and unhooked window tracking while paused.">性能、占用与流畅度：常驻回放、托盘面板与保存卡片由 Job Object 托管杜绝孤儿残留，隐藏常驻内存/显存/句柄/线程大幅下降并即时释放滞留分段文件句柄；消除首次激活窗口约半秒白屏；消除 GIF 估算与素材库读盘导致的 UI 卡顿，停录时自动卸载桌面钩子与定时器。</li>
+        <li data-zh="细节修复与关于页：修复复制帧到剪贴板缺少 PNG 格式、音频空洞超 2 秒错位和播放箭头中间竖缝；设置 → 关于页升级为带热气与悬停飘心微交互的赞助作者卡片。" data-en="Fixes &amp; About page: fixed PNG clipboard pasting, audio alignment after >2 s gaps, and the vertical anti-aliasing seam on the play triangle; upgraded the Sponsor row in Settings → About to an animated card.">细节修复与关于页：修复复制帧到剪贴板缺少 PNG 格式、音频空洞超 2 秒错位和播放箭头中间竖缝；设置 → 关于页升级为带热气与悬停飘心微交互的赞助作者卡片。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.15</h2><span>2026-11-21</span></div>
       <ul>
         <li data-zh="显示器唤醒后录像不再冻住：屏幕采集停止给新画面时（录像里一直是同一张旧图），录制程序会重新开始采集。声音恢复后设置里的声音警告会自动消失；声音被卡住的那段录像用静音补齐，不再比画面短；显示器关着时不再切出大量很短的分段。" data-en="Recording keeps going after the screen wakes: a capture that stopped giving new pictures (a still frame over the apps really in use) is now started again. The sound warning in Settings goes away once the sound is back, a segment whose sound was held up gets silence instead of a shorter track, and fewer small segments are written while the screen is off.">显示器唤醒后录像不再冻住：屏幕采集停止给新画面时（录像里一直是同一张旧图），录制程序会重新开始采集。声音恢复后设置里的声音警告会自动消失；声音被卡住的那段录像用静音补齐，不再比画面短；显示器关着时不再切出大量很短的分段。</li>
