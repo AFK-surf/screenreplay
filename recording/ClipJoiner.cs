@@ -236,6 +236,9 @@ public static class ClipJoiner
                 }
 
                 writer.Finalize();
+                writer.Dispose();
+                writer = null;
+                PatchHev1ToHvc1(output);
                 return 0;
             }
             finally
@@ -246,6 +249,109 @@ public static class ClipJoiner
         catch (Exception ex)
         {
             return ex.HResult != 0 ? ex.HResult : -3;
+        }
+    }
+
+    /// <summary>Renames MP4 HEVC sample entry <c>hev1</c> to <c>hvc1</c> in place so lossless joined clips play in
+    /// QuickTime, Safari, and iOS without remuxing.</summary>
+    internal static void PatchHev1ToHvc1(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+            var len = fs.Length;
+            if (len < 16)
+            {
+                return;
+            }
+
+            var hdr = new byte[16];
+            bool ReadBox(long off, long limit, out long body, out long end, out uint type)
+            {
+                body = end = 0;
+                type = 0;
+                if (off + 8 > limit)
+                {
+                    return false;
+                }
+
+                fs.Position = off;
+                var want = (int)Math.Min(16, limit - off);
+                var got = fs.Read(hdr, 0, want);
+                if (got < 8)
+                {
+                    return false;
+                }
+
+                var span = hdr.AsSpan(0, got);
+                ulong sz = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(span[..4]);
+                type = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(span.Slice(4, 4));
+                long head = 8;
+                if (sz == 1)
+                {
+                    if (got < 16)
+                    {
+                        return false;
+                    }
+
+                    sz = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(span.Slice(8, 8));
+                    head = 16;
+                }
+                else if (sz == 0)
+                {
+                    sz = (ulong)(limit - off);
+                }
+
+                if (sz < (ulong)head || off + (long)sz > limit)
+                {
+                    return false;
+                }
+
+                body = off + head;
+                end = off + (long)sz;
+                return true;
+            }
+
+            bool FindChild(long from, long limit, uint want, out long body, out long end)
+            {
+                for (var off = from; ReadBox(off, limit, out body, out end, out var ty); off = end)
+                {
+                    if (ty == want)
+                    {
+                        return true;
+                    }
+                }
+
+                body = end = 0;
+                return false;
+            }
+
+            const uint MOOV = 0x6D6F6F76, TRAK = 0x7472616B, MDIA = 0x6D646961, MINF = 0x6D696E66,
+                       STBL = 0x7374626C, STSD = 0x73747364, HEV1 = 0x68657631;
+            if (!FindChild(0, len, MOOV, out var moovB, out var moovE))
+            {
+                return;
+            }
+
+            ReadOnlySpan<byte> hvc1 = "hvc1"u8;
+            for (var off = moovB; ReadBox(off, moovE, out var tb, out var te, out var ty); off = te)
+            {
+                if (ty != TRAK) continue;
+                if (!FindChild(tb, te, MDIA, out var mb, out var me)) continue;
+                if (!FindChild(mb, me, MINF, out var nb, out var ne)) continue;
+                if (!FindChild(nb, ne, STBL, out var sb, out var se)) continue;
+                if (!FindChild(sb, se, STSD, out var db, out var de)) continue;
+                if (db + 8 >= de) continue;
+                if (!ReadBox(db + 8, de, out _, out _, out var entryType)) continue;
+                if (entryType == HEV1)
+                {
+                    fs.Position = db + 8 + 4;
+                    fs.Write(hvc1);
+                }
+            }
+        }
+        catch (Exception)
+        {
         }
     }
 }

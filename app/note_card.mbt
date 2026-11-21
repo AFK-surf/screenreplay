@@ -194,7 +194,7 @@ fn note_breath(v : @view.View) -> Double {
   if motion_off() {
     return 0.8
   }
-  let k = v.cycle(1400.0)
+  let k = v.cycle_resident(1400.0)
   0.775 + 0.225 * @math.cos(k * 2.0 * 3.141592653589793)
 }
 

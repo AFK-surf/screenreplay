@@ -52,6 +52,15 @@ internal sealed class Gpu : IDisposable
         Manager.ResetDevice(Device).CheckError();
 
         using var dxgi = Device.QueryInterface<IDXGIDevice>();
+        try
+        {
+            // Keep capture / HDR tone-mapping / hardware encode from being starved when a 4K game pegs the GPU at 100%.
+            dxgi.GPUThreadPriority = 7;
+        }
+        catch (Exception)
+        {
+        }
+
         Native.Check(Native.CreateDirect3D11DeviceFromDXGIDevice(dxgi.NativePointer, out var inspectable), "CreateDirect3D11DeviceFromDXGIDevice");
         try
         {

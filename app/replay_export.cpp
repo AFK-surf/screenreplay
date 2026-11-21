@@ -11,6 +11,7 @@
 // (or the part ends) first; what showed is never left out because the frame after it came soon.
 #define NOMINMAX
 #include <windows.h>
+#include <timeapi.h>
 #include <d3d11.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -37,6 +38,7 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "winmm.lib")
 
 using Microsoft::WRL::ComPtr;
 
@@ -181,7 +183,8 @@ HRESULT encoding_parameters(const Job &job, int level, IMFAttributes **out) {
     a->SetUINT32(CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_PeakConstrainedVBR);
     a->SetUINT32(CODECAPI_AVEncCommonMaxBitRate, (UINT32)job.bitrate);
     a->SetUINT32(CODECAPI_AVEncCommonBufferSize, (UINT32)((uint64_t)job.bitrate * 250 / 1000));
-    a->SetUINT32(CODECAPI_AVEncCommonQualityVsSpeed, 70);
+    // AV1 hardware MFTs run much slower at high QualityVsSpeed; 25 keeps throughput high while MinQP guards quality.
+    a->SetUINT32(CODECAPI_AVEncCommonQualityVsSpeed, job.codec == kAv1 ? 25u : 70u);
   }
   if (step == 0) a->SetUINT32(CODECAPI_AVEncVideoMinQP, 14);
   *out = a.Detach();
@@ -1262,6 +1265,71 @@ HRESULT av1_sized(const std::wstring &path, int width, int height) {
   return hr;
 }
 
+// Rename HEVC sample entry 'hev1' to 'hvc1' in place so exported MP4s play in QuickTime, Safari, and iOS.
+void hevc_hvc1(const std::wstring &path) {
+  HANDLE f = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return;
+  auto be32 = [](const uint8_t *b) -> uint32_t { return (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3]; };
+  auto read_box = [&](uint64_t off, uint64_t limit, uint64_t &body, uint64_t &end, char type[4]) -> bool {
+    if (off + 8 > limit) return false;
+    LARGE_INTEGER p;
+    p.QuadPart = (LONGLONG)off;
+    uint8_t h[16] = {};
+    DWORD got = 0;
+    const DWORD want = (DWORD)std::min<uint64_t>(16, limit - off);
+    if (!SetFilePointerEx(f, p, nullptr, FILE_BEGIN) || !ReadFile(f, h, want, &got, nullptr) || got < 8) return false;
+    uint64_t n = be32(h), head = 8;
+    if (n == 1) {
+      if (got < 16) return false;
+      n = (uint64_t)be32(h + 8) << 32 | be32(h + 12);
+      head = 16;
+    } else if (n == 0) {
+      n = limit - off;
+    }
+    if (n < head || off + n > limit) return false;
+    memcpy(type, h + 4, 4);
+    body = off + head;
+    end = off + n;
+    return true;
+  };
+  auto find_child = [&](uint64_t from, uint64_t limit, const char want[4], uint64_t &body, uint64_t &end) -> bool {
+    char ty[4];
+    for (uint64_t off = from; read_box(off, limit, body, end, ty); off = end) {
+      if (memcmp(ty, want, 4) == 0) return true;
+    }
+    return false;
+  };
+  LARGE_INTEGER fsz{};
+  uint64_t moov_b = 0, moov_e = 0;
+  if (GetFileSizeEx(f, &fsz) && fsz.QuadPart >= 16 && find_child(0, (uint64_t)fsz.QuadPart, "moov", moov_b, moov_e)) {
+    uint64_t tb = 0, te = 0;
+    char ty[4];
+    for (uint64_t off = moov_b; read_box(off, moov_e, tb, te, ty); off = te) {
+      if (memcmp(ty, "trak", 4) != 0) continue;
+      uint64_t mb, me, nb, ne, sb, se, db, de, eb, ee;
+      if (!find_child(tb, te, "mdia", mb, me)) continue;
+      if (!find_child(mb, me, "minf", nb, ne)) continue;
+      if (!find_child(nb, ne, "stbl", sb, se)) continue;
+      if (!find_child(sb, se, "stsd", db, de)) continue;
+      if (db + 8 >= de) continue;
+      if (!read_box(db + 8, de, eb, ee, ty)) continue;
+      if (memcmp(ty, "hev1", 4) == 0) {
+        LARGE_INTEGER at;
+        at.QuadPart = (LONGLONG)(db + 8 + 4);
+        DWORD put = 0;
+        if (SetFilePointerEx(f, at, nullptr, FILE_BEGIN)) WriteFile(f, "hvc1", 4, &put, nullptr);
+      }
+    }
+  }
+  CloseHandle(f);
+}
+
+struct ScopedTimerPeriod {
+  bool active = false;
+  ScopedTimerPeriod() { active = timeBeginPeriod(1) == TIMERR_NOERROR; }
+  ~ScopedTimerPeriod() { if (active) timeEndPeriod(1); }
+};
+
 // Whether any of the job's segments has sound. The clip's file gets a sound track only where one does: a track given no
 // samples fails the file as it is finished (MF_E_SINK_NO_SAMPLES_PROCESSED, 0xC00D4A3E: a recording made with its
 // sound off could not be saved encoded again, 2026-11-17).
@@ -1307,6 +1375,7 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
   ExportDevice own_device;
   ExportDevice &made = shared ? *shared : own_device;
   CHECK(made.make());
+  ScopedTimerPeriod timer_period;
   ComPtr<ID3D11Device> device = made.device;
   ComPtr<ID3D11DeviceContext> context = made.context;
   ComPtr<IMFDXGIDeviceManager> manager = made.manager;
@@ -1515,6 +1584,7 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
     CHECK(writer->Finalize());
     writer.Reset();
     if (job.codec == kAv1) CHECK(av1_sized(partial, job.width, job.height));
+    else if (job.codec == kHevc) hevc_hvc1(partial);
   }
   // (a new name, never an old clip's: the window made sure)
   if (!MoveFileExW(partial.c_str(), job.output.c_str(), MOVEFILE_WRITE_THROUGH)) return HRESULT_FROM_WIN32(GetLastError());

@@ -1533,6 +1533,7 @@ internal sealed class RecorderApp : IDisposable
     /// where the program has one of its own: Weixin kept as its photo viewer's 「Photos and Videos」, a build of
     /// 2026-11-13).</summary>
     private readonly HashSet<string> namesChecked = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> iconsChecked = new(StringComparer.OrdinalIgnoreCase);
 
     private void KeepAppIcon(string name, string exe, string title)
     {
@@ -1550,7 +1551,13 @@ internal sealed class RecorderApp : IDisposable
                 var own = OwnName(exe, name);
                 stale = own.Length > 0 && own != kept;
             }
-            if (File.Exists(file) && File.Exists(named) && !stale)
+            var iconStale = !File.Exists(file);
+            if (!iconStale && exe.Length > 0 && iconsChecked.Add(name))
+            {
+                // Refresh cached icon once per run if the application binary was updated since caching.
+                iconStale = File.GetLastWriteTimeUtc(exe) > File.GetLastWriteTimeUtc(file);
+            }
+            if (!iconStale && File.Exists(named) && !stale)
             {
                 return;
             }
@@ -1575,7 +1582,7 @@ internal sealed class RecorderApp : IDisposable
                 File.WriteAllText(named, description);
             }
 
-            if (File.Exists(file))
+            if (!iconStale)
             {
                 return;
             }

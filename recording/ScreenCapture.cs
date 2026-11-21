@@ -93,7 +93,7 @@ internal sealed class ScreenCapture : IDisposable
         item = CreateItem(target);
         item.Closed += (_, _) => Closed?.Invoke();
         poolSize = item.Size;
-        pool = Direct3D11CaptureFramePool.CreateFreeThreaded(gpu.WinRtDevice, poolFormat, 2, poolSize);
+        pool = Direct3D11CaptureFramePool.CreateFreeThreaded(gpu.WinRtDevice, poolFormat, 4, poolSize);
         pool.FrameArrived += OnFrame;
         session = pool.CreateCaptureSession(item);
         session.IsCursorCaptureEnabled = true;
@@ -158,9 +158,16 @@ internal sealed class ScreenCapture : IDisposable
 
     private void OnFrame(Direct3D11CaptureFramePool sender, object args)
     {
+        Direct3D11CaptureFrame? frame = null;
         try
         {
-            using var frame = sender.TryGetNextFrame();
+            // Drain any backlog so only the newest composed frame is copied and older buffers return to DWM at once.
+            while (sender.TryGetNextFrame() is { } next)
+            {
+                frame?.Dispose();
+                frame = next;
+            }
+
             if (frame is null)
             {
                 return;
@@ -184,7 +191,7 @@ internal sealed class ScreenCapture : IDisposable
             {
                 // (the window resized: the pool's buffers made to its size; this frame still used, cut to it)
                 poolSize = content;
-                sender.Recreate(gpu.WinRtDevice, poolFormat, 2, content);
+                sender.Recreate(gpu.WinRtDevice, poolFormat, 4, content);
             }
 
             var frameTicks = frame.SystemRelativeTime.Ticks;
@@ -241,6 +248,10 @@ internal sealed class ScreenCapture : IDisposable
         catch (Exception)
         {
             // (a frame lost; the device's loss shows in the encoder's next write)
+        }
+        finally
+        {
+            frame?.Dispose();
         }
     }
 
