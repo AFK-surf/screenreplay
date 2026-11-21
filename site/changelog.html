@@ -51,6 +51,15 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.19</h2><span>2026-11-21</span></div>
+      <ul>
+        <li data-zh="主屏切换与分辨率变更自动恢复：检测主显示器句柄或分辨率变更（如开机后内屏交接外接 4K 屏、独显直连 MUX 切换等），稳定 2 秒后自动干净重启录屏器到新主屏与新分辨率，避免画面冻住或一直按旧分辨率带黑边录制。" data-en="Primary display switch &amp; resolution recovery: automatically detects primary monitor handoffs or resolution changes (such as laptop-to-4K monitor or MUX switches after boot) and cleanly restarts recording on the new display and resolution once stable for 2 s, preventing frozen frames or pillarboxed old-resolution recordings.">主屏切换与分辨率变更自动恢复：检测主显示器句柄或分辨率变更（如开机后内屏交接外接 4K 屏、独显直连 MUX 切换等），稳定 2 秒后自动干净重启录屏器到新主屏与新分辨率，避免画面冻住或一直按旧分辨率带黑边录制。</li>
+        <li data-zh="游戏场景 WGC 卡死自动自愈：修复持续高频键鼠输入饿死 2 秒停帧检测的缺陷；轻量重建采集若连续两次无图或换源后再次停帧，自动升级为整套重建 GPU 与录屏器（且不触发 HEVC 降级）；新增 UAC 安全桌面切换监听并修正帧池缩放顺序。" data-en="Robust WGC stall recovery during gameplay: fixed continuous keyboard/mouse input starving the 2 s stall detector; escalated repeated capture renewal failures or post-swap re-stalls to a full recorder and GPU device restart without downgrading HEVC; added UAC secure-desktop switch monitoring and fixed frame-pool resize ordering.">游戏场景 WGC 卡死自动自愈：修复持续高频键鼠输入饿死 2 秒停帧检测的缺陷；轻量重建采集若连续两次无图或换源后再次停帧，自动升级为整套重建 GPU 与录屏器（且不触发 HEVC 降级）；新增 UAC 安全桌面切换监听并修正帧池缩放顺序。</li>
+        <li data-zh="卡死排查日志增强：录屏日志新增启动版本/系统/显卡型号、显示器与会话/桌面切换、帧池尺寸变更、限频采集回调报错、GPU DeviceRemovedReason 检查与活跃期单帧分段哨兵，正常录屏零刷屏。" data-en="Richer freeze diagnostics: recorder.log now records startup version/OS/GPU adapter, display/session/desktop transitions, capture resize events, rate-limited frame callback errors, D3D11 DeviceRemovedReason checks, and a still-segment sentinel during active use, with zero extra log noise during normal recording.">卡死排查日志增强：录屏日志新增启动版本/系统/显卡型号、显示器与会话/桌面切换、帧池尺寸变更、限频采集回调报错、GPU DeviceRemovedReason 检查与活跃期单帧分段哨兵，正常录屏零刷屏。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.18</h2><span>2026-11-21</span></div>
       <ul>
         <li data-zh="录屏稳定性与高负载稳帧：提升 D3D11 采集/编码设备 GPU 线程优先级，避免 4K 游戏满载时抢占录屏队列；WGC 采集帧池升级至 4 缓冲并在回调中排空旧帧，降低高刷屏掉帧风险。" data-en="Capture stability under heavy GPU load: raised D3D11 capture/encode GPU thread priority so 4K games pegging the GPU do not starve recording, and upgraded the WGC capture frame pool to 4 buffers with latest-frame draining.">录屏稳定性与高负载稳帧：提升 D3D11 采集/编码设备 GPU 线程优先级，避免 4K 游戏满载时抢占录屏队列；WGC 采集帧池升级至 4 缓冲并在回调中排空旧帧，降低高刷屏掉帧风险。</li>

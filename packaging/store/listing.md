@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.18):** Raised D3D11 capture/encode GPU thread priority and upgraded the WGC capture frame pool to 4 buffers with latest-frame draining for smoother recording when 4K games peg the GPU. Patched lossless quick-save and H.265 exports to hvc1 in place so clips play directly in QuickTime, Safari and iOS. Sped up hardware AV1 re-encoding, lowered the save-card breathing indicator to 10 Hz on high-refresh displays, and automatically refresh cached timeline app icons when an application updates.
+**What's new in this version (0.1.19):** Automatically detects primary monitor handoffs and resolution changes (such as laptop-to-4K external monitor or GPU MUX switches after sign-in) and cleanly restarts recording on the new display and resolution instead of freezing or staying stuck at the old resolution. Fixed continuous gaming input starving the capture-stall detector, added automatic full recorder/GPU restart if lightweight WGC capture renewal fails twice or stalls again, added UAC secure-desktop switch monitoring, and enriched freeze diagnostics in recorder.log.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.18）：** 提升 D3D11 采集/编码设备 GPU 线程优先级并将 WGC 帧池升级为 4 缓冲排空，减少 4K 游戏 GPU 满载时的录屏掉帧；H.265 导出与无损秒存（Ctrl+Alt+S / 原样保存）原地写入 hvc1 标记，直接兼容 iPhone、Mac QuickTime 与 Safari 播放；优化硬件 AV1 重编码导出速度与线程计时精度；保存卡片呼吸提示降为 10 Hz 低功耗刷新；时间轴应用图标缓存随程序更新自动刷新。
+**此版本新增内容（0.1.19）：** 自动检测主显示器切换或分辨率变更（如开机后笔记本内屏交接外接 4K 屏或显卡直连切换），稳定 2 秒后干净重启录制到新主屏与正确分辨率，不再画面冻住或残留旧分辨率黑边；修复持续打游戏按键导致卡死检测被饿死的问题，并在轻量重建采集连续失败或二次停帧时自动重建 GPU 与录屏器（不触发 HEVC 降级）；新增 UAC 安全桌面切换监听并补全录屏日志的卡死诊断信息。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 
