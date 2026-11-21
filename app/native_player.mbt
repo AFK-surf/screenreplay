@@ -216,6 +216,105 @@ fn Deck::new(
 }
 
 ///|
+/// REPLAY_FPS=1: how the picture plays, said every 2 s while it plays ("REPLAY_FPS shown=… dropped=… gaps p50/p95/p99/max"):
+/// the frames handed over to be shown and those decoded unseen to catch up, and the gaps between the shown ones' being
+/// drawn (rp_now, as `shown` says them). For measuring only: nothing of it otherwise.
+let fps_on : Ref[Int] = Ref(-1)
+
+///|
+fn fps_log() -> Bool {
+  if fps_on.val < 0 {
+    fps_on.val = if @ui.env("REPLAY_FPS") == "1" { 1 } else { 0 }
+  }
+  fps_on.val == 1
+}
+
+///|
+priv struct FpsCount {
+  /// the times (as handed over) of frames to be shown, not drawn yet
+  wanted : Array[Double]
+  mut handed_shown : Int
+  mut handed_unseen : Int
+  mut last_drawn : Double
+  gaps : Array[Double]
+  mut since : Double
+}
+
+///|
+let fps_count : FpsCount = {
+  wanted: [],
+  handed_shown: 0,
+  handed_unseen: 0,
+  last_drawn: 0.0,
+  gaps: [],
+  since: 0.0,
+}
+
+///|
+fn fps_handed(ts : Double, show : Bool) -> Unit {
+  let c = fps_count
+  if show {
+    c.handed_shown = c.handed_shown + 1
+    c.wanted.push(ts)
+    if c.wanted.length() > 64 {
+      c.wanted.remove(0) |> ignore
+    }
+  } else {
+    c.handed_unseen = c.handed_unseen + 1
+  }
+}
+
+///|
+fn fps_drawn(ts : Double, playing : Bool) -> Unit {
+  let c = fps_count
+  let mut found = -1
+  for i, w in c.wanted {
+    if (w - ts).abs() < 1.0 {
+      found = i
+      break
+    }
+  }
+  if found < 0 {
+    return
+  }
+  c.wanted.remove(found) |> ignore
+  let t = rp_now()
+  if playing && c.last_drawn > 0.0 && t - c.last_drawn < 1000.0 {
+    c.gaps.push(t - c.last_drawn)
+  }
+  c.last_drawn = t
+  if c.since == 0.0 {
+    c.since = t
+  }
+  if t - c.since >= 2000.0 {
+    fps_say(t)
+  }
+}
+
+///|
+fn fps_say(t : Double) -> Unit {
+  let c = fps_count
+  let g = c.gaps.copy()
+  g.sort()
+  let at = fn(q : Double) -> Double {
+    if g.is_empty() {
+      0.0
+    } else {
+      g[@cmp.minimum(g.length() - 1, (q * g.length().to_double()).to_int())]
+    }
+  }
+  let secs = (t - c.since) / 1000.0
+  let drawn = g.length() + 1
+  @ui.log(
+    "REPLAY_FPS secs=\{secs} drawn_fps=\{drawn.to_double() / secs} handed_shown=\{c.handed_shown} handed_unseen=\{c.handed_unseen} gaps_ms p50=\{at(0.5)} p95=\{at(0.95)} p99=\{at(0.99)} max=\{at(1.0)}",
+  )
+  c.handed_shown = 0
+  c.handed_unseen = 0
+  c.gaps.clear()
+  c.since = t
+}
+
+///|
 fn ntrace(words : String) -> Unit {
   if @ui.env("REPLAY_TRACE") == "1" {
     @ui.log("REPLAY native " + words)
@@ -231,6 +330,9 @@ fn Deck::stream(self : Deck) -> @ui.Stream {
       let d = self
       let s = @ui.Stream::new(
         shown=fn(ts) {
+          if fps_log() {
+            fps_drawn(ts, d.play.untracked().going)
+          }
           // Settle this frame and any older frames from the same flush epoch.
           for i in 0..<d.in_flight.length() {
             if (d.in_flight[i] - ts).abs() < 1.0 {
@@ -496,6 +598,9 @@ fn Deck::hand(self : Deck, t : Mp4Track, k : Int, show? : Bool = true) -> Double
     return ts
   }
   let data = rp_play_read(cstr(self.path), x.at, x.size)
+  if fps_log() {
+    fps_handed(ts, show)
+  }
   self.in_flight.push(ts)
   self.in_flight_at = now()
   self.stream().frame(data, x.key, ts, show~)
