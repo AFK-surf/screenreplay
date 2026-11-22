@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.20):** Playback at 0.5x, 1.5x, 2x and 4x now has sound, time-stretched with its pitch kept (no chipmunk voices), in both the replay and saved clips; 8x and 10x stay muted. Sound and picture stay in sync at every speed.
+**What's new in this version (0.1.21):** Fixed a race condition during silent updates where a leftover quit request could cause the newly launched version to exit immediately and stop background recording; also improved the Apps filter for short recordings so apps under one minute are listed directly with second-level durations instead of collapsing into "others".
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.20）：** 0.5×、1.5×、2×、4× 倍速播放现在有声音，变速不变调，回放和已保存片段都适用；8× 和 10× 仍静音。各倍速下声画保持同步。
+**此版本新增内容（0.1.21）：** 修复静默自动更新时的文件占用竞态——旧进程退出时若残留 `quit.request`，可能导致刚启动的新版本立刻自退并中断后台录制；同时优化了短录像下的「前台应用」过滤面板，不足 1 分钟的应用现在直接展示并按秒计长，不再全部折叠进「其他」。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

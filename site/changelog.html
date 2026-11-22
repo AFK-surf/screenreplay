@@ -51,6 +51,14 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.21</h2><span>2026-11-22</span></div>
+      <ul>
+        <li data-zh="修复静默自动更新后的自退问题：消除 --quit 与文件监听之间的占用竞态，并在新版本启动时清理残留的退出请求，避免更新后后台录制悄悄中断。" data-en="Fixed silent auto-update self-exit: eliminated a file-locking race between --quit and the file watcher and cleared stale quit requests on startup so background recording never silently stops after an update.">修复静默自动更新后的自退问题：消除 --quit 与文件监听之间的占用竞态，并在新版本启动时清理残留的退出请求，避免更新后后台录制悄悄中断。</li>
+        <li data-zh="优化短录像下的「前台应用」过滤列表：不足 1 分钟的应用现在按总时长比例直接列出并按秒显示时长，不再全部折叠进「其他」。" data-en="Improved the Apps filter for short recordings: apps under 1 minute are now listed directly with second-level durations instead of collapsing into “others”.">优化短录像下的「前台应用」过滤列表：不足 1 分钟的应用现在按总时长比例直接列出并按秒显示时长，不再全部折叠进「其他」。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.20</h2><span>2026-11-22</span></div>
       <ul>
         <li data-zh="倍速播放有声音了：0.5×、1.5×、2×、4× 播放时声音变速不变调（不会变成尖嗓子），回放和已保存片段都适用；8× 和 10× 太快仍静音。各倍速下声画保持同步。" data-en="Sound at playback speeds: 0.5x, 1.5x, 2x and 4x now play sound, time-stretched with its pitch kept (no chipmunk voices), in the replay and in saved clips; 8x and 10x stay muted. Sound and picture stay in sync at every speed.">倍速播放有声音了：0.5×、1.5×、2×、4× 播放时声音变速不变调（不会变成尖嗓子），回放和已保存片段都适用；8× 和 10× 太快仍静音。各倍速下声画保持同步。</li>

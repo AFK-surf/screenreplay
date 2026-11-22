@@ -1,6 +1,6 @@
 param(
   [string]$Stage = "",
-  [string]$Version = "0.1.20",
+  [string]$Version = "0.1.21",
   [string]$AppIdOverride = ""
 )
 # Builds out\setup\ScreenReplay-Setup-<Version>.exe from a staged self-contained build (ScreenReplay.exe + ScreenReplayViewer.exe).
