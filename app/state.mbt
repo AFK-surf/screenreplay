@@ -137,6 +137,7 @@ let speed : @signals.Signal[Double] = @signals.signal(test_speed(), same=fn(a, b
 /// A test window's speed to start at (REPLAY_TEST_SPEED: one of the menu's), 1 otherwise.
 fn test_speed() -> Double {
   match @ui.env("REPLAY_TEST_SPEED") {
+    "0.25" => 0.25
     "0.5" => 0.5
     "1.5" => 1.5
     "2" => 2.0

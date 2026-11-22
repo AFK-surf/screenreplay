@@ -63,7 +63,7 @@ extern "C" fn rp_ts_close(h : Int) -> Unit = "rp_ts_close"
 ///|
 /// Whether it sounds at speed `r` (stretched to it where not 1; past 4x too fast to follow, as a browser's).
 fn sounds_at(r : Double) -> Bool {
-  r >= 0.5 && r <= 4.0
+  r >= 0.25 && r <= 4.0
 }
 
 ///|

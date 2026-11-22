@@ -7,7 +7,7 @@
 let current : Ref[Int] = Ref(-1)
 
 ///|
-let speeds : Array[Double] = [0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 10.0, 20.0]
+let speeds : Array[Double] = [0.25, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 10.0, 20.0]
 
 ///|
 /// The picture's shape (width for height), as its track's SPS says.
