@@ -66,19 +66,26 @@ fn env_or(name : String, fallback : String) -> String {
 
 ///|
 fn root_dir() -> String {
-  env_or("REPLAY_ROOT", @ui.env("LOCALAPPDATA") + "\\Replay")
+  env_or(
+    "REPLAY_ROOT",
+    if is_mac() {
+      pjoin(@ui.env("HOME"), "Library/Application Support/ScreenReplay")
+    } else {
+      @ui.env("LOCALAPPDATA") + "\\Replay"
+    },
+  )
 }
 
 ///|
 fn buffer_dir() -> String {
-  env_or("REPLAY_DIR", root_dir() + "\\Buffer")
+  env_or("REPLAY_DIR", pjoin(root_dir(), "Buffer"))
 }
 
 ///|
 /// The folders segments are in: the recorder's buffers.json (where it writes now, then those it wrote into before,
 /// till what is there expires), else buffer_dir().
 fn buffer_dirs() -> Array[String] {
-  match parse(read_text(root_dir() + "\\buffers.json")) {
+  match parse(read_text(pjoin(root_dir(), "buffers.json"))) {
     Some(Object(o)) => {
       let out : Array[String] = []
       match o.get("current") {
@@ -299,13 +306,13 @@ fn load() -> Unit {
     if name.length() < 5 {
       continue
     }
-    let path = dir + "\\" + name
+    let path = pjoin(dir, name)
     match known.get(path) {
       Some(seg) => { found.push(seg); continue }
       None => ()
     }
     let stem = name[:name.length() - 4].to_owned()
-    match (start_of(name), duration_of(dir + "\\" + stem + ".json")) {
+    match (start_of(name), duration_of(pjoin(dir, stem + ".json"))) {
       // (none from before 删除全部录像 was asked: the recorder may not have deleted them yet)
       (Some(start), Some(dur)) if start >= purged_before.val => {
         found.push({ path, start, dur: dur.0, size: rp_size(cstr(path)), fps: dur.1 })
@@ -375,7 +382,7 @@ fn load() -> Unit {
 ///|
 /// Incrementally reads appended lines from `markers.jsonl` (re-reading from scratch if pruned/rewritten).
 fn load_marks_incremental() -> Bool {
-  let path = root_dir() + "\\markers.jsonl"
+  let path = pjoin(root_dir(), "markers.jsonl")
   let size = rp_size(cstr(path))
   if size <= 0.0 {
     let had = !marks.is_empty()
@@ -423,7 +430,7 @@ fn load_marks_incremental() -> Bool {
 ///|
 /// Incrementally reads appended lines from `apps.jsonl` (re-reading from scratch if pruned/rewritten).
 fn load_apps_incremental() -> Bool {
-  let path = root_dir() + "\\apps.jsonl"
+  let path = pjoin(root_dir(), "apps.jsonl")
   let size = rp_size(cstr(path))
   if size <= 0.0 {
     let had = !apps.is_empty()
@@ -466,7 +473,7 @@ fn load_apps_incremental() -> Bool {
 ///|
 /// Asks the recorder to close the segment it is writing, so the replay reaches up to now.
 fn ask_flush() -> Unit {
-  rp_write(cstr(root_dir() + "\\flush.request"), b"1") |> ignore
+  rp_write(cstr(pjoin(root_dir(), "flush.request")), b"1") |> ignore
 }
 
 ///|

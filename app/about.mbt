@@ -22,7 +22,7 @@ let update_rev : @signals.Signal[Int] = @signals.signal(0)
 
 ///|
 fn read_update_status() -> UpdateStatus {
-  match parse(read_text(root_dir() + "\\update.json")) {
+  match parse(read_text(pjoin(root_dir(), "update.json"))) {
     Some(Object(o)) => {
       let str = fn(k : String) {
         match o.get(k) {
@@ -54,7 +54,7 @@ fn update_status() -> UpdateStatus {
 
 ///|
 fn update_watch(root : @view.View) -> Unit {
-  if @signals.untracked(fn() { settings_open.get() && settings_page.get() == 5 }) && rp_packaged() != 1 {
+  if @signals.untracked(fn() { settings_open.get() && settings_page.get() == 5 }) && (is_mac() || rp_packaged() != 1) {
     update_rev.set(update_rev.untracked() + 1)
   }
   again(root, 400.0, fn() { update_watch(root) })
@@ -62,7 +62,7 @@ fn update_watch(root : @view.View) -> Unit {
 
 ///|
 fn update_note_words() -> String {
-  if rp_packaged() == 1 {
+  if !is_mac() && rp_packaged() == 1 {
     return t("通过 Microsoft Store 自动更新")
   }
   let st = update_status()
@@ -115,15 +115,15 @@ fn update_action_pressed() -> Unit {
       if st.by_hand {
         rp_launch(cstr(site_url + (if is_english() { "?lang=en" } else { "" }))) |> ignore
       } else {
-        rp_write(cstr(root_dir() + "\\update.request"), b"update") |> ignore
+        rp_write(cstr(pjoin(root_dir(), "update.request")), b"update") |> ignore
         update_rev.set(update_rev.untracked() + 1)
       }
     "ready" => {
-      rp_write(cstr(root_dir() + "\\update.request"), b"update") |> ignore
+      rp_write(cstr(pjoin(root_dir(), "update.request")), b"update") |> ignore
       update_rev.set(update_rev.untracked() + 1)
     }
     _ => {
-      rp_write(cstr(root_dir() + "\\update.request"), b"check") |> ignore
+      rp_write(cstr(pjoin(root_dir(), "update.request")), b"check") |> ignore
       update_rev.set(update_rev.untracked() + 1)
     }
   }
@@ -150,14 +150,19 @@ extern "C" fn rp_packaged() -> Int = "rp_packaged"
 ///|
 /// The build: the commit it was built from (build.txt beside the program, written by the build), "" unknown.
 fn build_id() -> String {
-  read_text(exe_dir() + "\\build.txt").trim().to_owned()
+  let beside = read_text(pjoin(exe_dir(), "build.txt")).trim().to_owned()
+  if beside != "" || !is_mac() {
+    beside
+  } else {
+    read_text(pjoin(exe_dir(), "../Resources/build.txt")).trim().to_owned()
+  }
 }
 
 ///|
 let about_note : @signals.Signal[String] = @signals.signal("")
 
 ///|
-/// What is copied as the diagnostics: the app, Windows, the graphics card, how it records. No window titles, apps,
+/// What is copied as the diagnostics: the app, the OS, the graphics card, how it records. No window titles, apps,
 /// paths or user names.
 fn diagnostics_text() -> String {
   let info = recording_info()
@@ -166,19 +171,24 @@ fn diagnostics_text() -> String {
     Some({ "codecWhy": String(w), .. }) => w
     _ => ""
   }
+  let os_line = (if is_mac() { "macOS " } else { "Windows " }) + @utf8.decode_lossy(rp_windows_version()[:])
   let lines = [
     "ScreenReplay \{app_version} (build \{build_id()})",
-    "Windows \{@utf8.decode_lossy(rp_windows_version()[:])}",
+    os_line,
     "GPU: \{@utf8.decode_lossy(rp_gpu()[:])}",
     "Encoder: \{codec}" + (if why != "" { " (\{why})" } else { "" }),
     "Recording: \{info.width}x\{info.height} @ \{settings.fps} fps, quality \{settings.quality}",
     "System audio: \{settings.system_audio}, microphone: \{settings.microphone}",
     "Sound mux trouble: " + (if info.audio_trouble == "" { "none" } else { info.audio_trouble }),
-    "Store install: " + (if rp_packaged() == 1 { "yes" } else { "no" }),
+  ]
+  if !is_mac() {
+    lines.push("Store install: " + (if rp_packaged() == 1 { "yes" } else { "no" }))
+  }
+  lines.push(
     @signals.untracked(fn() {
       "Language: \{if is_english() { "en" } else { "zh" }}, theme: \{if is_dark() { "dark" } else { "light" }}"
     }),
-  ]
+  )
   lines.join("\n")
 }
 
@@ -318,7 +328,7 @@ fn about_page(p : @view.View) -> Unit {
         }
         if rp_install_kind() == 0 {
           words(r, fn() { t("开发构建") }, 12.0, ui_subtle) |> ignore
-        } else if rp_packaged() == 1 {
+        } else if !is_mac() && rp_packaged() == 1 {
           words(r, fn() { t("通过 Microsoft Store 自动更新") }, 12.0, ui_subtle) |> ignore
         }
       })
@@ -327,7 +337,7 @@ fn about_page(p : @view.View) -> Unit {
     |> ignore
   })
   |> ignore
-  if rp_packaged() != 1 {
+  if is_mac() || rp_packaged() != 1 {
     p.box(fn(card) {
       card
       .radius(Is(10.0))
@@ -404,7 +414,7 @@ fn about_page(p : @view.View) -> Unit {
     foot.row(Is(true)) |> ignore
     words(foot, fn() { "© 2026 pengx17" }, 11.0, ui_subtle) |> ignore
     spring(foot)
-    words(foot, fn() { t("录像只存在这台电脑上，不会上传。") }, 11.0, ui_subtle) |> ignore
+    words(foot, fn() { t(if is_mac() { "录像只存在这台 Mac 上，不会上传。" } else { "录像只存在这台电脑上，不会上传。" }) }, 11.0, ui_subtle) |> ignore
   })
   |> ignore
 }

@@ -153,9 +153,10 @@ fn tray_window(root : @view.View) -> Unit {
   |> ignore
   tray_rule(root)
   // what it is for, first: the last moments saved
-  tray_item(root, fn() { tf("保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, "Ctrl+Alt+S", fn() { tray_do(5) }, strong=true)
-  tray_item(root, fn() { t("打开回放") }, "Ctrl+Alt+R", fn() { tray_do(1) })
-  tray_item(root, fn() { t("标记此刻") }, "Ctrl+Alt+M", fn() { tray_do(4) })
+  let mac = is_mac()
+  tray_item(root, fn() { tf("保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, if mac { "⌃⌥S" } else { "Ctrl+Alt+S" }, fn() { tray_do(5) }, strong=true)
+  tray_item(root, fn() { t("打开回放") }, if mac { "⌃⌥R" } else { "Ctrl+Alt+R" }, fn() { tray_do(1) })
+  tray_item(root, fn() { t("标记此刻") }, if mac { "⌃⌥M" } else { "Ctrl+Alt+M" }, fn() { tray_do(4) })
   tray_item(root, fn() { t("打开已保存片段文件夹") }, "", fn() { tray_do(3) })
   tray_rule(root)
   // recording held or let go, as it stands now

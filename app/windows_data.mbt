@@ -99,7 +99,7 @@ fn parse_snap(line : String) -> Snap? {
 ///|
 /// What was added to windows.jsonl since last read (all of it again when it was rewritten shorter: pruned).
 fn load_windows() -> Unit {
-  let path = root_dir() + "\\windows.jsonl"
+  let path = pjoin(root_dir(), "windows.jsonl")
   let size = rp_size(cstr(path))
   if size <= 0.0 {
     // (emptied or gone (删除全部录像): what was read of it let go of too, not kept showing windows of then)

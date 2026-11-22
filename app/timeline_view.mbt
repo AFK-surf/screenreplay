@@ -30,7 +30,7 @@ fn app_name(process : String) -> String {
   if now - app_names_missed.get(key).unwrap_or(-10000.0) < 5000.0 {
     return process
   }
-  let text = read_text(root_dir() + "\\AppIcons\\" + key + ".txt").trim().to_owned()
+  let text = read_text(pjoin(pjoin(root_dir(), "AppIcons"), key + ".txt")).trim().to_owned()
   // (none, or a window's title of a page or a document kept by an earlier recorder: the program's name instead)
   if text == "" || text.contains(" - ") || text.contains(" — ") || text.contains(" – ") || text.contains(" | ") {
     app_names_missed[key] = now

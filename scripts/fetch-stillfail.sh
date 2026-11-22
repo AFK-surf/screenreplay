@@ -7,7 +7,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMMIT="$(tr -d ' \r\n' < "$ROOT/stillfail.lock")"
 DIR="$ROOT/deps/stillfail"
 REPO="${STILLFAIL_REPO:-https://github.com/AFK-surf/monoid.git}"
+apply_mac_patches() {
+  if [ "$(uname -s)" = "Darwin" ] && [ -f "$ROOT/scripts/apple-stream.patch" ]; then
+    if git -C "$DIR" apply --check "$ROOT/scripts/apple-stream.patch" >/dev/null 2>&1; then
+      git -C "$DIR" apply "$ROOT/scripts/apple-stream.patch"
+      echo "fetch-stillfail.sh: applied apple-stream.patch"
+    fi
+  fi
+}
+
 if [ -d "$DIR/.git" ] && [ "$(git -C "$DIR" rev-parse HEAD 2>/dev/null)" = "$COMMIT" ] && [ -f "$DIR/libs/sf-ui/moon.mod" ]; then
+  apply_mac_patches
   exit 0
 fi
 mkdir -p "$DIR"
@@ -19,4 +29,5 @@ git -C "$DIR" sparse-checkout set --no-cone libs/mbui/ libs/sf-ui/
 git -C "$DIR" remote set-url origin "$REPO"
 git -C "$DIR" fetch -q --depth 1 --filter=blob:none origin "$COMMIT"
 git -C "$DIR" -c advice.detachedHead=false checkout -q --force FETCH_HEAD
+apply_mac_patches
 echo "fetch-stillfail.sh: monoid $COMMIT"

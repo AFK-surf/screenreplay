@@ -80,7 +80,7 @@ let clip_thumb_due : Ref[Bool] = Ref(false)
 
 ///|
 fn clip_card(parent : @view.View, name : String) -> Unit {
-  let path = clips_dir() + "\\" + name
+  let path = pjoin(clips_dir(), name)
   parent.box(fn(card) {
     card.gap(Is(10.0)) |> ignore
     pressable(card, fn() { clip_title(name) }, fn() { open_clip_player(path) }, fn(pic) {
@@ -115,7 +115,7 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
         clips_rev.get() |> ignore
         // (an AV1 clip where nothing decodes AV1: said so, its press telling what to install)
         if av1_unplayable(path) {
-          return t("需要 AV1 视频扩展")
+          return t(if is_mac() { "此设备不支持 AV1 硬解" } else { "需要 AV1 视频扩展" })
         }
         match clip_thumb(path) {
           "" => t("加载预览…")
@@ -172,15 +172,15 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
             let result = rp_recycle(cstr(path))
             library_message.set(
               if result == 0 {
-                t("已移到回收站，可在回收站恢复")
+                t(if is_mac() { "已移到废纸篓，可在废纸篓恢复" } else { "已移到回收站，可在回收站恢复" })
               } else {
-                tf("未能移到回收站（{0}），文件仍保留", [result.to_string()])
+                tf(if is_mac() { "未能移到废纸篓（{0}），文件仍保留" } else { "未能移到回收站（{0}），文件仍保留" }, [result.to_string()])
               },
             )
             delete_pending.set("")
             clips_read()
           }, danger=true, small=true)
-          tip(del, fn() { t("移到回收站") })
+          tip(del, fn() { t(if is_mac() { "移到废纸篓" } else { "移到回收站" }) })
         } else {
           icon_button(b, fn() { "copy" }, fn() { t("复制") }, fn() {
             library_message.set(
@@ -192,7 +192,7 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
             )
           })
           |> ignore
-          icon_button(b, fn() { "folder" }, fn() { t("打开位置") }, fn() { rp_reveal(cstr(path)) }) |> ignore
+          icon_button(b, fn() { "folder" }, fn() { t(if is_mac() { "在 Finder 中显示" } else { "打开位置" }) }, fn() { rp_reveal(cstr(path)) }) |> ignore
           icon_button(b, fn() { "trash" }, fn() { t("删除") }, fn() { delete_pending.set(name) }) |> ignore
         }
       }, at_once=true)
@@ -206,7 +206,7 @@ fn clip_card(parent : @view.View, name : String) -> Unit {
 /// The library over the window under the title bar while it is open.
 fn library_layer(root : @view.View) -> Unit {
   root.box(fn(o) {
-    o.over(Is(true)).over_all(By(fn() { library_open.get() })).padding(Is((0.0, title_h + 1.0, 0.0, 0.0))) |> ignore
+    o.over(Is(true)).over_all(By(fn() { library_open.get() })).padding(Is((0.0, title_h() + 1.0, 0.0, 0.0))) |> ignore
     o.show(fn() { library_open.get() }, fn(page) {
       page.grow(Is(1.0)).ground(By(c_bg)).presses(Is(true)).padding(Is((28.0, 24.0, 28.0, 16.0))).gap(Is(16.0)) |> ignore
       // (read again every 3 s while it shows: a clip saved meanwhile, by Ctrl+Alt+S or elsewhere, comes in)
@@ -306,7 +306,15 @@ fn av1_note_layer(root : @view.View) -> Unit {
     |> ignore
     wrapped(
       card,
-      fn() { t("这台电脑还不能解码 AV1，所以没法在这里播放和预览它。从 Microsoft Store 装上免费的「AV1 视频扩展」，再打开这个片段就能播放。") },
+      fn() {
+        t(
+          if is_mac() {
+            "这台 Mac 硬件不支持 AV1 解码（需 M3 或更新芯片），无法在这里直接播放。可在 Finder 中用第三方播放器打开。"
+          } else {
+            "这台电脑还不能解码 AV1，所以没法在这里播放和预览它。从 Microsoft Store 装上免费的「AV1 视频扩展」，再打开这个片段就能播放。"
+          },
+        )
+      },
       13.0,
       19.0,
       ui_muted,
@@ -315,11 +323,19 @@ fn av1_note_layer(root : @view.View) -> Unit {
       foot.row(Is(true)).gap(Is(8.0)).padding(Is((0.0, 8.0, 0.0, 0.0))).lines_up(Is(Some(Middle))) |> ignore
       spring(foot)
       text_button(foot, fn() { t("关闭") }, fn() { av1_note.set("") }, ghost=true) |> ignore
-      solid_button(foot, fn() { t("在 Microsoft Store 获取") }, fn() {
-        rp_launch(cstr(av1_store_page)) |> ignore
-        av1_note.set("")
-      })
-      |> ignore
+      if is_mac() {
+        solid_button(foot, fn() { t("在 Finder 中显示") }, fn() {
+          rp_reveal(cstr(av1_note.untracked()))
+          av1_note.set("")
+        })
+        |> ignore
+      } else {
+        solid_button(foot, fn() { t("在 Microsoft Store 获取") }, fn() {
+          rp_launch(cstr(av1_store_page)) |> ignore
+          av1_note.set("")
+        })
+        |> ignore
+      }
     })
     |> ignore
   })
@@ -395,7 +411,7 @@ fn clip_player_layer(root : @view.View) -> Unit {
         return
       }
       guard clip_deck.val is Some(d) else { return }
-      let name = path[clips_dir().length() + 1:].to_owned()
+      let name = pbase(path)
       let fs = fn() { full_screen.get() }
       // (in full screen: the rows shown while the pointer moved in the last 2 s, or is over them, or the bar is held,
       // or a menu is up)
@@ -508,8 +524,8 @@ fn clip_player_layer(root : @view.View) -> Unit {
               }
             }, stage=true, tip_words=fn() { if copied_lately() { t("已复制") } else { t("复制到剪贴板") } })
             |> ignore
-            icon_button(row, fn() { "folder" }, fn() { t("打开位置") }, fn() { rp_reveal(cstr(path)) }, stage=true, tip_words=fn() {
-              t("在文件夹中显示")
+            icon_button(row, fn() { "folder" }, fn() { t(if is_mac() { "在 Finder 中显示" } else { "打开位置" }) }, fn() { rp_reveal(cstr(path)) }, stage=true, tip_words=fn() {
+              t(if is_mac() { "在 Finder 中显示" } else { "在文件夹中显示" })
             })
             |> ignore
             icon_button(row, fn() { "close" }, fn() { t("关闭") }, close_clip_player, stage=true, shortcut="escape") |> ignore

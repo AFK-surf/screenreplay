@@ -2,7 +2,10 @@ out/
 bin/
 obj/
 deps/
-vendor/
+/vendor/
 .wrangler/
 out-msix/
 out-setup-stage/
+mac/.build/
+mac/.swiftpm/
+*.generated.mbti

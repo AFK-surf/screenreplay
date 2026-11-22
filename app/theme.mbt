@@ -54,7 +54,7 @@ let system_chinese : @signals.Signal[Bool] = @signals.signal(true)
 
 ///|
 fn viewer_path() -> String {
-  root_dir() + "\\viewer.json"
+  pjoin(root_dir(), "viewer.json")
 }
 
 ///|

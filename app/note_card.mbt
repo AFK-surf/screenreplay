@@ -72,10 +72,7 @@ fn note_body(
     icon_button(parent, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore
     return
   }
-  let name = match path.rev_find("\\") {
-    Some(i) => path[i + 1:].to_owned()
-    None => path
-  }
+  let name = pbase(path)
   parent.box(fn(head) {
     head.row(Is(true)).height(Is(Some(72.0))).gap(Is(12.0)).lines_up(Is(Some(Middle))) |> ignore
     pressable(head, fn() { t("播放") }, play, fn(pic) {
@@ -165,7 +162,7 @@ fn note_body(
         }
       }, icon="copy", small=true),
     )
-    even(text_button(acts, fn() { t("打开位置") }, reveal, icon="folder", small=true))
+    even(text_button(acts, fn() { t(if is_mac() { "在 Finder 中显示" } else { "打开位置" }) }, reveal, icon="folder", small=true))
   })
   |> ignore
 }
@@ -215,7 +212,7 @@ priv struct NoteAsk {
 fn note_file_ask() -> NoteAsk? {
   // (read and parsed only where it was written since it was last read: it is looked at 10 times a second while the
   // card shows; the same ask as before otherwise)
-  let path = root_dir() + "\\note.json"
+  let path = pjoin(root_dir(), "note.json")
   let written = rp_modified(cstr(path))
   let size = rp_size(cstr(path))
   let (seen, seen_size, kept) = note_read.val

@@ -39,7 +39,7 @@ let index_ready : Ref[Bool] = Ref(false)
 fn index_start() -> Unit {
   if !index_ready.val {
     index_ready.val = true
-    rp_idx_dir(cstr(root_dir() + "\\Thumbs"))
+    rp_idx_dir(cstr(pjoin(root_dir(), "Thumbs")))
   }
 }
 

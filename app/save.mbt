@@ -625,7 +625,7 @@ fn clip_plan(a : Double, b : Double) -> String {
 fn new_clip_path(ext? : String = ".mp4") -> String {
   let dir = clips_dir()
   rp_mkdirs(cstr(dir)) |> ignore
-  let base = dir + "\\" + (if @signals.untracked(is_english) { "Replay " } else { "回放 " }) + stamp(t0() + clip_a.untracked())
+  let base = pjoin(dir, (if @signals.untracked(is_english) { "Replay " } else { "回放 " }) + stamp(t0() + clip_a.untracked()))
   let mut path = base + ext
   let mut n = 2
   while rp_size(cstr(path)) > 0.0 || rp_size(cstr(path + ".partial" + ext)) > 0.0 {

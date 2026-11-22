@@ -358,13 +358,21 @@ fn tick_box(parent : @view.View, on : () -> Bool) -> Unit {
 }
 
 ///|
-/// Processes that are Windows' own shell, or this app: never a row of their own (on the 「其它」 row).
+/// Processes that are the OS's own shell, or this app: never a row of their own (on the 「其它」 row).
 fn shell_process(process : String, name : String) -> Bool {
   let p = process.to_lower()
+  let n = name.to_lower()
   [
-    "screenreplay", "screenreplayviewer", "shellexperiencehost", "shellhost", "sihost", "startmenuexperiencehost", "searchhost",
+    "screenreplay", "screenreplayviewer", "screenreplay helper", "screenreplayhelper",
+    "shellexperiencehost", "shellhost", "sihost", "startmenuexperiencehost", "searchhost",
     "searchapp", "lockapp", "textinputhost", "applicationframehost", "systemsettings", "taskmgr",
+    "windowserver", "dock", "control center", "controlcenter", "notificationcenter", "notification center",
+    "spotlight", "systemuiserver", "loginwindow", "universalcontrol", "wallpaper",
   ].contains(p) ||
+  [
+    "screenreplay", "screenreplay helper", "windowserver", "dock", "control center",
+    "notification center", "notificationcenter", "spotlight",
+  ].contains(n) ||
   name.has_prefix("Microsoft® Windows®")
 }
 

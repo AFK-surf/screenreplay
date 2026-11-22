@@ -17,7 +17,13 @@ fn exe_dir() -> String {
 }
 
 ///|
-let title_h : Double = 40.0
+fn title_h() -> Double {
+  if is_mac() {
+    44.0
+  } else {
+    40.0
+  }
+}
 
 ///|
 let key_w : Double = 46.0
@@ -35,7 +41,7 @@ fn refresh(root : @view.View, first : Bool) -> Unit {
     clip_history_free()
   }
   status_rev.set(status_rev.untracked() + 1)
-  if rp_take_request(cstr(root_dir() + "\\settings.request")) != 0 {
+  if rp_take_request(cstr(pjoin(root_dir(), "settings.request"))) != 0 {
     load_settings()
     settings_open.set(true)
   }
@@ -70,6 +76,7 @@ fn status_words(code : String, arg : String) -> String {
     "diskLow" => t("磁盘空间不足，暂停录制")
     "noDisplay" => t("找不到主显示器")
     "startFailed" => t("录制没能开始")
+    "noPermission" | "permission" => t("未授予录屏权限")
     "noEncoder" => t("显卡不支持硬件视频编码，无法录制")
     _ => t("启动中…")
   }
@@ -91,7 +98,7 @@ fn window_key(
     let held = fn() { b.pressed() || (snap && @ui.window_snap_state() == 2) }
     b
     .width(Is(Some(key_w)))
-    .height(Is(Some(title_h)))
+    .height(Is(Some(title_h())))
     .lines_up(Is(Some(Middle)))
     .lies_along(Is(Middle))
     .cursor(Is(Some(Arrow)))
@@ -127,15 +134,17 @@ fn window_key(
 /// The title bar, 40 high: the app's mark and name; in the middle the moment the playhead is at and how long ago; the
 /// window's buttons as Windows 11 draws them. Its empty room moves the window (a double click maximizes it).
 fn title_bar(parent : @view.View) -> Unit {
+  let th = title_h()
+  let mac = is_mac()
   parent.box(fn(bar) {
-    bar.row(Is(true)).height(Is(Some(title_h))).lines_up(Is(Some(Middle))).ground(By(c_bg)) |> ignore
-    // (empty room in the bar moves the window; a right click on it: the window's own menu, as on a system title bar)
+    bar.row(Is(true)).height(Is(Some(th))).lines_up(Is(Some(Middle))).ground(By(c_bg)) |> ignore
+    // (empty room in the bar moves the window; on Windows a right click opens the window's system menu; on macOS
+    // moves_window also forwards double-clicks to AppKit's standard titlebar zoom/miniaturize action)
     let moves = fn(v : @view.View) {
-      v
-      .presses(Is(true))
-      .moves_window(Is(true))
-      .on_menu(fn(m) { rp_system_menu(m.wx * v.pixel_scale(), m.wy * v.pixel_scale()) })
-      |> ignore
+      v.presses(Is(true)).moves_window(Is(true)) |> ignore
+      if !mac {
+        v.on_menu(fn(m) { rp_system_menu(m.wx * v.pixel_scale(), m.wy * v.pixel_scale()) }) |> ignore
+      }
     }
     // (the two sides one width, the wider's: so the middle is on the window's middle and never under either. Their
     // contents measured once laid out, again when what they say changes: a side grown by grow from basis 0 is laid out
@@ -157,16 +166,19 @@ fn title_bar(parent : @view.View) -> Unit {
         _ => ()
       }
     }
-    bar.reacts(fn() { recorder_status().0 + "|" + library_open.get().to_string() + "|" + is_english().to_string() }, fn(_) {
-      bar.at_moment(now() + 30.0, measure, later=true) |> ignore
-    })
+    bar.reacts(
+      fn() {
+        recorder_status().0 + "|" + library_open.get().to_string() + "|" + is_english().to_string() + "|" + @ui.window_inset().to_string()
+      },
+      fn(_) { bar.at_moment(now() + 30.0, measure, later=true) |> ignore },
+    )
     // the left side: the app's mark and name (the saved clips: back and their count)
     bar.box(fn(side) {
-      side.row(Is(true)).grow(Is(1.0)).basis(Is(Some(0.0))).min_width(By(fn() { Some(side_need.get()) })).height(Is(Some(title_h))).lines_up(Is(Some(Middle))) |> ignore
+      side.row(Is(true)).grow(Is(1.0)).basis(Is(Some(0.0))).min_width(By(fn() { Some(side_need.get()) })).height(Is(Some(th))).lines_up(Is(Some(Middle))) |> ignore
       moves(side)
       side.box(fn(left) {
         left_box.val = Some(left)
-        left.row(Is(true)).padding(Is((14.0, 0.0, 8.0, 0.0))).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
+        left.row(Is(true)).padding(By(fn() { (if mac && @ui.window_inset() { 82.0 } else { 14.0 }, 0.0, 8.0, 0.0) })).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
         left.pick(fn() { library_open.get() }, fn(b, lib) {
           b.row(Is(true)).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
           if lib {
@@ -239,15 +251,15 @@ fn title_bar(parent : @view.View) -> Unit {
       |> ignore
     })
     |> ignore
-    // the right side: the recorder's chip, the folder and settings keys, the window's keys
+    // the right side: the recorder's chip, the folder and settings keys, and (on Windows) the window's keys
     bar.box(fn(side) {
-      side.row(Is(true)).grow(Is(1.0)).basis(Is(Some(0.0))).min_width(By(fn() { Some(side_need.get()) })).height(Is(Some(title_h))).lines_up(Is(Some(Middle))).lies_along(Is(End)) |> ignore
+      side.row(Is(true)).grow(Is(1.0)).basis(Is(Some(0.0))).min_width(By(fn() { Some(side_need.get()) })).height(Is(Some(th))).lines_up(Is(Some(Middle))).lies_along(Is(End)) |> ignore
       moves(side)
       side.box(fn(content) {
         right_box.val = Some(content)
-        content.row(Is(true)).height(Is(Some(title_h))).lines_up(Is(Some(Middle))) |> ignore
+        content.row(Is(true)).height(Is(Some(th))).lines_up(Is(Some(Middle))) |> ignore
         content.box(fn(tools) {
-          tools.row(Is(true)).gap(Is(2.0)).padding(Is((0.0, 0.0, 6.0, 0.0))).lines_up(Is(Some(Middle))) |> ignore
+          tools.row(Is(true)).gap(Is(2.0)).padding(Is((0.0, 0.0, if mac { 14.0 } else { 6.0 }, 0.0))).lines_up(Is(Some(Middle))) |> ignore
           recorder_chip(tools)
           // (the saved clips' key, a stack of clips (the folder read as 「open a folder」: the user, 2026-11-15); on
           // their page, the key that opens their folder)
@@ -272,24 +284,28 @@ fn title_bar(parent : @view.View) -> Unit {
           |> ignore
         })
         |> ignore
-        window_key(content, fn() { t("最小化") }, fn() { "minus" }, fn() { @ui.window_act(1) })
-        window_key(content, fn() { if @ui.window_zoomed() { t("还原") } else { t("最大化") } }, fn() {
-          if @ui.window_zoomed() {
-            "copy"
-          } else {
-            "square"
-          }
-        }, fn() { @ui.window_act(2) }, snap=true)
-        window_key(content, fn() { t("关闭") }, fn() { "close" }, fn() { @ui.window_act(3) }, close=true)
+        if !mac {
+          window_key(content, fn() { t("最小化") }, fn() { "minus" }, fn() { @ui.window_act(1) })
+          window_key(content, fn() { if @ui.window_zoomed() { t("还原") } else { t("最大化") } }, fn() {
+            if @ui.window_zoomed() {
+              "copy"
+            } else {
+              "square"
+            }
+          }, fn() { @ui.window_act(2) }, snap=true)
+          window_key(content, fn() { t("关闭") }, fn() { "close" }, fn() { @ui.window_act(3) }, close=true)
+        }
       })
       |> ignore
     })
     |> ignore
-    // (the maximize button the host's as well, for Snap Layouts: the second from the right)
-    let snap = bar.by_room(fn(_, room) {
-      bar.reacts(fn() { room.width() }, fn(w) { @ui.window_snap(w - key_w * 2.0, 0.0, key_w, title_h) })
-    })
-    snap.over(Is(true)).presses(Is(false)) |> ignore
+    // (the maximize button the host's as well, for Windows Snap Layouts: the second from the right)
+    if !mac {
+      let snap = bar.by_room(fn(_, room) {
+        bar.reacts(fn() { room.width() }, fn(w) { @ui.window_snap(w - key_w * 2.0, 0.0, key_w, th) })
+      })
+      snap.over(Is(true)).presses(Is(false)) |> ignore
+    }
   })
   |> ignore
 }
@@ -584,8 +600,9 @@ fn speed_key(
 /// is (as it changes: the wheel, the overview's ends, the keys), a chevron; pressed, a menu over it of 1, 5, 10, 30
 /// minutes, an hour and all of it (none longer than the buffer), the one the view is ticked.
 fn zoom_key(parent : @view.View) -> Unit {
+  let zoom_tip = fn() { t(if is_mac() { "时间线缩放 · ⌘+滚轮" } else { "时间线缩放 · Ctrl+滚轮" }) }
   let key : Ref[@view.View?] = Ref(None)
-  let k = pressable(parent, fn() { t("时间线缩放 · Ctrl+滚轮") }, fn() {
+  let k = pressable(parent, zoom_tip, fn() {
     guard key.val is Some(b) else { return }
     let total = view_total()
     let len = @signals.untracked(view_len)
@@ -626,7 +643,7 @@ fn zoom_key(parent : @view.View) -> Unit {
     })
     |> ignore
   })
-  tip(k, fn() { t("时间线缩放 · Ctrl+滚轮") })
+  tip(k, zoom_tip)
   key.val = Some(k)
 }
 
@@ -687,9 +704,26 @@ fn key_bindings() -> @view.Keymap {
     ch('c', "clip", 0),
     // (the frame shown, onto the clipboard: the user, 2026-11-16 「copy frame 感觉应该加个快捷键，比如ctrl c」)
     k(@ui.key_code_copy, "copy-frame", @ui.mod_ctrl),
+    ch('s', "save", @ui.mod_ctrl),
+    ch('s', "save-copy", @ui.mod_ctrl | shift),
     ch(',', "settings", @ui.mod_ctrl),
     ch('m', "mark", 0),
   ]
+  if is_mac() {
+    keys.push(k(@ui.key_code_copy, "copy-frame", @ui.mod_cmd))
+    keys.push(ch('c', "copy-frame", @ui.mod_ctrl))
+    keys.push(ch('s', "save", @ui.mod_cmd))
+    keys.push(ch('s', "save-copy", @ui.mod_cmd | shift))
+    keys.push(ch(',', "settings", @ui.mod_cmd))
+    keys.push(k(@ui.key_code_left, "home", @ui.mod_cmd))
+    keys.push(k(@ui.key_code_right, "latest", @ui.mod_cmd))
+    keys.push(ch('=', "zoom-in", @ui.mod_cmd))
+    keys.push(ch('=', "zoom-in", @ui.mod_cmd | shift))
+    keys.push(ch('+', "zoom-in", @ui.mod_cmd))
+    keys.push(ch('+', "zoom-in", @ui.mod_cmd | shift))
+    keys.push(ch('-', "zoom-out", @ui.mod_cmd))
+    keys.push(ch('0', "pic-fit", @ui.mod_cmd))
+  }
   keys.append(region_bindings())
   @view.Keymap::new(keys)
 }
@@ -778,6 +812,12 @@ fn replay_actions(root : @view.View) -> Unit {
       // (the first run's sheet: the window hidden, as its close does, nothing written; read again, the sheet closes)
       if consent_reading.untracked() {
         consent_open.set(false)
+      } else if is_mac() {
+        if resident() {
+          rp_tray_hide()
+        } else {
+          @hostapi.exit(0)
+        }
       } else {
         @ui.window_act(3)
       }

@@ -19,6 +19,7 @@ fn tip(anchor : @view.View, label : () -> String, shortcut? : String = "", side?
 /// The keys of the actions the tips name (the replay's keymap, key_bindings, and the saved clip's player's), as said
 /// in a tip's caps.
 fn shortcut_words(action : String) -> String {
+  let mac = is_mac()
   match action {
     "play" => "Space"
     "full" => "F"
@@ -27,13 +28,13 @@ fn shortcut_words(action : String) -> String {
     "clip" => "C"
     "mark" => "M"
     "escape" => "Esc"
-    "undo" => "Ctrl+Z"
-    "redo" => "Ctrl+Y"
+    "undo" => if mac { "⌘Z" } else { "Ctrl+Z" }
+    "redo" => if mac { "⇧⌘Z" } else { "Ctrl+Y" }
     "clip-before" => "["
     "clip-after" => "]"
     "pic-fit" => "0"
     "save" => "Enter"
-    "settings" => "Ctrl+,"
+    "settings" => if mac { "⌘," } else { "Ctrl+," }
     _ => ""
   }
 }
@@ -97,7 +98,7 @@ fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> 
     }),
     Some({
       label: t(if at_playhead { "复制当前帧" } else { "复制这一帧" }),
-      key: if at_playhead { "Ctrl+C" } else { "" },
+      key: if at_playhead { if is_mac() { "⌘C" } else { "Ctrl+C" } } else { "" },
       act: fn() { copy_frame(at, shown=at_playhead) },
     }),
     None,

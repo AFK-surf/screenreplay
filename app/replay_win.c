@@ -1053,3 +1053,5 @@ int32_t rp_install_kind(void) {
   if (slash) *slash = 0;
   return CompareStringOrdinal(at, -1, mine, -1, TRUE) == CSTR_EQUAL ? 1 : 0;
 }
+
+int32_t rp_is_mac(void) { return 0; }

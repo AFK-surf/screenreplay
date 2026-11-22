@@ -452,7 +452,7 @@ fn region_bindings() -> Array[@view.Binding] {
   }
   let shift = @ui.mod_shift_key
   let alt = @ui.mod_alt
-  [
+  let out = [
     k(@ui.key_code_up, "rgn-up", 0),
     k(@ui.key_code_down, "rgn-down", 0),
     k(@ui.key_code_up, "rgn-up10", shift),
@@ -473,4 +473,10 @@ fn region_bindings() -> Array[@view.Binding] {
     k(@ui.key_of_char('y'), "clip-redo", @ui.mod_ctrl),
     k(@ui.key_of_char('z'), "clip-redo", @ui.mod_ctrl | shift),
   ]
+  if is_mac() {
+    out.push(k(@ui.key_of_char('z'), "clip-undo", @ui.mod_cmd))
+    out.push(k(@ui.key_of_char('y'), "clip-redo", @ui.mod_cmd))
+    out.push(k(@ui.key_of_char('z'), "clip-redo", @ui.mod_cmd | shift))
+  }
+  out
 }

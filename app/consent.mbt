@@ -245,20 +245,23 @@ fn consent_window_keys(layer : @view.View) -> Unit {
     o.over(Is(true)) |> ignore
     o.show(fn() { !consent_reading.get() }, fn(s) {
       s.box(fn(bar) {
-        bar.row(Is(true)).height(Is(Some(title_h))).fills_across(Is(true)).lines_up(Is(Some(Middle))) |> ignore
+        let h = title_h()
+        bar.row(Is(true)).height(Is(Some(h))).fills_across(Is(true)).lines_up(Is(Some(Middle))) |> ignore
         bar.box(fn(mid) {
-          mid.grow(Is(1.0)).height(Is(Some(title_h))).presses(Is(true)).moves_window(Is(true)) |> ignore
+          mid.grow(Is(1.0)).height(Is(Some(h))).presses(Is(true)).moves_window(Is(true)) |> ignore
         })
         |> ignore
-        window_key(bar, fn() { t("最小化") }, fn() { "minus" }, fn() { @ui.window_act(1) })
-        window_key(bar, fn() { if @ui.window_zoomed() { t("还原") } else { t("最大化") } }, fn() {
-          if @ui.window_zoomed() {
-            "copy"
-          } else {
-            "square"
-          }
-        }, fn() { @ui.window_act(2) })
-        window_key(bar, fn() { t("关闭") }, fn() { "close" }, fn() { @ui.window_act(3) }, close=true)
+        if !is_mac() {
+          window_key(bar, fn() { t("最小化") }, fn() { "minus" }, fn() { @ui.window_act(1) })
+          window_key(bar, fn() { if @ui.window_zoomed() { t("还原") } else { t("最大化") } }, fn() {
+            if @ui.window_zoomed() {
+              "copy"
+            } else {
+              "square"
+            }
+          }, fn() { @ui.window_act(2) })
+          window_key(bar, fn() { t("关闭") }, fn() { "close" }, fn() { @ui.window_act(3) }, close=true)
+        }
       })
       |> ignore
     }, at_once=true)
@@ -304,13 +307,31 @@ fn consent_sheet(root : @view.View) -> Unit {
             .clips(Is(true))
             |> ignore
             consent_row(rows, true, "screen", fn() { t("录什么") }, fn() {
-              t("主屏幕的画面和系统声音。麦克风默认不录。还会记下每个时刻在前台的应用和各窗口的位置、标题，用来画时间线和按窗口导出。也会记下鼠标、键盘和手柄用得多频繁（只记次数，不记按了哪个键、点在哪里），在时间线上标出忙碌的时段。开始录制时，Windows 可能会问一次是否允许它截屏时不显示黄色边框，允许即可。")
+              t(
+                if is_mac() {
+                  "主屏幕的画面和系统声音。麦克风默认不录。还会记下每个时刻在前台的应用和各窗口的位置、标题，用来画时间线和按窗口导出。也会记下鼠标、键盘和手柄用得多频繁（只记次数，不记按了哪个键、点在哪里），在时间线上标出忙碌的时段。首次开始录制时，需要在「系统设置 › 隐私与安全性 › 屏幕与系统音频录制」中授予录制权限。"
+                } else {
+                  "主屏幕的画面和系统声音。麦克风默认不录。还会记下每个时刻在前台的应用和各窗口的位置、标题，用来画时间线和按窗口导出。也会记下鼠标、键盘和手柄用得多频繁（只记次数，不记按了哪个键、点在哪里），在时间线上标出忙碌的时段。开始录制时，Windows 可能会问一次是否允许它截屏时不显示黄色边框，允许即可。"
+                },
+              )
             })
             consent_row(rows, false, "disk", fn() { t("存在哪、留多久") }, fn() {
-              t("只存在这台电脑上，不上传。只保留最近一段时间，更早的自动删除。")
+              t(
+                if is_mac() {
+                  "只存在这台 Mac 上，不上传。只保留最近一段时间，更早的自动删除。"
+                } else {
+                  "只存在这台电脑上，不上传。只保留最近一段时间，更早的自动删除。"
+                },
+              )
             })
             consent_row(rows, false, "pause", fn() { t("你随时可以") }, fn() {
-              t("从托盘图标暂停或退出；在「设置 › 存储」里删除全部录像；在设置里关掉声音或整个后台录制。")
+              t(
+                if is_mac() {
+                  "从菜单栏图标暂停或退出；在「设置 › 存储」里删除全部录像；在设置里关掉声音或整个后台录制。"
+                } else {
+                  "从托盘图标暂停或退出；在「设置 › 存储」里删除全部录像；在设置里关掉声音或整个后台录制。"
+                },
+              )
             })
             consent_row(rows, false, "shield", fn() { t("它不做的") }, fn() { t("这个版本不收集任何使用统计，也不发送崩溃报告。") })
           })
@@ -318,8 +339,11 @@ fn consent_sheet(root : @view.View) -> Unit {
           body.show(fn() { !consent_reading.get() }, fn(opts) {
             opts.padding(Is((0.0, 14.0, 0.0, 0.0))).gap(Is(10.0)) |> ignore
             consent_option(opts, fn() { t("保留最近") }, consent_choice)
-            consent_option(opts, fn() { t("开机时自动启动并开始录制") }, fn(c) {
-              switch(c, fn() { t("开机时自动启动并开始录制") }, fn() { consent_autostart.get() }, fn(v) { consent_autostart.set(v) })
+            let autostart_label = fn() {
+              t(if is_mac() { "登录时自动启动并开始录制" } else { "开机时自动启动并开始录制" })
+            }
+            consent_option(opts, autostart_label, fn(c) {
+              switch(c, autostart_label, fn() { consent_autostart.get() }, fn(v) { consent_autostart.set(v) })
             })
           }, at_once=true)
         })

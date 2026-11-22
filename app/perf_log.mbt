@@ -17,7 +17,7 @@ fn perf_watch(root : @view.View) -> Unit {
       let span = t - t0_
       let st = rp_window_state()
       let line = "{\"at\":\{rp_now().to_int64()},\"cpu\":\{((cpu - c0) * 100.0 / span).round()},\"front\":\{st & 1},\"min\":\{(st >> 1) & 1},\"shown\":\{(st >> 2) & 1},\"speed\":\{speed.untracked()}}\n"
-      let path = root_dir() + "\\perf.log"
+      let path = pjoin(root_dir(), "perf.log")
       if rp_size(cstr(path)) > 1048576.0 {
         rp_write(cstr(path), @utf8.encode(line)) |> ignore
       } else {

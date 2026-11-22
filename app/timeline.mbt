@@ -314,7 +314,7 @@ fn next_mark(dir : Int) -> Double? {
 /// A marker at `at` (ms into the buffer), kept with the recorder's (markers.jsonl).
 fn add_marker(at : Double) -> Unit {
   let abs = (t0() + at).round()
-  if rp_append(cstr(root_dir() + "\\markers.jsonl"), @utf8.encode("{\"at\":\{abs.to_int64()}}\n")) == 1 {
+  if rp_append(cstr(pjoin(root_dir(), "markers.jsonl")), @utf8.encode("{\"at\":\{abs.to_int64()}}\n")) == 1 {
     marks.push(abs)
     marks.sort()
     just_marked.val = abs
@@ -355,7 +355,7 @@ let just_marked : Ref[Double] = Ref(-1.0)
 ///|
 /// The marker at `abs` (ms since the epoch) taken out of markers.jsonl (the recorder only ever adds to it).
 fn remove_marker(abs : Double) -> Unit {
-  let path = root_dir() + "\\markers.jsonl"
+  let path = pjoin(root_dir(), "markers.jsonl")
   let kept : Array[String] = []
   for line in read_text(path).split("\n") {
     let line = line.to_owned()

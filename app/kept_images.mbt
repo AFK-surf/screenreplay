@@ -90,7 +90,7 @@ fn clip_thumb_kept(path : String, key : String) -> Unit {
 fn clips_gone_forget(dir : String, names : Array[String]) -> Unit {
   let here : Map[String, Bool] = Map([])
   for n in names {
-    here[dir + "\\" + n] = true
+    here[pjoin(dir, n)] = true
   }
   let gone : Array[String] = []
   for path, key in clip_thumb_keys {

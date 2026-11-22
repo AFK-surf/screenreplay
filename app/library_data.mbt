@@ -45,9 +45,13 @@ extern "C" fn rp_modified(path : Bytes) -> Double = "rp_modified"
 ///|
 fn clips_dir() -> String {
   env_or("REPLAY_OUT", {
-    // (named in the window's language the first time; a folder already there keeps its name)
-    let videos = @ui.env("USERPROFILE") + "\\Videos\\"
-    if is_english() && rp_size(cstr(videos + "回放")) < 0.0 { videos + "Replay" } else { videos + "回放" }
+    if is_mac() {
+      pjoin(@ui.env("HOME"), "Movies/ScreenReplay")
+    } else {
+      // (named in the window's language the first time; a folder already there keeps its name)
+      let videos = @ui.env("USERPROFILE") + "\\Videos\\"
+      if is_english() && rp_size(cstr(videos + "回放")) < 0.0 { videos + "Replay" } else { videos + "回放" }
+    }
   })
 }
 
@@ -59,7 +63,7 @@ fn load_clips() -> Unit {
     // (an encode's file left as it was stopped (the window ended while it ran): not a clip, taken away where none runs)
     if name.has_suffix(".partial.mp4") || name.has_suffix(".partial.gif") {
       if export_out.untracked() == "" {
-        rp_delete(cstr(clips_dir() + "\\" + name.to_owned()))
+        rp_delete(cstr(pjoin(clips_dir(), name.to_owned())))
       }
       continue
     }
@@ -248,7 +252,7 @@ fn clip_beside(dir : Int) -> String? {
   let path = clip_playing.untracked()
   let mut i = -1
   for k, name in clip_files {
-    if clips_dir() + "\\" + name == path {
+    if pjoin(clips_dir(), name) == path {
       i = k
     }
   }
@@ -257,7 +261,7 @@ fn clip_beside(dir : Int) -> String? {
   }
   let mut k = i + dir
   while k >= 0 && k < clip_files.length() {
-    let p = clips_dir() + "\\" + clip_files[k]
+    let p = pjoin(clips_dir(), clip_files[k])
     if plays_here(p) {
       return Some(p)
     }

@@ -123,7 +123,7 @@ fn app_icon_path(process : String) -> String {
   match app_icons_found.get(key) {
     Some(p) => p
     None => {
-      let path = root_dir() + "\\AppIcons\\" + key + ".png"
+      let path = pjoin(pjoin(root_dir(), "AppIcons"), key + ".png")
       let found = if rp_size(cstr(path)) > 0.0 { path } else { "" }
       app_icons_found[key] = found
       found

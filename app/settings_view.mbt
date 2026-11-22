@@ -130,7 +130,7 @@ fn storage_card(parent : @view.View) -> Unit {
     if at > 0.0 && rp_now() - at < 30000.0 {
       return bytes
     }
-    let b = @cmp.maximum(0.0, rp_dir_size(cstr(root_dir() + "\\Thumbs")))
+    let b = @cmp.maximum(0.0, rp_dir_size(cstr(pjoin(root_dir(), "Thumbs"))))
     thumbs_size.val = (rp_now(), b)
     b
   }
@@ -199,7 +199,7 @@ fn storage_card(parent : @view.View) -> Unit {
           1 => {
             text_button(b, fn() { t("取消") }, fn() { purge_state.set(0) }, ghost=true) |> ignore
             text_button(b, fn() { t("删除") }, fn() {
-              rp_write(cstr(root_dir() + "\\purge.request"), b"1") |> ignore
+              rp_write(cstr(pjoin(root_dir(), "purge.request")), b"1") |> ignore
               purge_state.set(2)
               purge_now()
               match the_root.val {
@@ -338,7 +338,7 @@ fn settings_dialog(root : @view.View) -> Unit {
 /// between the new picture and an old one (the user's Psycho Sleuth, 2026-11-15; Discord's share and OBS's display
 /// capture alike), so it is said above the recording's settings with how to turn it off. Nothing is changed for it.
 fn fast_sync_note(p : @view.View) -> Unit {
-  p.show(fn() { info().fast_sync != "" }, fn(n) {
+  p.show(fn() { !is_mac() && info().fast_sync != "" }, fn(n) {
     setting_group(n, fn() { t("NVIDIA 显卡开着「快速同步」") }, fn(card) {
       card.box(fn(w) {
         w.padding(Is((14.0, 10.0, 14.0, 10.0))) |> ignore
@@ -376,7 +376,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
             if info().audio_trouble != "" {
               t("声音没能写进最近的录像，详情在 recorder.log")
             } else {
-              t("电脑播放的声音一起录下")
+              t(if is_mac() { "Mac 播放的声音一起录下" } else { "电脑播放的声音一起录下" })
             }
           }, fn() { sets().system_audio }, fn(v) { settings.system_audio = v })
         toggle_row(g, false, fn() { t("录制麦克风") }, fn() { t("和系统声音同开时，片段里只带系统声音") }, fn() { sets().microphone }, fn(
@@ -399,12 +399,19 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
             rp_hide_from_capture(if v { 1 } else { 0 })
           })
         })
-        toggle_row(g, false, fn() { t("开机时启动") }, fn() { t("登录 Windows 后自动开始后台录制") }, fn() { sets().autostart }, fn(v) {
-          settings.autostart = v
-        })
+        toggle_row(
+          g,
+          false,
+          fn() { t(if is_mac() { "登录时自动启动" } else { "开机时启动" }) },
+          fn() { t(if is_mac() { "登录 macOS 后自动开始后台录制" } else { "登录 Windows 后自动开始后台录制" }) },
+          fn() { sets().autostart },
+          fn(v) { settings.autostart = v },
+        )
       })
       setting_group(p, fn() { t("保存最近一段") }, fn(g) {
-        choice_row(g, true, fn() { t("长度") }, fn() { t("按 Ctrl+Alt+S，不开窗口直接存成片段") }, fn() {
+        choice_row(g, true, fn() { t("长度") }, fn() {
+          t(if is_mac() { "按 ⌃⌥S，不开窗口直接存成片段" } else { "按 Ctrl+Alt+S，不开窗口直接存成片段" })
+        }, fn() {
           [t("15 秒"), t("30 秒"), t("1 分钟"), t("2 分钟")]
         }, fn() { index_of(last_choices, sets().last_seconds, 1) }, fn(i) { settings.last_seconds = last_choices[i] })
       })
@@ -413,7 +420,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
       setting_group(p, fn() { "" }, fn(g) {
         choice_row(g, true, fn() { t("编码") }, fn() {
           if info().codec == "H264" && sets().codec == "hevc" {
-            t("这台电脑现在用 H.264 录")
+            t(if is_mac() { "这台 Mac 现在用 H.264 录" } else { "这台电脑现在用 H.264 录" })
           } else {
             t("H.265 同样画质约省 40% 空间")
           }
@@ -551,7 +558,7 @@ fn buffer_place(p : @view.View) -> Unit {
       } else if sets().buffer_dir != "" {
         sets().buffer_dir
       } else {
-        root_dir() + "\\Buffer"
+        pjoin(root_dir(), "Buffer")
       }
     }
     setting_row(g, true, fn() { shown_dir() }, fn() {
@@ -589,12 +596,12 @@ fn buffer_place(p : @view.View) -> Unit {
       |> ignore
     })
     // (after a change: switching, then switched; what is left where it wrote before and when it is cleared)
-    let lowered = fn(s : String) { s.to_lower().trim_end(chars="\\").to_owned() }
+    let lowered = fn(s : String) { s.to_lower().trim_end(chars="/\\").to_owned() }
     let switching = fn() {
       let want = sets().buffer_dir
       let now_dir = info().buffer_dir
       info().buffer_trouble == "" && now_dir != "" &&
-      lowered(now_dir) != lowered(if want == "" { root_dir() + "\\Buffer" } else { want })
+      lowered(now_dir) != lowered(if want == "" { pjoin(root_dir(), "Buffer") } else { want })
     }
     let old_left = fn() -> (Double, Double, Double) {
       data()

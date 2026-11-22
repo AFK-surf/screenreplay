@@ -179,7 +179,7 @@ fn dev_pointer(root : @view.View) -> Unit {
   fn look() -> Unit {
     let nums : Array[Int] = []
     let mut n = -1
-    for ch in read_text(root_dir() + "\\pointer.txt") + " " {
+    for ch in read_text(pjoin(root_dir(), "pointer.txt")) + " " {
       if ch >= '0' && ch <= '9' {
         n = (if n < 0 { 0 } else { n }) * 10 + (ch.to_int() - '0'.to_int())
       } else if n >= 0 {
@@ -311,6 +311,10 @@ fn recorder_chip(parent : @view.View) -> Unit {
       entries.push(Some({ label: t("关闭后台录制"), key: "", act: fn() { set_recording(false) } }))
     } else if code == "disabled" {
       entries.push(Some({ label: t("开启后台录制"), key: "", act: fn() { set_recording(true) } }))
+    } else if code == "noPermission" {
+      entries.push(Some({ label: t("开启屏幕录制权限…"), key: "", act: fn() { ask_recorder("permissions") } }))
+      entries.push(None)
+      entries.push(Some({ label: t("关闭后台录制"), key: "", act: fn() { set_recording(false) } }))
     } else if code == "" {
       entries.push(Some({ label: t("启动录制"), key: "", act: start_recorder }))
     } else {
@@ -455,7 +459,7 @@ fn now_starting() -> Bool {
 ///|
 /// The recorder asked to pause (minutes) or go on ("resume"), as its tray's items do (it reads pause.request every 2 s).
 fn ask_recorder(what : String) -> Unit {
-  rp_write(cstr(root_dir() + "\\pause.request"), @utf8.encode(what)) |> ignore
+  rp_write(cstr(pjoin(root_dir(), "pause.request")), @utf8.encode(what)) |> ignore
 }
 
 ///|

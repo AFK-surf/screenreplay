@@ -70,7 +70,7 @@ fn sets() -> Settings {
 
 ///|
 fn settings_path() -> String {
-  root_dir() + "\\settings.json"
+  pjoin(root_dir(), "settings.json")
 }
 
 ///|
@@ -274,7 +274,7 @@ fn state_json() -> Json? {
   if at == rev {
     return j
   }
-  let j = parse(read_text(root_dir() + "\\state.json"))
+  let j = parse(read_text(pjoin(root_dir(), "state.json")))
   state_read.val = (rev, j)
   j
 }
@@ -399,27 +399,28 @@ extern "C" fn rp_dir_size(path : Bytes) -> Double = "rp_dir_size"
 
 /// The keys, a row each: what it does on the left, its keys on the right.
 fn shortcut_rows() -> Array[(String, Array[String])] {
+  let mac = is_mac()
   [
-  (t("打开回放"), ["Ctrl+Alt+R"]),
-  (t("标记此刻"), ["Ctrl+Alt+M"]),
-  (t("保存最近一段"), ["Ctrl+Alt+S"]),
-  (t("播放 / 暂停"), ["Space", "K"]),
-  (t("逐帧"), ["←", "→"]),
-  (t("前后 5 秒"), ["Shift+←", "Shift+→"]),
-  (t("前后 15 秒"), ["J", "L"]),
-  (t("在当前位置加标记"), ["M"]),
-  (t("上一个 / 下一个标记"), ["[", "]"]),
-  (t("复制当前帧"), ["Ctrl+C"]),
-  (t("剪辑"), ["C"]),
-  (t("设起点 / 终点"), ["I", "O"]),
-  (t("撤销 / 重做"), ["Ctrl+Z", "Ctrl+Y"]),
-  (t("保存片段"), ["Enter"]),
-  (t("保存并复制"), ["Shift+Enter"]),
-  (t("回到最新"), ["End"]),
-  (t("时间线缩放"), ["+", "-"]),
-  (t("适应窗口"), ["0"]),
-  (t("全屏"), ["F"]),
-  (t("设置"), ["Ctrl+,"]),
+    (t("打开回放"), [if mac { "⌃⌥R" } else { "Ctrl+Alt+R" }]),
+    (t("标记此刻"), [if mac { "⌃⌥M" } else { "Ctrl+Alt+M" }]),
+    (t("保存最近一段"), [if mac { "⌃⌥S" } else { "Ctrl+Alt+S" }]),
+    (t("播放 / 暂停"), ["Space", "K"]),
+    (t("逐帧"), ["←", "→"]),
+    (t("前后 5 秒"), [if mac { "⇧←" } else { "Shift+←" }, if mac { "⇧→" } else { "Shift+→" }]),
+    (t("前后 15 秒"), ["J", "L"]),
+    (t("在当前位置加标记"), ["M"]),
+    (t("上一个 / 下一个标记"), ["[", "]"]),
+    (t("复制当前帧"), [if mac { "⌘C" } else { "Ctrl+C" }]),
+    (t("剪辑"), ["C"]),
+    (t("设起点 / 终点"), ["I", "O"]),
+    (t("撤销 / 重做"), if mac { ["⌘Z", "⇧⌘Z"] } else { ["Ctrl+Z", "Ctrl+Y"] }),
+    (t("保存片段"), if mac { ["Enter", "⌘S"] } else { ["Enter", "Ctrl+S"] }),
+    (t("保存并复制"), if mac { ["⇧Enter", "⇧⌘S"] } else { ["Shift+Enter", "Ctrl+Shift+S"] }),
+    (t("回到最新"), if mac { ["⌘→", "End"] } else { ["End"] }),
+    (t("时间线缩放"), ["+", "-"]),
+    (t("适应窗口"), ["0"]),
+    (t("全屏"), ["F"]),
+    (t("设置"), [if mac { "⌘," } else { "Ctrl+," }]),
   ]
 }
 

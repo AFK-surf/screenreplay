@@ -481,12 +481,15 @@ fn region_chip(parent : @view.View) -> Unit {
       })
       |> ignore
     }, keeps_region=true)
+    let nudge_words = fn() {
+      t(if is_mac() { "方向键微调 · Shift 加快 · ⌥ 改大小" } else { "方向键微调 · Shift 加快 · Alt 改大小" })
+    }
     key.val = Some(body)
-    tip(body, fn() { t("区域比例") + " · " + t("方向键微调 · Shift 加快 · Alt 改大小") })
+    tip(body, fn() { t("区域比例") + " · " + nudge_words() })
     icon_button(chip, fn() { "close" }, fn() { t("改回整屏") }, clear_region, w=18.0, h=18.0, size=10.0) |> ignore
   })
   |> ignore
-  words(parent, fn() { if region_selected.get() { t("方向键微调 · Shift 加快 · Alt 改大小") } else { "" } }, 12.0, ui_subtle) |> ignore
+  words(parent, fn() { if region_selected.get() { t(if is_mac() { "方向键微调 · Shift 加快 · ⌥ 改大小" } else { "方向键微调 · Shift 加快 · Alt 改大小" }) } else { "" } }, 12.0, ui_subtle) |> ignore
 }
 
 ///|

@@ -140,7 +140,7 @@ fn as_opened() -> Unit {
   app_icons_found.clear()
   load()
   status_rev.set(status_rev.untracked() + 1)
-  if rp_take_request(cstr(root_dir() + "\\settings.request")) != 0 {
+  if rp_take_request(cstr(pjoin(root_dir(), "settings.request"))) != 0 {
     load_settings()
     settings_open.set(true)
   }
