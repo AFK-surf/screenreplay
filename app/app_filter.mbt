@@ -209,15 +209,24 @@ fn filter_dim_picture(w : Double, from : Double, len : Double, f : Array[String]
 }
 
 ///|
-/// A time in front in words: under a minute 「不到 1 分」, else minutes, past an hour hours and minutes.
+/// A time in front in words: under a second 「不到 1 秒」, under a minute seconds, else minutes, past an hour hours and minutes.
 fn front_words(ms : Double) -> String {
-  let m = (ms / 60000.0).round().to_int()
-  if ms < 60000.0 {
-    t("不到 1 分")
-  } else if m < 60 {
-    tf("{0} 分", [m.to_string()])
+  if ms < 1000.0 {
+    t("不到 1 秒")
+  } else if ms < 60000.0 {
+    let s = (ms / 1000.0).round().to_int()
+    if s >= 60 {
+      tf("{0} 分", ["1"])
+    } else {
+      tf("{0} 秒", [s.to_string()])
+    }
   } else {
-    tf("{0} 小时 {1} 分", [(m / 60).to_string(), (m % 60).to_string()])
+    let m = (ms / 60000.0).round().to_int()
+    if m < 60 {
+      tf("{0} 分", [m.to_string()])
+    } else {
+      tf("{0} 小时 {1} 分", [(m / 60).to_string(), (m % 60).to_string()])
+    }
   }
 }
 
@@ -360,22 +369,39 @@ fn shell_process(process : String, name : String) -> Bool {
 }
 
 ///|
-/// The rows shown: the apps in front a minute or more and 1% of the time or more (Windows' shell and this app never),
-/// eight at most, ticked ones always; the rest on one 「其它」 row, or all of them (16 at most) once it was pressed.
+/// The rows shown: the apps in front enough of the buffer (at least 1 minute or 5% of a shorter buffer, and 1% of the
+/// time; Windows' shell and this app never), eight at most, ticked ones always; if none qualify (e.g. a very short
+/// buffer), the top non-shell apps (or top rows if only shell apps exist) are still shown so the list never collapses
+/// to only an 「其他」 row. The rest sit on one 「其他」 row, or all of them once it was pressed.
 fn apps_rows() -> (Array[(String, Double, String)], Int, Double) {
   let (rows, total) = app_stats.get()
   let f = app_filter.get()
   let more = apps_more.get()
+  let min_ms = @cmp.minimum(60000.0, total * 0.05)
   let shown : Array[(String, Double, String)] = []
   let mut rest = 0
   let mut rest_ms = 0.0
   for r in rows {
-    let big = r.1 >= 60000.0 && (total <= 0.0 || r.1 / total >= 0.01) && !shell_process(r.2, r.0)
-    if f.contains(r.0) || (big && shown.length() < 8) || (more && shown.length() < 16) {
+    let big = r.1 >= min_ms && (total <= 0.0 || r.1 / total >= 0.01) && !shell_process(r.2, r.0)
+    if f.contains(r.0) || (big && shown.length() < 8) || more {
       shown.push(r)
     } else {
       rest += 1
       rest_ms += r.1
+    }
+  }
+  if shown.is_empty() && !rows.is_empty() {
+    rest = 0
+    rest_ms = 0.0
+    let has_non_shell = rows.iter().any(fn(r) { !shell_process(r.2, r.0) })
+    for r in rows {
+      let pick = (!has_non_shell || !shell_process(r.2, r.0)) && shown.length() < 8
+      if pick {
+        shown.push(r)
+      } else {
+        rest += 1
+        rest_ms += r.1
+      }
     }
   }
   (shown, rest, rest_ms)
@@ -385,9 +411,7 @@ fn apps_rows() -> (Array[(String, Double, String)], Int, Double) {
 /// One app's row, 34 high: its tick, icon and name; its time in front (muted) and share (subtle, in a column of its
 /// own) at its end (a bar of the share behind the row was tried: grey blocks behind the ticks); s2 under the pointer.
 /// Pressed it is ticked or not; under the pointer 「只看它」 in place of its time, which ticks it alone.
-fn app_row(parent : @view.View, row : (String, Double, String), total : Double) -> Unit {
-  let (name, ms, process) = row
-  let share = if total > 0.0 { ms / total } else { 0.0 }
+fn app_row(parent : @view.View, name : String, process : String, ms_get : () -> Double) -> Unit {
   pressable(parent, fn() { name }, fn() { toggle_app(name) }, fn(b) {
     b
     .height(Is(Some(34.0)))
@@ -425,10 +449,13 @@ fn app_row(parent : @view.View, row : (String, Double, String), total : Double) 
           })
           |> ignore
         } else {
-          words(r, fn() { front_words(ms) }, 12.0, ui_muted) |> ignore
+          words(r, fn() { front_words(ms_get()) }, 12.0, ui_muted) |> ignore
           r.box(fn(pc) {
             pc.row(Is(true)).width(Is(Some(34.0))).lines_up(Is(Some(Middle))).lies_along(Is(End)) |> ignore
-            words(pc, fn() { share_words(share) }, 12.0, ui_subtle) |> ignore
+            words(pc, fn() {
+              let total = app_stats.get().1
+              share_words(if total > 0.0 { ms_get() / total } else { 0.0 })
+            }, 12.0, ui_subtle) |> ignore
           })
           |> ignore
         }
@@ -501,7 +528,16 @@ fn apps_layer(root : @view.View) -> Unit {
           sc.max_height(Is(Some(400.0))) |> ignore
           sc.scrolls(@view.Scroll::new(), slop=@ui.touch_slop(), bar=@ui.tree_scroll_bar(), fn(list) {
             list.each(fn() { apps_rows().0 }, fn(r) { r.0 }, fn(row, r) {
-              app_row(row, @signals.untracked(fn() { r.get() }), @signals.untracked(fn() { app_stats.get().1 }))
+              let snap = @signals.untracked(fn() { r.get() })
+              app_row(row, snap.0, snap.2, fn() { r.get().1 })
+            }, at_once=true)
+            |> ignore
+            list.show(fn() { apps_rows().0.is_empty() && apps_rows().1 == 0 }, fn(x) {
+              x.box(fn(e) {
+                e.height(Is(Some(34.0))).padding(Is((10.0, 0.0, 10.0, 0.0))).lines_up(Is(Some(Middle))) |> ignore
+                words(e, fn() { t("暂无应用记录") }, 12.0, ui_subtle) |> ignore
+              })
+              |> ignore
             }, at_once=true)
             |> ignore
             list.show(fn() { apps_rows().1 > 0 }, fn(x) {
@@ -518,7 +554,14 @@ fn apps_layer(root : @view.View) -> Unit {
                 |> ignore
                 b.box(fn(n) {
                   n.grow(Is(1.0)).padding(Is((52.0, 0.0, 0.0, 0.0))) |> ignore
-                  words(n, fn() { tf("其他 {0} 个", [apps_rows().1.to_string()]) }, 13.0, ui_muted) |> ignore
+                  words(n, fn() {
+                    let count = apps_rows().1
+                    if count == 1 {
+                      t("其他 1 个")
+                    } else {
+                      tf("其他 {0} 个", [count.to_string()])
+                    }
+                  }, 13.0, ui_muted) |> ignore
                 })
                 |> ignore
                 words(b, fn() { front_words(apps_rows().2) }, 12.0, ui_subtle) |> ignore

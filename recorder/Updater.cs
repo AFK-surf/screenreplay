@@ -197,16 +197,8 @@ internal sealed class Updater : IDisposable
         if (IsTestMode() && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_UPDATE_URL"))) return;
 
         // 1. Handle explicit UI action from Settings > About
-        if (File.Exists(RequestFilePath))
+        if (Program.TryConsumeRequest(RequestFilePath, out var req))
         {
-            string req = "";
-            try
-            {
-                req = File.ReadAllText(RequestFilePath).Trim();
-                File.Delete(RequestFilePath);
-            }
-            catch (Exception) { }
-
             if (req == "check")
             {
                 _ = CheckAsync(userAsked: true);

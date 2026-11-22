@@ -22,24 +22,40 @@ internal static class Program
         var mutexName = @"Local\ReplayRecorder.Single." + rootKey;
         if (args.Contains("--quit"))
         {
+            var quitPath = Path.Combine(paths.Root, "quit.request");
             using var probe = new Mutex(false, mutexName, out var noneRunning);
             if (!noneRunning)
             {
-                try { File.WriteAllText(Path.Combine(paths.Root, "quit.request"), "quit"); } catch (Exception) { }
+                try { WriteAtomic(quitPath, "quit"); } catch (Exception) { }
+                var exited = false;
                 try
                 {
                     if (probe.WaitOne(4500))
                     {
+                        exited = true;
                         probe.ReleaseMutex();
                     }
                 }
-                catch (AbandonedMutexException) { }
+                catch (AbandonedMutexException)
+                {
+                    exited = true;
+                }
+                // Never leave quit.request behind once the old instance has exited, otherwise the newly launched
+                // instance after an update would consume it on startup and immediately quit.
+                if (exited)
+                {
+                    TryTakeRequest(quitPath);
+                }
+            }
+            else
+            {
+                TryTakeRequest(quitPath);
             }
             return;
         }
         if (!args.Contains("--background") && !args.Contains("--updated") && !Packaged.StartedAtSignIn())
         {
-            File.WriteAllText(Path.Combine(paths.Root, "open.request"), "open");
+            try { WriteAtomic(Path.Combine(paths.Root, "open.request"), "open"); } catch (Exception) { }
         }
         // (one per buffer: a test run with its own REPLAY_ROOT never stands in the way of the real one)
         using var single = new Mutex(true, mutexName, out var first);
@@ -48,11 +64,82 @@ internal static class Program
             return;
         }
 
+        // Any quit.request already on disk before this instance claimed the single-instance mutex belonged to a
+        // previous instance (e.g. an older version's --quit race during update), never to us.
+        TryTakeRequest(Path.Combine(paths.Root, "quit.request"));
+
         // DPI_AWARENESS_CONTEXT_SYSTEM_AWARE: as WinForms' ApplicationConfiguration set it (a test window's bounds, the
         // tray icon's size and the app icons' are at the system's DPI, not scaled by Windows)
         SetProcessDpiAwarenessContext(-2);
         using var app = new RecorderApp(paths, wasUpdated: args.Contains("--updated"));
         app.Run();
+    }
+
+    internal static void WriteAtomic(string path, string content)
+    {
+        var tmp = $"{path}.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tmp, content);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch (Exception)
+        {
+            try { File.Delete(tmp); } catch (Exception) { }
+            File.WriteAllText(path, content);
+        }
+    }
+
+    internal static bool TryTakeRequest(string path)
+    {
+        for (var i = 0; i < 6; i++)
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+            try
+            {
+                File.Delete(path);
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(25);
+            }
+        }
+        return false;
+    }
+
+    internal static bool TryConsumeRequest(string path, out string content)
+    {
+        content = "";
+        for (var i = 0; i < 6; i++)
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+            try
+            {
+                content = File.ReadAllText(path).Trim();
+                File.Delete(path);
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(25);
+            }
+        }
+        return false;
     }
 
     [DllImport("user32.dll")]
@@ -313,11 +400,12 @@ internal sealed class RecorderApp : IDisposable
         };
         asks.Created += asked;
         asks.Changed += asked;
+        asks.Renamed += (s, e) => asked(s, e);
         _ = CheckAsync();
         // (the replay window ready in the background, so that opening it is only showing it: unless one of this
         // program's runs already (a recorder started again while its window stayed), found by its program file, not by
         // its name alone (another buffer's test windows, the tray's panel and the note card have that name too))
-        if (FindReplay() is null)
+        if (!exiting && FindReplay() is null)
         {
             StartReplay(hidden: true);
         }
@@ -470,26 +558,22 @@ internal sealed class RecorderApp : IDisposable
         }
 
         var quitRequest = Path.Combine(paths.Root, "quit.request");
-        if (File.Exists(quitRequest))
+        if (Program.TryTakeRequest(quitRequest))
         {
-            try { File.Delete(quitRequest); } catch (Exception) { }
             await ExitAsync();
             return;
         }
         var openRequest = Path.Combine(paths.Root, "open.request");
-        if (File.Exists(openRequest))
+        if (Program.TryTakeRequest(openRequest))
         {
-            File.Delete(openRequest);
             OpenReplay();
         }
         NoteForegroundApp();
         // (the replay window's recording chip asks for a pause, or for it to go on: pause.request, its minutes or
         // "resume", as the tray's items do)
         var pauseRequest = Path.Combine(paths.Root, "pause.request");
-        if (File.Exists(pauseRequest))
+        if (Program.TryConsumeRequest(pauseRequest, out var asked))
         {
-            var asked = File.ReadAllText(pauseRequest).Trim();
-            File.Delete(pauseRequest);
             if (asked == "resume")
             {
                 pausedUntil = null;
@@ -509,9 +593,8 @@ internal sealed class RecorderApp : IDisposable
         // the apps', windows' and markers' records) deleted; the clips saved, the settings and the logs kept; recording
         // starts again below as ever)
         var purgeRequest = Path.Combine(paths.Root, "purge.request");
-        if (File.Exists(purgeRequest))
+        if (Program.TryTakeRequest(purgeRequest))
         {
-            File.Delete(purgeRequest);
             if (recorder is not null)
             {
                 await StopRecorderAsync();
@@ -637,9 +720,8 @@ internal sealed class RecorderApp : IDisposable
         {
             // (the replay window, or a test, asks for the last moments saved as the hotkey does)
             var saveRequest = Path.Combine(paths.Root, "save.request");
-            if (File.Exists(saveRequest))
+            if (Program.TryTakeRequest(saveRequest))
             {
-                File.Delete(saveRequest);
                 _ = SaveLastAsync();
             }
 
@@ -1174,7 +1256,7 @@ internal sealed class RecorderApp : IDisposable
     private async Task FlushIfAskedAsync()
     {
         var request = Path.Combine(paths.Root, "flush.request");
-        if (recorder is null || !File.Exists(request))
+        if (recorder is null || !Program.TryTakeRequest(request))
         {
             return;
         }
@@ -1183,20 +1265,11 @@ internal sealed class RecorderApp : IDisposable
         {
             // (the window left open with the screen off asks every few seconds and nobody sees it: 2026-11-21 a
             // night of 8 s segments, 420 an hour, each starting on a 4K keyframe; 30 s ones while the screen is off)
-            try
-            {
-                File.Delete(request);
-            }
-            catch (IOException)
-            {
-            }
-
             return;
         }
 
         try
         {
-            File.Delete(request);
             await recorder.FlushAsync(CancellationToken.None);
         }
         catch (Exception ex)
@@ -1215,9 +1288,8 @@ internal sealed class RecorderApp : IDisposable
     private void TraceIfAsked()
     {
         var request = Path.Combine(paths.Root, "capture-diag.request");
-        if (traceUntil is null && File.Exists(request))
+        if (traceUntil is null && Program.TryTakeRequest(request))
         {
-            File.Delete(request);
             Replay.Recording.FrameTrace.Take();
             Replay.Recording.FrameTrace.On = true;
             traceUntil = DateTimeOffset.UtcNow.AddSeconds(20);
@@ -1732,7 +1804,7 @@ internal sealed class RecorderApp : IDisposable
 
         if (showSettings)
         {
-            File.WriteAllText(Path.Combine(paths.Root, "settings.request"), "settings");
+            try { Program.WriteAtomic(Path.Combine(paths.Root, "settings.request"), "settings"); } catch (Exception) { }
         }
 
         if (FindReplay() is { } found)
@@ -1856,6 +1928,7 @@ internal sealed class RecorderApp : IDisposable
             recorder = null;
         }
 
+        Program.TryTakeRequest(Path.Combine(paths.Root, "quit.request"));
         Log("quit");
         window.Quit();
     }
