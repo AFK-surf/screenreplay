@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.22):** "Skip time not recorded" now also excludes unrecorded gaps (sleep, shutdown, paused, or app closed) from the retention window so older recordings are never wiped after an overnight gap, while keeping matching app/marker/window records intact. Hardened settings writes to be atomic so transient file locks can never reset recording or autostart, and added cleanup for orphaned sidecar files in the buffer folder.
+**What's new in this version (0.1.23):** Added 20× playback speed and clear silent-mode indication on the speaker icon for speeds above 4×. Refined the timeline playhead into a single continuous vector path so approaching the left or right edge tapers smoothly into the vertical line without a sharp corner overhang, and rounded/clamped the overview playhead within its track.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.22）：** 「跳过没录制的时段」现在同样作用于录制保留时长——关机、睡眠、暂停或未打开期间的空白时间不再计入保留时长，不会再因停录一夜把之前的录像清空，并同步保留对应的应用/标记/窗口记录；同时将设置文件写入改为原子替换并加重试保护，防止保存设置瞬间的文件占用误把录制或开机自启重置，并自动清理缓冲目录遗留的孤儿伴随文件。
+**此版本新增内容（0.1.23）：** 新增 20× 高倍速回放，并在高于 4× 倍速无声时于音量按钮上直接提示静音状态；将时间轴播放头胶囊、颈部与竖线合并为一条连续矢量路径，靠近左右边缘时平滑收束为贴边形态，消除直角凸台与接缝，同时收口底部总览条播放头的边缘表现。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 
