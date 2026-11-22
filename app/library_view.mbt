@@ -608,7 +608,7 @@ fn clip_player_layer(root : @view.View) -> Unit {
               spring(row)
               speed_key(row, now=fn() { clip_speed.get() }, set=set_clip_speed, stage=true)
               row.box(fn(g) { g.width(Is(Some(4.0))) |> ignore }) |> ignore
-              volume_control(row, stage=true)
+              volume_control(row, stage=true, rate=fn() { clip_speed.get() })
               row.box(fn(b) {
                 b.row(Is(true)).margin(Is((0.0, 0.0, -6.0, 0.0))) |> ignore
                 icon_button(b, fn() { if fs() { "unfull" } else { "full" } }, fn() { if fs() { t("退出全屏") } else { t("全屏") } }, fn() {

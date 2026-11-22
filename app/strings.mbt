@@ -389,9 +389,7 @@ let english : Map[String, String] = {
   "10 分钟": "10 min",
   "全部": "All",
   "时间线缩放 · Ctrl+滚轮": "Timeline zoom · Ctrl+wheel",
-  "无声": "muted",
-  "播放速度": "Playback speed",
-  "播放速度 · 超过 4× 没有声音": "Playback speed · no sound above 4×",
+  "超过 4× 没有声音": "No sound above 4×",
   // the first run's sheet
   "开始之前，先说清楚它做什么": "Before you start, here is what it does",
   "ScreenReplay 会在后台一直录着你的屏幕，直到你暂停或退出。": "ScreenReplay records your screen in the background all the time, until you pause it or quit.",

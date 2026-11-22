@@ -13,25 +13,28 @@ fn set_volume(v : Double, m : Bool) -> Unit {
 }
 
 ///|
-/// The speaker and its slider (72 wide, a 4 high track, a 12 knob), opening over 140 ms.
-fn volume_control(parent : @view.View, stage? : Bool = false) -> Unit {
+/// The speaker and its slider (72 wide, a 4 high track, a 12 knob), opening over 140 ms. At a speed with no sound
+/// (past 4×: sounds_at; `rate` the player's) the speaker is struck through and its tip says why (the user, 2026-11-23:
+/// 「只在播放那里的声音图标标一下就行」); pressed it mutes and unmutes as ever.
+fn volume_control(parent : @view.View, stage? : Bool = false, rate? : () -> Double = fn() { speed.get() }) -> Unit {
   parent.box(fn(area) {
     area.row(Is(true)).gap(Is(4.0)).lines_up(Is(Some(Middle))).presses(Is(true)) |> ignore
     let silent = fn() { muted.get() || volume.get() <= 0.0 }
-    let speaker = icon_button(area, fn() { if silent() { "volume-x" } else { "volume" } }, fn() {
+    let words = fn() {
       if silent() {
         t("取消静音")
       } else {
         t("静音")
       }
-    }, fn() {
+    }
+    let speaker = icon_button(area, fn() { if silent() || !sounds_at(rate()) { "volume-x" } else { "volume" } }, words, fn() {
       if @signals.untracked(silent) {
         set_volume(if volume.untracked() <= 0.0 { 0.6 } else { volume.untracked() }, false)
       } else {
         set_volume(volume.untracked(), true)
       }
       save_prefs()
-    }, stage~)
+    }, stage~, tip_words=fn() { if sounds_at(rate()) { words() } else { t("超过 4× 没有声音") } })
     let open = @motion.NodeWay::new(0.0)
     // (open while the pointer is anywhere over the key and the slider, the room between them too, or the slider held;
     // closing only 400 ms after the pointer left (800 was too slow, the user, 2026-11-16), called off if it comes back meanwhile: at once, it was gone before
