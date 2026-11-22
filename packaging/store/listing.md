@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.19):** Automatically detects primary monitor handoffs and resolution changes (such as laptop-to-4K external monitor or GPU MUX switches after sign-in) and cleanly restarts recording on the new display and resolution instead of freezing or staying stuck at the old resolution. Fixed continuous gaming input starving the capture-stall detector, added automatic full recorder/GPU restart if lightweight WGC capture renewal fails twice or stalls again, added UAC secure-desktop switch monitoring, and enriched freeze diagnostics in recorder.log.
+**What's new in this version (0.1.20):** Playback at 0.5x, 1.5x, 2x and 4x now has sound, time-stretched with its pitch kept (no chipmunk voices), in both the replay and saved clips; 8x and 10x stay muted. Sound and picture stay in sync at every speed.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.19）：** 自动检测主显示器切换或分辨率变更（如开机后笔记本内屏交接外接 4K 屏或显卡直连切换），稳定 2 秒后干净重启录制到新主屏与正确分辨率，不再画面冻住或残留旧分辨率黑边；修复持续打游戏按键导致卡死检测被饿死的问题，并在轻量重建采集连续失败或二次停帧时自动重建 GPU 与录屏器（不触发 HEVC 降级）；新增 UAC 安全桌面切换监听并补全录屏日志的卡死诊断信息。
+**此版本新增内容（0.1.20）：** 0.5×、1.5×、2×、4× 倍速播放现在有声音，变速不变调，回放和已保存片段都适用；8× 和 10× 仍静音。各倍速下声画保持同步。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 
