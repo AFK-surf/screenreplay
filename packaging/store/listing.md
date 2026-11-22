@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.21):** Fixed a race condition during silent updates where a leftover quit request could cause the newly launched version to exit immediately and stop background recording; also improved the Apps filter for short recordings so apps under one minute are listed directly with second-level durations instead of collapsing into "others".
+**What's new in this version (0.1.22):** "Skip time not recorded" now also excludes unrecorded gaps (sleep, shutdown, paused, or app closed) from the retention window so older recordings are never wiped after an overnight gap, while keeping matching app/marker/window records intact. Hardened settings writes to be atomic so transient file locks can never reset recording or autostart, and added cleanup for orphaned sidecar files in the buffer folder.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.21）：** 修复静默自动更新时的文件占用竞态——旧进程退出时若残留 `quit.request`，可能导致刚启动的新版本立刻自退并中断后台录制；同时优化了短录像下的「前台应用」过滤面板，不足 1 分钟的应用现在直接展示并按秒计长，不再全部折叠进「其他」。
+**此版本新增内容（0.1.22）：** 「跳过没录制的时段」现在同样作用于录制保留时长——关机、睡眠、暂停或未打开期间的空白时间不再计入保留时长，不会再因停录一夜把之前的录像清空，并同步保留对应的应用/标记/窗口记录；同时将设置文件写入改为原子替换并加重试保护，防止保存设置瞬间的文件占用误把录制或开机自启重置，并自动清理缓冲目录遗留的孤儿伴随文件。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

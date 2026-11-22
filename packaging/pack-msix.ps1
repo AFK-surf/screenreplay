@@ -5,7 +5,7 @@ param(
   [string]$Name = "pengx17.ScreenReplay",
   [string]$Publisher = "CN=0A62AE73-FF5C-4B40-9E2B-F24486072C86",
   [string]$PublisherDisplayName = "pengx17",
-  [string]$Version = "0.1.21.0",
+  [string]$Version = "0.1.22.0",
   [string]$Out = ""
 )
 # Makes ScreenReplay's MSIX for the Microsoft Store: the recorder published with its own .NET runtime (the Store cannot

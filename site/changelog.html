@@ -51,6 +51,14 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.22</h2><span>2026-11-22</span></div>
+      <ul>
+        <li data-zh="「跳过没录制的时段」不再把空白时间计入保留时长：关机、睡眠、暂停或未运行期间不会吃掉保留配额，重新打开时之前的录像及对应应用、标记、窗口记录都会完整保留。" data-en="“Skip time not recorded” now excludes unrecorded gaps from retention: time spent asleep, shut down, paused or closed no longer counts against your retention window, keeping earlier recordings along with their app, marker and window history intact.">「跳过没录制的时段」不再把空白时间计入保留时长：关机、睡眠、暂停或未运行期间不会吃掉保留配额，重新打开时之前的录像及对应应用、标记、窗口记录都会完整保留。</li>
+        <li data-zh="加固设置读写与缓冲清理：回放窗口写入设置改用原子替换，录制端读取加失败重试且不再因瞬时占用回退为关闭录制/取消自启；自动清理缓冲目录遗留的孤儿伴随文件。" data-en="Hardened settings persistence and buffer cleanup: viewer writes are now atomic and recorder reads retry without falling back to disabled defaults on transient locks; orphaned sidecar files in the buffer folder are cleaned up automatically.">加固设置读写与缓冲清理：回放窗口写入设置改用原子替换，录制端读取加失败重试且不再因瞬时占用回退为关闭录制/取消自启；自动清理缓冲目录遗留的孤儿伴随文件。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.21</h2><span>2026-11-22</span></div>
       <ul>
         <li data-zh="修复静默自动更新后的自退问题：消除 --quit 与文件监听之间的占用竞态，并在新版本启动时清理残留的退出请求，避免更新后后台录制悄悄中断。" data-en="Fixed silent auto-update self-exit: eliminated a file-locking race between --quit and the file watcher and cleared stale quit requests on startup so background recording never silently stops after an update.">修复静默自动更新后的自退问题：消除 --quit 与文件监听之间的占用竞态，并在新版本启动时清理残留的退出请求，避免更新后后台录制悄悄中断。</li>
