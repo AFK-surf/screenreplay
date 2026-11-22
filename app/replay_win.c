@@ -194,14 +194,37 @@ moonbit_bytes_t rp_read(moonbit_bytes_t path, double offset, int32_t length) {
   return rp_bytes((const char *)b, (int32_t)got);
 }
 
-// Writes `data` to a file (created or replaced); whether it could.
+// Writes `data` to a file atomically via a sibling temp file + MoveFileExW so readers (and the recorder's
+// FileSystemWatcher) never see a truncated or write-locked settings/request file; falls back to direct write.
 int32_t rp_write(moonbit_bytes_t path, moonbit_bytes_t data) {
   wchar_t *w = rp_wide((const char *)path);
+  size_t wlen = wcslen(w);
+  size_t tcap = wlen + 48;
+  wchar_t *tmp = (wchar_t *)malloc(tcap * sizeof(wchar_t));
+  DWORD n = (DWORD)Moonbit_array_length(data);
+  if (tmp) {
+    static volatile LONG rp_write_seq = 0;
+    LONG seq = InterlockedIncrement(&rp_write_seq);
+    swprintf(tmp, tcap, L"%ls.%lu.%ld.tmp", w, (unsigned long)GetCurrentProcessId(), (long)seq);
+    HANDLE h = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+      DWORD wrote = 0;
+      BOOL ok = WriteFile(h, data, n, &wrote, NULL) && wrote == n;
+      CloseHandle(h);
+      if (ok && MoveFileExW(tmp, w, MOVEFILE_REPLACE_EXISTING)) {
+        free(tmp);
+        free(w);
+        return 1;
+      }
+      DeleteFileW(tmp);
+    }
+    free(tmp);
+  }
   HANDLE h = CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   free(w);
   if (h == INVALID_HANDLE_VALUE) return 0;
   DWORD wrote = 0;
-  BOOL ok = WriteFile(h, data, (DWORD)Moonbit_array_length(data), &wrote, NULL);
+  BOOL ok = WriteFile(h, data, n, &wrote, NULL) && wrote == n;
   CloseHandle(h);
   return ok ? 1 : 0;
 }

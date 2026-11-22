@@ -280,7 +280,7 @@ let english : Map[String, String] = {
   "未录制 {0} · {1} – {2}": "{0} not recorded · {1} – {2}",
   "时间线": "Timeline",
   "跳过没录制的时段": "Skip time not recorded",
-  "没开 ScreenReplay、关掉或暂停录制的时间，在时间线上折成一条细缝": "Time ScreenReplay wasn't running, or recording was off or paused, folds to a thin seam on the timeline",
+  "没开 ScreenReplay、关掉或暂停录制的时间，不计入保留时长，在时间线上也折成一条细缝": "Time ScreenReplay wasn't running, or recording was off or paused, doesn't count toward retention and folds to a thin seam on the timeline",
   "不到 1 秒": "< 1 s",
   "不到 1 分": "Under 1 min",
   "暂无应用记录": "No apps recorded yet",

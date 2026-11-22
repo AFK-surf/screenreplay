@@ -119,29 +119,123 @@ public sealed class SegmentStore(string folder)
                 continue;
             }
 
-            try
+            if (DeleteSegment(segment))
             {
-                File.Delete(segment.Path);
-            }
-            catch (Exception)
-            {
-                continue;
-            }
-
-            gone++;
-            foreach (var ext in Sidecars)
-            {
-                try
-                {
-                    File.Delete(System.IO.Path.ChangeExtension(segment.Path, ext));
-                }
-                catch (Exception)
-                {
-                }
+                gone++;
             }
         }
 
         return gone;
+    }
+
+    /// <summary>Keeps segments newest-first until their cumulative recorded duration reaches <paramref name="keep"/>,
+    /// deleting older segments and their sidecars. Unrecorded gaps (sleep, paused, app closed) do not count against
+    /// <paramref name="keep"/>.</summary>
+    public int PruneRecorded(TimeSpan keep)
+    {
+        var segments = List();
+        var keepMs = Math.Max(0.0, keep.TotalMilliseconds);
+        var accMs = 0.0;
+        var keepFrom = 0;
+        for (var i = segments.Count - 1; i >= 0; i--)
+        {
+            accMs += Math.Max(0.0, segments[i].DurationMs);
+            if (accMs >= keepMs)
+            {
+                keepFrom = i;
+                break;
+            }
+        }
+
+        if (accMs < keepMs)
+        {
+            return 0;
+        }
+
+        var gone = 0;
+        for (var i = 0; i < keepFrom; i++)
+        {
+            if (DeleteSegment(segments[i]))
+            {
+                gone++;
+            }
+        }
+
+        return gone;
+    }
+
+    /// <summary>As <see cref="PruneRecorded"/>, applied jointly across multiple buffer folders (previous buffer dirs +
+    /// the active one) ordered by segment start time.</summary>
+    public static int PruneRecordedAcross(IReadOnlyList<SegmentStore> stores, TimeSpan keep)
+    {
+        var all = new List<(SegmentStore Store, Segment Segment)>();
+        foreach (var store in stores)
+        {
+            foreach (var seg in store.List())
+            {
+                all.Add((store, seg));
+            }
+        }
+
+        all.Sort((a, b) => a.Segment.StartUtc.CompareTo(b.Segment.StartUtc));
+        var keepMs = Math.Max(0.0, keep.TotalMilliseconds);
+        var accMs = 0.0;
+        var keepFrom = 0;
+        for (var i = all.Count - 1; i >= 0; i--)
+        {
+            accMs += Math.Max(0.0, all[i].Segment.DurationMs);
+            if (accMs >= keepMs)
+            {
+                keepFrom = i;
+                break;
+            }
+        }
+
+        if (accMs < keepMs)
+        {
+            return 0;
+        }
+
+        var gone = 0;
+        for (var i = 0; i < keepFrom; i++)
+        {
+            if (all[i].Store.DeleteSegment(all[i].Segment))
+            {
+                gone++;
+            }
+        }
+
+        return gone;
+    }
+
+    private bool DeleteSegment(Segment segment)
+    {
+        try
+        {
+            File.Delete(segment.Path);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        foreach (var ext in Sidecars)
+        {
+            try
+            {
+                File.Delete(System.IO.Path.ChangeExtension(segment.Path, ext));
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        lock (read)
+        {
+            read.Remove(segment.Path);
+        }
+
+        return true;
     }
 
     /// <summary>What a crash left half written (the temporary files of segments never completed) deleted.</summary>

@@ -434,7 +434,7 @@ internal sealed class WindowTrack : IDisposable
         dirty = true;
     }
 
-    public void Prune(TimeSpan keep)
+    public void Prune(DateTimeOffset cutoffTime)
     {
         try
         {
@@ -446,7 +446,7 @@ internal sealed class WindowTrack : IDisposable
 
             lastPrune = DateTimeOffset.UtcNow;
 
-            var cutoff = DateTimeOffset.UtcNow.Add(-keep).ToUnixTimeMilliseconds();
+            var cutoff = cutoffTime.ToUnixTimeMilliseconds();
             var lines = File.ReadAllLines(path);
             var kept = new List<string>();
             string? before = null;

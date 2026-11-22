@@ -489,7 +489,7 @@ fn settings_page_body(p : @view.View, i : Int) -> Unit {
       })
       setting_group(p, fn() { t("时间线") }, fn(g) {
         setting_row(g, true, fn() { t("跳过没录制的时段") }, fn() {
-          t("没开 ScreenReplay、关掉或暂停录制的时间，在时间线上折成一条细缝")
+          t("没开 ScreenReplay、关掉或暂停录制的时间，不计入保留时长，在时间线上也折成一条细缝")
         }, fn(c) {
           switch(c, fn() { t("跳过没录制的时段") }, fn() { fold_gaps.get() }, fn(v) { set_fold_gaps(v) })
         })
@@ -596,23 +596,26 @@ fn buffer_place(p : @view.View) -> Unit {
       info().buffer_trouble == "" && now_dir != "" &&
       lowered(now_dir) != lowered(if want == "" { root_dir() + "\\Buffer" } else { want })
     }
-    let old_left = fn() -> (Double, Double) {
+    let old_left = fn() -> (Double, Double, Double) {
       data()
       let here = lowered(shown_dir())
       let mut size = 0.0
       let mut last = -1.0
+      let mut new_dur = 0.0
       for s in segs {
         if !lowered(s.path).has_prefix(here) {
           size += s.size
           last = @cmp.maximum(last, s.start + s.dur)
+        } else {
+          new_dur += s.dur
         }
       }
-      (size, last)
+      (size, last, new_dur)
     }
     g.show(fn() { switching() || buffer_moved.get() || old_left().0 > 0.0 }, fn(n) {
       n.padding(Is((14.0, 0.0, 14.0, 12.0))) |> ignore
       words(n, fn() {
-        let (size, last) = old_left()
+        let (size, last, new_dur) = old_left()
         let head = if switching() {
           t("正在切换…")
         } else if buffer_moved.get() {
@@ -621,7 +624,12 @@ fn buffer_place(p : @view.View) -> Unit {
           ""
         }
         let left = if size > 0.0 {
-          let ms = @cmp.maximum(0.0, last + sets().window_minutes.to_double() * 60000.0 - rp_now())
+          let window_ms = sets().window_minutes.to_double() * 60000.0
+          let ms = if fold_gaps.get() {
+            @cmp.maximum(0.0, window_ms - new_dur)
+          } else {
+            @cmp.maximum(0.0, last + window_ms - rp_now())
+          }
           if ms < 60000.0 {
             tf("旧位置还有 {0}，即将自动清空", [bytes_text(size)])
           } else {

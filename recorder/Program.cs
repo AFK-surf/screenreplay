@@ -392,7 +392,7 @@ internal sealed class RecorderApp : IDisposable
         {
             // (every ask the window or a test writes taken at once: open, save and flush too, which waited for the next
             // 2 s look before)
-            if (e.Name is "pause.request" or "settings.json" or "purge.request" or "quit.request" or "update.request" or
+            if (e.Name is "pause.request" or "settings.json" or "viewer.json" or "purge.request" or "quit.request" or "update.request" or
                 "open.request" or "save.request" or "flush.request" or "capture-diag.request")
             {
                 ui?.Post(_ => _ = CheckAsync(), null);
@@ -690,6 +690,7 @@ internal sealed class RecorderApp : IDisposable
         }
 
         settings = wanted;
+        recorder?.SetSkipUnrecorded(ReadFoldGaps());
         Housekeeping();
         Relabel();
         statusArg = "";
@@ -881,7 +882,7 @@ internal sealed class RecorderApp : IDisposable
         try
         {
             var olds = string.Join(",", oldBuffers.Select(Json));
-            File.WriteAllText(Path.Combine(paths.Root, "buffers.json"), $"{{\"current\":{Json(paths.Buffer)},\"old\":[{olds}]}}");
+            Program.WriteAtomic(Path.Combine(paths.Root, "buffers.json"), $"{{\"current\":{Json(paths.Buffer)},\"old\":[{olds}]}}");
         }
         catch (IOException)
         {
@@ -1002,28 +1003,67 @@ internal sealed class RecorderApp : IDisposable
             });
         }
 
+        var skipUnrecorded = ReadFoldGaps();
+        var store = recorder?.Store ?? new SegmentStore(paths.Buffer);
+        DateTimeOffset? earliestKept = null;
+
         // (the folders written before: what passed the window taken away, the folder forgotten once nothing is left)
         if (oldBuffers.Count > 0)
         {
-            var gone = new List<string>();
+            var oldStores = new List<(string Dir, SegmentStore Store)>();
             foreach (var dir in oldBuffers)
+            {
+                if (Directory.Exists(dir))
+                {
+                    oldStores.Add((dir, new SegmentStore(dir)));
+                }
+            }
+
+            if (skipUnrecorded)
             {
                 try
                 {
-                    if (!Directory.Exists(dir))
+                    var allStores = oldStores.Select(x => x.Store).Append(store).ToList();
+                    SegmentStore.PruneRecordedAcross(allStores, settings.Window);
+                }
+                catch (Exception ex)
+                {
+                    Log("expire (recorded across buffers) failed: " + ex.Message);
+                }
+            }
+            else
+            {
+                foreach (var (_, old) in oldStores)
+                {
+                    try
                     {
-                        continue;
+                        old.Prune(DateTimeOffset.UtcNow - settings.Window);
                     }
-                    var old = new SegmentStore(dir);
-                    old.Prune(DateTimeOffset.UtcNow - settings.Window);
-                    if (!old.List().Any())
+                    catch (Exception ex)
+                    {
+                        Log("expire (old buffer) failed: " + ex.Message);
+                    }
+                }
+            }
+
+            var gone = new List<string>();
+            foreach (var (dir, old) in oldStores)
+            {
+                try
+                {
+                    var rem = old.List();
+                    if (rem.Count == 0)
                     {
                         gone.Add(dir);
+                    }
+                    else if (earliestKept is null || rem[0].StartUtc < earliestKept)
+                    {
+                        earliestKept = rem[0].StartUtc;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log("expire (old buffer) failed: " + ex.Message);
+                    Log("expire (old buffer list) failed: " + ex.Message);
                 }
             }
             if (gone.Count > 0)
@@ -1036,12 +1076,18 @@ internal sealed class RecorderApp : IDisposable
                 WriteBuffers();
             }
         }
-        var store = recorder?.Store ?? new SegmentStore(paths.Buffer);
-        if (recorder?.IsRunning != true)
+        else if (recorder?.IsRunning != true)
         {
             try
             {
-                store.Prune(DateTimeOffset.UtcNow - settings.Window);
+                if (skipUnrecorded)
+                {
+                    store.PruneRecorded(settings.Window);
+                }
+                else
+                {
+                    store.Prune(DateTimeOffset.UtcNow - settings.Window);
+                }
             }
             catch (Exception ex)
             {
@@ -1052,6 +1098,10 @@ internal sealed class RecorderApp : IDisposable
         try
         {
             var segments = store.List().OrderBy(s => s.StartUtc).ToList();
+            if (segments.Count > 0 && (earliestKept is null || segments[0].StartUtc < earliestKept))
+            {
+                earliestKept = segments[0].StartUtc;
+            }
             var sizes = segments.Select(s => s.Bytes).ToList();
             var total = sizes.Sum();
             var free = DiskFree();
@@ -1083,15 +1133,58 @@ internal sealed class RecorderApp : IDisposable
             }
 
             // the scrub index's files of segments no longer there
+            var stems = segments.Select(s => Path.GetFileNameWithoutExtension(s.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var thumbs = Path.Combine(paths.Root, "Thumbs");
             if (Directory.Exists(thumbs))
             {
-                var stems = segments.Select(s => Path.GetFileNameWithoutExtension(s.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 foreach (var file in Directory.EnumerateFiles(thumbs, "*.thumbs"))
                 {
                     if (!stems.Contains(Path.GetFileNameWithoutExtension(file)) && File.Exists(Path.Combine(paths.Buffer, Path.GetFileNameWithoutExtension(file) + ".mp4")) is false)
                     {
                         TryDelete(file);
+                    }
+                }
+            }
+
+            // Orphan sidecars (.input/.levels/.thumbs/.json, legacy .m4a) and broken .mp4 without .json left behind
+            // in the active buffer folder from earlier crashes/kills: only touch files older than 5 minutes so an
+            // in-flight segment finalization is never disturbed.
+            if (Directory.Exists(paths.Buffer))
+            {
+                var orphanCutoff = DateTime.UtcNow.AddMinutes(-5);
+                foreach (var file in Directory.EnumerateFiles(paths.Buffer))
+                {
+                    var ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (ext == ".recording")
+                    {
+                        continue;
+                    }
+                    var stem = Path.GetFileNameWithoutExtension(file);
+                    var isOrphan = false;
+                    if (SegmentStore.Sidecars.Contains(ext))
+                    {
+                        isOrphan = !stems.Contains(stem) && !File.Exists(Path.Combine(paths.Buffer, stem + ".mp4"));
+                    }
+                    else if (ext == ".m4a")
+                    {
+                        isOrphan = true;
+                    }
+                    else if (ext == ".mp4")
+                    {
+                        isOrphan = !stems.Contains(stem) && !File.Exists(Path.ChangeExtension(file, ".json"));
+                    }
+                    if (isOrphan)
+                    {
+                        try
+                        {
+                            if (File.GetLastWriteTimeUtc(file) < orphanCutoff)
+                            {
+                                TryDelete(file);
+                            }
+                        }
+                        catch (Exception)
+                        {
+                        }
                     }
                 }
             }
@@ -1101,9 +1194,47 @@ internal sealed class RecorderApp : IDisposable
             Log("prune failed: " + ex.Message);
         }
 
-        TrimLines(paths.Apps);
-        TrimLines(paths.Markers);
-        windows.Prune(settings.Window);
+        var wallCutoff = DateTimeOffset.UtcNow - settings.Window;
+        var metaCutoff = earliestKept is { } e && e < wallCutoff ? e : wallCutoff;
+        TrimLines(paths.Apps, metaCutoff);
+        TrimLines(paths.Markers, metaCutoff);
+        windows.Prune(metaCutoff);
+    }
+
+    private (DateTime Written, long Length, bool FoldGaps)? viewerFoldCache;
+
+    /// <summary>Whether viewer.json's "fold_gaps" ("Skip time not recorded") is on; defaults to true when absent so
+    /// unrecorded gaps never expire older recordings.</summary>
+    private bool ReadFoldGaps()
+    {
+        var path = Path.Combine(paths.Root, "viewer.json");
+        try
+        {
+            var info = new FileInfo(path);
+            var written = info.Exists ? info.LastWriteTimeUtc : DateTime.MinValue;
+            var length = info.Exists ? info.Length : -1;
+            if (viewerFoldCache is { } c && c.Written == written && c.Length == length)
+            {
+                return c.FoldGaps;
+            }
+
+            var value = true;
+            if (info.Exists)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+                if (doc.RootElement.TryGetProperty("fold_gaps", out var fg) &&
+                    fg.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                {
+                    value = fg.GetBoolean();
+                }
+            }
+            viewerFoldCache = (written, length, value);
+            return value;
+        }
+        catch (Exception)
+        {
+            return viewerFoldCache?.FoldGaps ?? true;
+        }
     }
 
     private static bool TryDelete(string path)
@@ -1121,9 +1252,9 @@ internal sealed class RecorderApp : IDisposable
 
     private readonly Dictionary<string, DateTimeOffset> lastTrim = [];
 
-    /// <summary>A side file's lines older than the window dropped (the newest older one kept: what was in force at
-    /// the buffer's start), when it has grown past 256 KB, at most every 10 minutes.</summary>
-    private void TrimLines(string path)
+    /// <summary>A side file's lines older than <paramref name="cutoffTime"/> dropped (the newest older one kept: what
+    /// was in force at the buffer's start), when it has grown past 256 KB, at most every 10 minutes.</summary>
+    private void TrimLines(string path, DateTimeOffset cutoffTime)
     {
         try
         {
@@ -1134,7 +1265,7 @@ internal sealed class RecorderApp : IDisposable
             }
 
             lastTrim[path] = DateTimeOffset.UtcNow;
-            var cutoff = DateTimeOffset.UtcNow.Add(-settings.Window).ToUnixTimeMilliseconds();
+            var cutoff = cutoffTime.ToUnixTimeMilliseconds();
             var kept = new List<string>();
             string? before = null;
             foreach (var line in File.ReadAllLines(path))
@@ -1205,6 +1336,7 @@ internal sealed class RecorderApp : IDisposable
             Microphone = settings.Microphone && !target.IsWindow,
             Activity = input.Activity,
             ForceHdr = Environment.GetEnvironmentVariable("REPLAY_FORCE_HDR") == "1",
+            SkipUnrecorded = ReadFoldGaps(),
         };
         var created = new ScreenRecorder(options, OnRecorderEvent);
         created.Faulted += (_, ex) =>
@@ -2102,20 +2234,24 @@ internal sealed record RecorderSettings(
 
     private static (string Path, DateTime Written, long Length, RecorderSettings Read)? cached;
 
-    /// <summary>As Read, the file read and parsed again only where its time or length changed since (asked every 2 s).</summary>
+    /// <summary>As Read, the file read and parsed again only where its time or length changed since (asked every 2 s).
+    /// Retries transient read/parse races when the file exists and never clobbers a valid cached setting with Default
+    /// (which would turn recording and autostart off).</summary>
     public static RecorderSettings ReadCached(string path)
     {
         DateTime written;
         long length;
+        bool exists;
         try
         {
             var info = new FileInfo(path);
-            written = info.Exists ? info.LastWriteTimeUtc : DateTime.MinValue;
-            length = info.Exists ? info.Length : -1;
+            exists = info.Exists;
+            written = exists ? info.LastWriteTimeUtc : DateTime.MinValue;
+            length = exists ? info.Length : -1;
         }
         catch (Exception)
         {
-            return Read(path);
+            return cached is { } prev && prev.Path == path ? prev.Read : Read(path);
         }
 
         if (cached is { } c && c.Path == path && c.Written == written && c.Length == length)
@@ -2123,13 +2259,37 @@ internal sealed record RecorderSettings(
             return c.Read;
         }
 
-        var read = Read(path);
-        cached = (path, written, length, read);
-        return read;
+        if (!exists)
+        {
+            cached = (path, written, length, Default);
+            return Default;
+        }
+
+        for (var i = 0; i < 4; i++)
+        {
+            if (TryRead(path, out var read))
+            {
+                try
+                {
+                    var info2 = new FileInfo(path);
+                    written = info2.Exists ? info2.LastWriteTimeUtc : written;
+                    length = info2.Exists ? info2.Length : length;
+                }
+                catch (Exception) { }
+                cached = (path, written, length, read);
+                return read;
+            }
+            Thread.Sleep(25);
+        }
+
+        return cached is { } last && last.Path == path ? last.Read : Default;
     }
 
-    public static RecorderSettings Read(string path)
+    public static RecorderSettings Read(string path) => TryRead(path, out var read) ? read : Default;
+
+    private static bool TryRead(string path, out RecorderSettings result)
     {
+        result = Default;
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
@@ -2144,7 +2304,7 @@ internal sealed record RecorderSettings(
                 => root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? fallback : fallback;
             var minutes = Math.Clamp(Number("windowMinutes", 120), 5, 24 * 60);
             var gb = Math.Max(0, Number("maxGB", 20));
-            return new RecorderSettings(
+            result = new RecorderSettings(
                 Flag("enabled", Default.Enabled),
                 TimeSpan.FromMinutes(minutes),
                 (long)gb << 30,
@@ -2161,10 +2321,11 @@ internal sealed record RecorderSettings(
                 root.TryGetProperty("consent", out var consent) && consent.ValueKind == System.Text.Json.JsonValueKind.Object &&
                     consent.TryGetProperty("version", out var version) && version.TryGetInt32(out var v) && v >= ConsentVersion,
                 Flag("autoUpdate", true));
+            return true;
         }
         catch (Exception)
         {
-            return Default;
+            return false;
         }
     }
 }

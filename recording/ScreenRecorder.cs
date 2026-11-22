@@ -26,6 +26,10 @@ public sealed record RecorderOptions(string Folder, TimeSpan Keep, int FrameRate
 
     /// <summary>Tests only: frames taken as FP16 and made SDR as on an HDR desktop, whatever the display is.</summary>
     public bool ForceHdr { get; init; }
+
+    /// <summary>Whether unrecorded gaps (app closed, sleep, paused) do not count toward <see cref="Keep"/>:
+    /// true keeps cumulative recorded duration up to <see cref="Keep"/>, false prunes by wall-clock time.</summary>
+    public bool SkipUnrecorded { get; init; } = true;
 }
 
 /// <summary>Something the recorder reports: its level ("info", "warning", "error"), a code and words.</summary>
@@ -50,6 +54,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
     private const int MF_E_SAMPLEALLOCATOR_EMPTY = unchecked((int)0xC00D4A3E);
 
     private RecorderOptions options;
+    private volatile bool skipUnrecorded;
     private readonly Action<RecorderEvent> report;
     private readonly object segmentsGate = new();
     private readonly List<Open> segments = new();
@@ -94,9 +99,12 @@ public sealed class ScreenRecorder : IAsyncDisposable
     public ScreenRecorder(RecorderOptions options, Action<RecorderEvent>? report = null)
     {
         this.options = options;
+        skipUnrecorded = options.SkipUnrecorded;
         this.report = report ?? (_ => { });
         Store = new SegmentStore(options.Folder);
     }
+
+    public void SetSkipUnrecorded(bool value) => skipUnrecorded = value;
 
     public SegmentStore Store { get; }
 
@@ -908,7 +916,14 @@ public sealed class ScreenRecorder : IAsyncDisposable
                 SegmentClosed?.Invoke(this, segment);
             }
 
-            Store.Prune(DateTimeOffset.UtcNow - options.Keep);
+            if (skipUnrecorded)
+            {
+                Store.PruneRecorded(options.Keep);
+            }
+            else
+            {
+                Store.Prune(DateTimeOffset.UtcNow - options.Keep);
+            }
         }
         catch (Exception ex)
         {
