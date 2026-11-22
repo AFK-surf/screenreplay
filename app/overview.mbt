@@ -234,8 +234,12 @@ fn overview(parent : @view.View) -> Unit {
             p
             .width(Is(Some(2.0)))
             .height(Is(Some(overview_h)))
+            .radius(Is(1.0))
             .ground(By(ui_text))
-            .drawn_off(By(fn() { (clamp(ax_d(pos_drawn(p), view_len()) * k(), 0.0, w()) - 1.0, 0.0) }), exact=true)
+            .drawn_off(
+              By(fn() { (clamp(ax_d(pos_drawn(p), view_len()) * k(), 1.0, @cmp.maximum(1.0, w() - 1.0)) - 1.0, 0.0) }),
+              exact=true,
+            )
             |> ignore
           })
           |> ignore

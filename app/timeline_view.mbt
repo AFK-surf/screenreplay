@@ -464,12 +464,12 @@ fn fine_words_w() -> Double {
 }
 
 ///|
-/// The playhead (letters 24 and 25) over the band `w` wide: one shape in the accent, no edge: a capsule with the time
-/// (11, 600, in the accent's opposite) whose foot is 4 over the track, a neck drawn in from 10 to 2 wide, and a 2 wide
-/// line down to the track's foot. Near an end of the view the capsule stops and the line slides along its foot to its
-/// side: there it hangs as a flag, the corner on that side squared off as the line nears it, the neck's half on that
-/// side gone. All of it drawn off by parts of a pixel as one (View::drawn_off's exact), smooth, its time softened as
-/// it goes; still, all on whole pixels together.
+/// The playhead (letters 24 and 25) over the band `w` wide: one continuous shape in the accent, no edge: a capsule with
+/// the time (11, 600, in the accent's opposite) whose foot is 4 over the track, a tangent concave neck drawn in to a 2
+/// wide line down to the track's foot. Near an end of the view the capsule stops and the line slides along its foot to
+/// its side: that side's bottom corner and neck half merge smoothly into a continuous taper until the line sits flush
+/// with the capsule's edge as a flag. All of it is one vector path drawn off by parts of a pixel (View::drawn_off's
+/// exact), smooth, with zero seam between capsule, neck and line.
 fn playhead(band : @view.View, w : () -> Double) -> Unit {
   // (the milliseconds coming in and going: the capsule widening and they wiping in, faded, 160 ms eased out; the user,
   // 2026-11-15 「有渐变动画吗」)
@@ -483,56 +483,13 @@ fn playhead(band : @view.View, w : () -> Double) -> Unit {
     if p < from || p > from + len {
       None
     } else {
-      // (its 2 wide line kept inside the band at its ends: under the capsule's squared corner there, never past it)
+      // (its 2 wide line kept inside the band at its ends: flush with the capsule's side there, never past it)
       Some(clamp((p - from) / len * w(), 1.0, @cmp.maximum(1.0, w() - 1.0)))
     }
   }
   let cap_x = fn(v : @view.View, x : Double) { clamp(x - cw(v) / 2.0, 0.0, @cmp.maximum(0.0, w() - cw(v))) }
-  // (a part of it, laid at the band's top left, drawn off to where it is: `exact` by parts of a pixel, else to the
-  // nearest whole one)
-  let part = fn(
-    parent : @view.View,
-    exact : Bool,
-    width : (@view.View) -> Double,
-    height : Double,
-    at : (@view.View, Double) -> (Double, Double),
-    make : (@view.View) -> Unit,
-  ) {
-    parent.box(fn(o) {
-      o.over(Is(true)).lines_up(Is(Some(Start))) |> ignore
-      o.box(fn(b) {
-        b
-        .width(By(fn() { Some(width(b)) }))
-        .height(Is(Some(height)))
-        .laid_nowhere(By(fn() { x_drawn(b) is None }))
-        .drawn_off(By(fn() { at(b, x_drawn(b).unwrap_or(0.0)) }), exact~)
-        |> ignore
-        make(b)
-      })
-      |> ignore
-    })
-    |> ignore
-  }
-  // the capsule's ground: its corner on a side squared off as the line nears it
-  let ground = fn(b : @view.View) {
-    // (its corners worked out as it goes, its picture made again only as they change: near the ends)
-    let corners = @signals.computed(fn(_) {
-      let x = x_drawn(b).unwrap_or(0.0)
-      let cx = cap_x(b, x)
-      // (squared off whole where the neck's half on that side has no room, under 4: a small round there left a notch
-      // between the line and the curve, the user, 2026-11-17 「这里也有瑕疵」, the playhead a few pixels in from the end)
-      let side = fn(d : Double) { if d < 4.0 { 0.0 } else { clamp(d, 0.0, 6.0) } }
-      (side(x - 1.0 - cx), side(cx + cw(b) - (x + 1.0)))
-    }, same=fn(a, b) { a == b })
-    b
-    .picture(By(fn() {
-      let (bl, br) = corners.get()
-      let c = cw(b)
-      Some(vector(squircle(c, 19.0, 6.0, 6.0, br, bl), c, 19.0))
-    }))
-    .tint(By(ui_accent))
-    |> ignore
-  }
+  let cap_h = 19.0
+  let total_h = 23.0 + strip_h
   // its time, in the middle of the capsule (digits have no descent: centred by their line they sit low, so lifted)
   let time = fn(b : @view.View) {
     b.lines_up(Is(Some(Middle))).lies_along(Is(Middle)) |> ignore
@@ -553,62 +510,126 @@ fn playhead(band : @view.View, w : () -> Double) -> Unit {
     })
     |> ignore
   }
-  let cap_at = fn(v : @view.View, x : Double) { (cap_x(v, x), -23.0) }
   band.box(fn(layer) {
     layer.over(Is(true)).presses(Is(false)) |> ignore
     layer.show(fn() { has_segs() }, fn(ph) {
       ph.over(Is(true)) |> ignore
       ph.reacts(fn() { fine_time.get() }, fn(on) { fine.go_ms(ph, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 160.0 }) })
-      // the capsule and its time, off by parts of a pixel with the line, all of it one (B, the capsule on whole pixels,
-      // was tried and taken back by the user, 2026-11-13: 「不如之前」)
-      part(ph, true, cw, 19.0, cap_at, fn(b) {
-        ground(b)
-        time(b)
-      })
-      // its neck and line, by parts of a pixel always: 10 wide (the neck's halves), from 6 over the track (the neck's
-      // top 1.5 into the capsule's foot, so no gap shows between the two as they are drawn apart) to the track's foot
-      let lh = strip_h + 6.0
-      part(ph, true, fn(_) { 10.0 }, lh, fn(_, x) { (x - 5.0, -6.0) }, fn(b) {
-        // (which of the neck's halves there is room for, each on its side: the picture made again only as that changes)
-        let halves = @signals.computed(fn(_) {
-          let x = x_drawn(b).unwrap_or(0.0)
-          let cx = cap_x(b, x)
-          (x - 1.0 - cx >= 4.0, cx + cw(b) - (x + 1.0) >= 4.0)
-        }, same=fn(a, b) { a == b })
-        b
-        .picture(By(fn() {
-          let (left, right) = halves.get()
-          let paths : Array[(String, Double)] = [("M4 0H6V\{lh}H4Z", 0.0)]
-          // (under the capsule's foot 1.5)
-          if left {
-            paths.push(("M0 0H5V6.5H4C4 3.5 3 1.5 0 1.5Z", 0.0))
-          }
-          if right {
-            paths.push(("M5 0H10V1.5C7 1.5 6 3.5 6 6.5H5Z", 0.0))
-          }
-          Some(vectors(10.0, lh, paths))
-        }))
-        .tint(By(ui_accent))
+      // the capsule, its neck, its line and its time as one node, off by parts of a pixel (B, the capsule on whole
+      // pixels, was tried and taken back by the user, 2026-11-13: 「不如之前」)
+      ph.box(fn(o) {
+        o.over(Is(true)).lines_up(Is(Some(Start))) |> ignore
+        o.box(fn(b) {
+          // (in the middle of the band `sl = c / 2 - 1` stays constant as the playhead moves, so the picture is rebuilt
+          // only while the stem slides near an edge or the capsule widens for milliseconds)
+          let shape = @signals.computed(fn(_) {
+            let c = cw(b)
+            let x = x_drawn(b).unwrap_or(0.0)
+            let cx = cap_x(b, x)
+            let sl = clamp(x - 1.0 - cx, 0.0, @cmp.maximum(0.0, c - 2.0))
+            ((c * 20.0).round() / 20.0, (sl * 20.0).round() / 20.0)
+          }, same=fn(a, b) { a == b })
+          b
+          .width(By(fn() { Some(cw(b)) }))
+          .height(Is(Some(total_h)))
+          .laid_nowhere(By(fn() { x_drawn(b) is None }))
+          .drawn_off(By(fn() { (cap_x(b, x_drawn(b).unwrap_or(0.0)), -23.0) }), exact=true)
+          .picture(By(fn() {
+            let (c, sl) = shape.get()
+            Some(vector(playhead_path(c, cap_h, total_h, sl), c, total_h))
+          }))
+          .tint(By(ui_accent))
+          |> ignore
+          b.box(fn(cap) {
+            cap.width(By(fn() { Some(cw(cap)) })).height(Is(Some(cap_h))) |> ignore
+            time(cap)
+          })
+          |> ignore
+        })
         |> ignore
       })
+      |> ignore
     }, at_once=true)
   })
   |> ignore
 }
 
 ///|
-/// A rectangle `w` × `h` with smooth (continuous, "squircle") corners of radius `tl`, `tr`, `br`, `bl` as an SVG path:
-/// each corner a cubic over 1.5 times its radius (no further than half a side), its handles 0.36 of that from the corner,
-/// so the curve eases out of the straight edge instead of meeting it at a circle's sudden bend.
-fn squircle(w : Double, h : Double, tl : Double, tr : Double, br : Double, bl : Double) -> String {
-  let lim = @cmp.minimum(w, h) / 2.0
-  let k = fn(r : Double) { @cmp.minimum(r * 1.5, lim) }
-  let a = k(tl)
-  let b = k(tr)
-  let c = k(br)
-  let d = k(bl)
+/// The playhead as one closed SVG path `w` × `total_h`: a `cap_h`-tall squircle capsule seamlessly joined into a 2-wide
+/// stem whose left edge is at `sl`. On each side of the stem, where room >= 13 pt (`c_max + f_max`), a full squircle
+/// corner meets a tangent concave neck; where room is tighter near a timeline edge, the corner and neck merge into two
+/// G1-continuous cubics whose shared inflection tangent eases from horizontal to vertical, tapering smoothly down to a
+/// flush flag at room = 0 with no square overhang or notch.
+fn playhead_path(w : Double, cap_h : Double, total_h : Double, sl : Double) -> String {
+  let f = fn(v : Double) { (v * 100.0).round() / 100.0 }
   let q = 0.36
-  "M\{a} 0H\{w - b}C\{w - b * q} 0 \{w} \{b * q} \{w} \{b}V\{h - c}C\{w} \{h - c * q} \{w - c * q} \{h} \{w - c} \{h}H\{d}C\{d * q} \{h} 0 \{h - d * q} 0 \{h - d}V\{a}C0 \{a * q} \{a * q} 0 \{a} 0Z"
+  let lim = @cmp.minimum(w, cap_h) / 2.0
+  let top_r = @cmp.minimum(9.0, lim)
+  let c_max = @cmp.minimum(9.0, cap_h / 2.0)
+  let f_max = 4.0
+  let fy_max = 4.0
+  let span_full = c_max + f_max
+  let sr = sl + 2.0
+  let dl = sl
+  let dr = w - sr
+  let b = StringBuilder()
+  // top edge + top-right squircle
+  b.write_string("M\{f(top_r)} 0H\{f(w - top_r)}C\{f(w - top_r * q)} 0 \{f(w)} \{f(top_r * q)} \{f(w)} \{f(top_r)}")
+  // right side: capsule right wall -> stem right wall
+  if dr <= 0.01 {
+    b.write_string("V\{f(cap_h)}L\{f(sr)} \{f(cap_h)}V\{f(total_h)}")
+  } else if dr >= span_full {
+    b.write_string(
+      "V\{f(cap_h - c_max)}C\{f(w)} \{f(cap_h - c_max * q)} \{f(w - c_max * q)} \{f(cap_h)} \{f(w - c_max)} \{f(cap_h)}H\{f(sr + f_max)}C\{f(sr + f_max * 0.32)} \{f(cap_h)} \{f(sr)} \{f(cap_h + fy_max * 0.36)} \{f(sr)} \{f(cap_h + fy_max)}V\{f(total_h)}",
+    )
+  } else {
+    let t = dr / span_full
+    let u_m = f_max * t
+    let s_small = @cmp.minimum(1.0, t / 0.45)
+    let alpha = 1.5707963267948966 * (1.0 - (1.0 - s_small) * (1.0 - s_small))
+    let tu = -@math.sin(alpha)
+    let ty = @math.cos(alpha)
+    let cy = c_max * (t * 0.65 + @math.pow(t, 0.72) * 0.35)
+    let fy = fy_max * (t * 0.55 + @math.pow(t, 0.6) * 0.45)
+    let l0 = cy * (1.0 - q)
+    let du = dr - u_m
+    let l1 = (du * du + cy * cy).sqrt() * 0.452548
+    let l2 = (u_m * u_m + fy * fy).sqrt() * 0.480833
+    let l3 = fy * (1.0 - 0.36)
+    b.write_string(
+      "V\{f(cap_h - cy)}C\{f(w)} \{f(cap_h - cy + l0)} \{f(sr + u_m - l1 * tu)} \{f(cap_h - l1 * ty)} \{f(sr + u_m)} \{f(cap_h)}C\{f(sr + u_m + l2 * tu)} \{f(cap_h + l2 * ty)} \{f(sr)} \{f(cap_h + fy - l3)} \{f(sr)} \{f(cap_h + fy)}V\{f(total_h)}",
+    )
+  }
+  // stem foot
+  b.write_string("H\{f(sl)}")
+  // left side: stem left wall -> capsule left wall (mirror of right side, reversed)
+  if dl <= 0.01 {
+    b.write_string("V\{f(cap_h)}L0 \{f(cap_h)}V\{f(top_r)}")
+  } else if dl >= span_full {
+    b.write_string(
+      "V\{f(cap_h + fy_max)}C\{f(sl)} \{f(cap_h + fy_max * 0.36)} \{f(sl - f_max * 0.32)} \{f(cap_h)} \{f(sl - f_max)} \{f(cap_h)}H\{f(c_max)}C\{f(c_max * q)} \{f(cap_h)} 0 \{f(cap_h - c_max * q)} 0 \{f(cap_h - c_max)}V\{f(top_r)}",
+    )
+  } else {
+    let t = dl / span_full
+    let u_m = f_max * t
+    let s_small = @cmp.minimum(1.0, t / 0.45)
+    let alpha = 1.5707963267948966 * (1.0 - (1.0 - s_small) * (1.0 - s_small))
+    let tu = -@math.sin(alpha)
+    let ty = @math.cos(alpha)
+    let cy = c_max * (t * 0.65 + @math.pow(t, 0.72) * 0.35)
+    let fy = fy_max * (t * 0.55 + @math.pow(t, 0.6) * 0.45)
+    let l0 = cy * (1.0 - q)
+    let du = dl - u_m
+    let l1 = (du * du + cy * cy).sqrt() * 0.452548
+    let l2 = (u_m * u_m + fy * fy).sqrt() * 0.480833
+    let l3 = fy * (1.0 - 0.36)
+    b.write_string(
+      "V\{f(cap_h + fy)}C\{f(sl)} \{f(cap_h + fy - l3)} \{f(sl - (u_m + l2 * tu))} \{f(cap_h + l2 * ty)} \{f(sl - u_m)} \{f(cap_h)}C\{f(sl - (u_m - l1 * tu))} \{f(cap_h - l1 * ty)} 0 \{f(cap_h - cy + l0)} 0 \{f(cap_h - cy)}V\{f(top_r)}",
+    )
+  }
+  // top-left squircle
+  b.write_string("C0 \{f(top_r * q)} \{f(top_r * q)} 0 \{f(top_r)} 0Z")
+  b.to_string()
 }
 
 ///|
