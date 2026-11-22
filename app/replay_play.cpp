@@ -423,7 +423,7 @@ extern "C" void rp_aac_close(int32_t h) {
 
 struct RpTs {
   double rate;
-  std::vector<float> l, r, m;  // what is in and not let go of yet
+  std::vector<float> l, r;  // what is in and not let go of yet
   double pos;                  // where the next frame is due in it
   long nat;                    // where the frame before goes on, -1 none yet
   std::vector<float> acc_l, acc_r, win;
@@ -462,13 +462,15 @@ extern "C" void rp_ts_close(int32_t h) {
   rp_tss[h - 1] = nullptr;
 }
 
-// How well what is at `a` goes on from what is at `b` (every 4th sample, normalized by its own energy).
+// How well what is at `a` goes on from what is at `b` (every 2nd sample, each channel on its own so a wide or
+// out-of-phase stereo is not cancelled out, normalized by its own energy).
 static float rp_ts_fit(const RpTs *t, long a, long b) {
-  const float *x = t->m.data() + a, *y = t->m.data() + b;
+  const float *xl = t->l.data() + a, *yl = t->l.data() + b;
+  const float *xr = t->r.data() + a, *yr = t->r.data() + b;
   float xy = 0, xx = 1e-3f;
-  for (int j = 0; j < RP_TS_W; j += 4) {
-    xy += x[j] * y[j];
-    xx += x[j] * x[j];
+  for (int j = 0; j < RP_TS_W; j += 2) {
+    xy += xl[j] * yl[j] + xr[j] * yr[j];
+    xx += xl[j] * xl[j] + xr[j] * xr[j];
   }
   return xy / sqrtf(xx);
 }
@@ -479,29 +481,29 @@ extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t f
   std::vector<int16_t> out;
   if (t) {
     int32_t n = (int32_t)Moonbit_array_length(data);
-    const int16_t *p = (const int16_t *)(data + (from < 0 ? 0 : from));
+    if (from < 0) from = 0;
+    const int16_t *p = (const int16_t *)(data + from);
     long frames = from < n ? (n - from) / 4 : 0;
     for (long i = 0; i < frames; i++) {
       float l = p[2 * i] / 32768.f, r = p[2 * i + 1] / 32768.f;
       t->l.push_back(l);
       t->r.push_back(r);
-      t->m.push_back(l + r);
     }
     if (flush) {
       for (int i = 0; i < RP_TS_W + RP_TS_HS + 2 * RP_TS_DL; i++) {
         t->l.push_back(0);
         t->r.push_back(0);
-        t->m.push_back(0);
       }
     }
     for (;;) {
       long at = (long)t->pos;
-      long len = (long)t->m.size();
+      long len = (long)t->l.size();
       if (at + RP_TS_DL + RP_TS_HS + RP_TS_W > len) break;
       long seg = at;
       if (t->nat >= 0) {
         long lo = at - RP_TS_DL < 0 ? 0 : at - RP_TS_DL, hi = at + RP_TS_DL;
-        float best = -1e30f;
+        // (where it is due unless another fits better: silence, all alike, stays where it is due)
+        float best = rp_ts_fit(t, at, t->nat);
         for (long k = lo; k <= hi; k += 4) {
           float f = rp_ts_fit(t, k, t->nat);
           if (f > best) best = f, seg = k;
@@ -533,7 +535,6 @@ extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t f
       if (drop > 8192) {
         t->l.erase(t->l.begin(), t->l.begin() + drop);
         t->r.erase(t->r.begin(), t->r.begin() + drop);
-        t->m.erase(t->m.begin(), t->m.begin() + drop);
         t->pos -= drop;
         t->nat -= drop;
       }
@@ -544,10 +545,11 @@ extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t f
   return res;
 }
 
-// The frames in and not heard yet (what was put in ahead of where its sound has come to).
+// The frames in and not heard yet: what was put in ahead of where its sound has come to, less the half frame each
+// frame's middle lies on (frame k's middle, what is heard most of it, is at k*HS + HS out and at k*HS*rate + HS in:
+// out o is in o*rate + HS*(1 - rate)). Negative at its start, below 1x.
 extern "C" double rp_ts_lag(int32_t h) {
   RpTs *t = rp_ts_of(h);
   if (!t) return 0;
-  double lag = (double)t->m.size() - t->pos;
-  return lag < 0 ? 0 : lag;
+  return (double)t->l.size() - t->pos - RP_TS_HS * (1.0 - t->rate);
 }

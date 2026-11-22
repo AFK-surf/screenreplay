@@ -961,6 +961,10 @@ fn Deck::set_playing(self : Deck, on : Bool) -> Unit {
 fn Deck::set_rate(self : Deck, r : Double) -> Unit {
   let p = self.pos()
   let was = self.play.untracked()
+  // (the speed it is at picked again: nothing changes, its sound not cut and begun again)
+  if r == was.rate || (self.sound.on && self.sound.rate == r) {
+    return
+  }
   self.play.set({ ..was, pos: p, at: now(), rate: r })
   if was.going && sounds_at(r) {
     self.sound_start(p)
@@ -1062,13 +1066,15 @@ fn Deck::sound_start(self : Deck, at : Double) -> Unit {
   s.seen = 0.0
   s.seen_at = now()
   s.heard_any = false
-  s.anchors.clear()
-  s.anchors.push((0.0, (self.start)(i) + sample_ms(t, from) + skip_ms))
   s.ends = -1.0
   s.rate = rate
   if rate != 1.0 {
     s.ts = rp_ts_open(rate)
   }
+  // (stretched, where the first of it is heard: half a frame of the stretch's on, rp_ts_lag)
+  let first = if s.ts != 0 { rp_ts_lag(s.ts) / rate } else { 0.0 }
+  s.anchors.clear()
+  s.anchors.push((first, (self.start)(i) + sample_ms(t, from) + skip_ms))
   s.on = true
   ntrace("sound from \{at} seg=\{i} k=\{from} skip=\{s.skip}")
   self.sound_tick()
@@ -1251,7 +1257,9 @@ fn Deck::sound_tick(self : Deck) -> Unit {
   // is wanted cut a headset's sound off for good where its delay was more, nothing sent once the first was queued)
   let max_ahead = 48.0 * (want_ms + 1000.0)
   let mut n = 0
-  while s.ends < 0.0 && st.audio_queued() < want_ms && s.sent - (st.audio_played() - s.zero) < max_ahead && n < 24 {
+  // (24 AAC frames are 512 ms at 1x, a quarter of that at 4x: as many more at a higher speed)
+  let limit = (24.0 * @cmp.maximum(1.0, s.rate)).ceil().to_int()
+  while s.ends < 0.0 && st.audio_queued() < want_ms && s.sent - (st.audio_played() - s.zero) < max_ahead && n < limit {
     if !self.sound_more() {
       self.sound_put(b"", pad=true)
       s.ends = s.sent
@@ -1264,16 +1272,18 @@ fn Deck::sound_tick(self : Deck) -> Unit {
       if p.going {
         let ours = self.pos()
         let off = heard - ours
+        // (how far off on the wall's clock: what is heard and what is seen, at the speed it plays)
+        let wall = off / s.rate
         if now() - s.told_at >= 1000.0 {
           s.told_at = now()
           ntrace("sound off=\{off} rate=\{p.rate} queued=\{st.audio_queued()} inflight=\{self.in_flight.length()}")
         }
-        if off.abs() > 150.0 {
+        if wall.abs() > 150.0 {
           ntrace("sound: clock put at \{heard} (was \{ours})")
           self.play.set({ pos: heard, at: now(), rate: s.rate, going: true })
           self.pump()
         } else {
-          let r = s.rate * (if off.abs() < 12.0 { 1.0 } else { 1.0 + clamp(off / 500.0, -0.08, 0.08) })
+          let r = s.rate * (if wall.abs() < 12.0 { 1.0 } else { 1.0 + clamp(wall / 500.0, -0.08, 0.08) })
           if r != p.rate {
             self.play.set({ pos: ours, at: now(), rate: r, going: true })
           }
