@@ -544,8 +544,9 @@ fn speed_key(
       "\{s}×"
     }
   }
-  // (a menu of the speeds over it, up to 10× (the user, 2026-11-13: 「最快应该能到x10」「需要dropdown」), the one now
-  // ticked)
+  // (a menu of the speeds over it, up to 20× (the user, 2026-11-13: 「最快应该能到x10」「需要dropdown」; 2026-11-23:
+  // 「需要再加上20x，但可能得提示一下这种状态没有声音」), the one now ticked; those past 4× (no sound: sounds_at) say so in
+  // the menu, and chosen the key shows a struck speaker and its tip why)
   let key : Ref[@view.View?] = Ref(None)
   let k = pressable(parent, label, fn() {
     guard key.val is Some(b) else { return }
@@ -554,6 +555,7 @@ fn speed_key(
       b,
       speeds.map(fn(s) {
         let name = if s == s.floor() { "\{s.to_int()}×" } else { "\{s}×" }
+        let name = if sounds_at(s) { name } else { name + " · " + t("无声") }
         Some({ label: name, key: if s == chosen { "✓" } else { "" }, act: fn() { set(s) } })
       }),
       above=true,
@@ -581,6 +583,17 @@ fn speed_key(
       }
     }, weight=500)
     |> ignore
+    b.box(fn(m) {
+      m.laid_nowhere(By(fn() { sounds_at(now()) })).padding(Is((2.0, 0.0, 0.0, 0.0))) |> ignore
+      @sf.icon_node(m, "volume-x", 12.0, By(fn() {
+        if stage {
+          mix(stage_subtle, stage_muted, hand.shown(b))
+        } else {
+          mix(ui_subtle(), ui_muted(), hand.shown(b))
+        }
+      })) |> ignore
+    })
+    |> ignore
     b.box(fn(c) {
       c.width(Is(Some(10.0))).height(Is(Some(10.0))).picture(Is(Some(vector("M2.5 3.75 5 6.25 7.5 3.75", 10.0, 10.0, stroke=1.25)))).tint(By(fn() {
         if stage {
@@ -592,6 +605,7 @@ fn speed_key(
     })
     |> ignore
   })
+  tip(k, fn() { if sounds_at(now()) { t("播放速度") } else { t("播放速度 · 超过 4× 没有声音") } })
   key.val = Some(k)
 }
 
