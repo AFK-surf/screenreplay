@@ -131,7 +131,20 @@ let want_play : @signals.Signal[Bool] = @signals.signal(false)
 
 ///|
 /// How fast it plays.
-let speed : @signals.Signal[Double] = @signals.signal(1.0, same=fn(a, b) { a == b })
+let speed : @signals.Signal[Double] = @signals.signal(test_speed(), same=fn(a, b) { a == b })
+
+///|
+/// A test window's speed to start at (REPLAY_TEST_SPEED: one of the menu's), 1 otherwise.
+fn test_speed() -> Double {
+  match @ui.env("REPLAY_TEST_SPEED") {
+    "0.5" => 0.5
+    "1.5" => 1.5
+    "2" => 2.0
+    "4" => 4.0
+    "8" => 8.0
+    _ => 1.0
+  }
+}
 
 // ---- the timeline's view ----
 

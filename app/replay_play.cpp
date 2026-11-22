@@ -17,6 +17,7 @@
 #include <mferror.h>
 #include <wmcodecdsp.h>
 #include <stdint.h>
+#include <math.h>
 #include <string.h>
 #include <vector>
 #include <string>
@@ -412,4 +413,141 @@ extern "C" void rp_aac_close(int32_t h) {
   a->mft->Release();
   delete a;
   rp_aacs[h - 1] = nullptr;
+}
+
+// ---- the sound at another speed ----
+//
+// WSOLA (waveform-similarity overlap-add): 32 ms Hann frames laid down every 16 ms of what is heard, each taken from
+// where the speed puts it in what was decoded, moved by up to 10 ms to where it best goes on from the one before (its
+// pitch kept, as a browser's playbackRate keeps it). 48 kHz stereo PCM16 in and out.
+
+struct RpTs {
+  double rate;
+  std::vector<float> l, r, m;  // what is in and not let go of yet
+  double pos;                  // where the next frame is due in it
+  long nat;                    // where the frame before goes on, -1 none yet
+  std::vector<float> acc_l, acc_r, win;
+};
+
+static const int RP_TS_W = 1536, RP_TS_HS = 768, RP_TS_DL = 480;
+static std::vector<RpTs *> rp_tss;
+
+static RpTs *rp_ts_of(int32_t h) {
+  return h >= 1 && h <= (int32_t)rp_tss.size() ? rp_tss[h - 1] : nullptr;
+}
+
+extern "C" int32_t rp_ts_open(double rate) {
+  RpTs *t = new RpTs();
+  t->rate = rate < 0.25 ? 0.25 : (rate > 8.0 ? 8.0 : rate);
+  t->pos = 0;
+  t->nat = -1;
+  t->acc_l.assign(RP_TS_W, 0.f);
+  t->acc_r.assign(RP_TS_W, 0.f);
+  t->win.resize(RP_TS_W);
+  for (int i = 0; i < RP_TS_W; i++) t->win[i] = (float)(0.5 - 0.5 * cos(6.283185307179586 * i / RP_TS_W));
+  for (size_t i = 0; i < rp_tss.size(); i++) {
+    if (!rp_tss[i]) {
+      rp_tss[i] = t;
+      return (int32_t)i + 1;
+    }
+  }
+  rp_tss.push_back(t);
+  return (int32_t)rp_tss.size();
+}
+
+extern "C" void rp_ts_close(int32_t h) {
+  RpTs *t = rp_ts_of(h);
+  if (!t) return;
+  delete t;
+  rp_tss[h - 1] = nullptr;
+}
+
+// How well what is at `a` goes on from what is at `b` (every 4th sample, normalized by its own energy).
+static float rp_ts_fit(const RpTs *t, long a, long b) {
+  const float *x = t->m.data() + a, *y = t->m.data() + b;
+  float xy = 0, xx = 1e-3f;
+  for (int j = 0; j < RP_TS_W; j += 4) {
+    xy += x[j] * y[j];
+    xx += x[j] * x[j];
+  }
+  return xy / sqrtf(xx);
+}
+
+// The frames `data` from `from` on (bytes; `flush`: and the rest of what is in, played out) make: what is heard next.
+extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t from, int32_t flush) {
+  RpTs *t = rp_ts_of(h);
+  std::vector<int16_t> out;
+  if (t) {
+    int32_t n = (int32_t)Moonbit_array_length(data);
+    const int16_t *p = (const int16_t *)(data + (from < 0 ? 0 : from));
+    long frames = from < n ? (n - from) / 4 : 0;
+    for (long i = 0; i < frames; i++) {
+      float l = p[2 * i] / 32768.f, r = p[2 * i + 1] / 32768.f;
+      t->l.push_back(l);
+      t->r.push_back(r);
+      t->m.push_back(l + r);
+    }
+    if (flush) {
+      for (int i = 0; i < RP_TS_W + RP_TS_HS + 2 * RP_TS_DL; i++) {
+        t->l.push_back(0);
+        t->r.push_back(0);
+        t->m.push_back(0);
+      }
+    }
+    for (;;) {
+      long at = (long)t->pos;
+      long len = (long)t->m.size();
+      if (at + RP_TS_DL + RP_TS_HS + RP_TS_W > len) break;
+      long seg = at;
+      if (t->nat >= 0) {
+        long lo = at - RP_TS_DL < 0 ? 0 : at - RP_TS_DL, hi = at + RP_TS_DL;
+        float best = -1e30f;
+        for (long k = lo; k <= hi; k += 4) {
+          float f = rp_ts_fit(t, k, t->nat);
+          if (f > best) best = f, seg = k;
+        }
+        long c = seg;
+        for (long k = c - 3; k <= c + 3; k++) {
+          if (k < lo || k > hi || k == c) continue;
+          float f = rp_ts_fit(t, k, t->nat);
+          if (f > best) best = f, seg = k;
+        }
+      }
+      for (int j = 0; j < RP_TS_W; j++) {
+        t->acc_l[j] += t->win[j] * t->l[seg + j];
+        t->acc_r[j] += t->win[j] * t->r[seg + j];
+      }
+      for (int j = 0; j < RP_TS_HS; j++) {
+        float l = t->acc_l[j] * 32767.f, r = t->acc_r[j] * 32767.f;
+        out.push_back((int16_t)(l > 32767.f ? 32767 : (l < -32768.f ? -32768 : l)));
+        out.push_back((int16_t)(r > 32767.f ? 32767 : (r < -32768.f ? -32768 : r)));
+      }
+      memmove(t->acc_l.data(), t->acc_l.data() + RP_TS_HS, (RP_TS_W - RP_TS_HS) * sizeof(float));
+      memmove(t->acc_r.data(), t->acc_r.data() + RP_TS_HS, (RP_TS_W - RP_TS_HS) * sizeof(float));
+      for (int j = RP_TS_W - RP_TS_HS; j < RP_TS_W; j++) t->acc_l[j] = t->acc_r[j] = 0.f;
+      t->nat = seg + RP_TS_HS;
+      t->pos += RP_TS_HS * t->rate;
+      // (what no frame can come from any more let go of)
+      long drop = (long)t->pos - RP_TS_DL;
+      if (t->nat < drop) drop = t->nat;
+      if (drop > 8192) {
+        t->l.erase(t->l.begin(), t->l.begin() + drop);
+        t->r.erase(t->r.begin(), t->r.begin() + drop);
+        t->m.erase(t->m.begin(), t->m.begin() + drop);
+        t->pos -= drop;
+        t->nat -= drop;
+      }
+    }
+  }
+  moonbit_bytes_t res = moonbit_make_bytes((int32_t)(out.size() * 2), 0);
+  if (!out.empty()) memcpy(res, out.data(), out.size() * 2);
+  return res;
+}
+
+// The frames in and not heard yet (what was put in ahead of where its sound has come to).
+extern "C" double rp_ts_lag(int32_t h) {
+  RpTs *t = rp_ts_of(h);
+  if (!t) return 0;
+  double lag = (double)t->m.size() - t->pos;
+  return lag < 0 ? 0 : lag;
 }

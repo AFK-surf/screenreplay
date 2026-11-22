@@ -14,8 +14,9 @@
 // stereo in 20 ms packets), kept 160 ms ahead of what it has played. While it plays, its clock is the deck's: how far
 // it has played (`Stream::audio_played`) puts the clock where it says, the clock's rate bent a few percent to come to
 // it, put there at once when more than 150 ms off (so the picture, paced by the clock, keeps to the sound). The host
-// plays it at one rate only (XAudio2's voice at 48 kHz, nothing to change it), so at another speed there is no sound
-// and the clock goes by the tree's time alone; so too where a piece has no sound, or nothing plays it.
+// plays it at one rate only (XAudio2's voice at 48 kHz), so at another speed up to 4x what decodes is stretched first
+// (replay_play.cpp's WSOLA, its pitch kept; the user, 2026-11-22: 「倍速播放的时候听不到声音」); past 4x there is no
+// sound and the clock goes by the tree's time alone; so too where a piece has no sound, or nothing plays it.
 //
 // Dragged (the replay's playhead held on the timeline: `deck_scrub`), each move shows the key frame before where it
 // is, decoded at once, one at a time (a move while one decodes waits for it, the last move's taken), and the frame
@@ -45,6 +46,25 @@ extern "C" fn rp_aac_reset(h : Int) -> Unit = "rp_aac_reset"
 
 ///|
 extern "C" fn rp_aac_close(h : Int) -> Unit = "rp_aac_close"
+
+///|
+extern "C" fn rp_ts_open(rate : Double) -> Int = "rp_ts_open"
+
+///|
+#borrow(data)
+extern "C" fn rp_ts_feed(h : Int, data : Bytes, from : Int, flush : Int) -> Bytes = "rp_ts_feed"
+
+///|
+extern "C" fn rp_ts_lag(h : Int) -> Double = "rp_ts_lag"
+
+///|
+extern "C" fn rp_ts_close(h : Int) -> Unit = "rp_ts_close"
+
+///|
+/// Whether it sounds at speed `r` (stretched to it where not 1; past 4x too fast to follow, as a browser's).
+fn sounds_at(r : Double) -> Bool {
+  r >= 0.5 && r <= 4.0
+}
 
 ///|
 /// A deck's sound: the piece it reads (index, path, its track), the next AAC frame to decode, its decoder (0 none) and
@@ -77,6 +97,9 @@ struct Sound {
   mut heard_any : Bool
   /// its start asked for again, a while after it was given up (its cancel)
   mut retry : (() -> Unit)?
+  /// the speed it plays at, and what stretches it to that (0 none: at 1)
+  mut rate : Double
+  mut ts : Int
 }
 
 ///|
@@ -102,6 +125,8 @@ fn Sound::new() -> Sound {
     due: None,
     heard_any: false,
     retry: None,
+    rate: 1.0,
+    ts: 0,
   }
 }
 
@@ -888,7 +913,7 @@ fn Deck::pump(self : Deck) -> Unit {
     if self.open(i + 1) {
       self.next = 0
       // (the sound gone quiet at a piece without it, or where it stopped: from here)
-      if !self.sound.on && (self.speed)() == 1.0 {
+      if !self.sound.on && sounds_at((self.speed)()) {
         self.sound_start(self.pos())
       }
       self.pump()
@@ -932,12 +957,12 @@ fn Deck::set_playing(self : Deck, on : Bool) -> Unit {
 }
 
 ///|
-/// Played at `r` times its speed from where it is: its sound only at 1.
+/// Played at `r` times its speed from where it is: its sound where it sounds at that speed.
 fn Deck::set_rate(self : Deck, r : Double) -> Unit {
   let p = self.pos()
   let was = self.play.untracked()
   self.play.set({ ..was, pos: p, at: now(), rate: r })
-  if was.going && r == 1.0 {
+  if was.going && sounds_at(r) {
     self.sound_start(p)
   } else {
     self.sound_stop()
@@ -1000,14 +1025,19 @@ fn Deck::sound_stop(self : Deck) -> Unit {
     self.stream().audio(b"")
   }
   s.on = false
+  if s.ts != 0 {
+    rp_ts_close(s.ts)
+    s.ts = 0
+  }
 }
 
 ///|
-/// Its sound from `at` (ms on its clock), where the speed is 1, the host plays sound and the piece there has some.
+/// Its sound from `at` (ms on its clock), where it sounds at the speed, the host plays sound and the piece there has some.
 fn Deck::sound_start(self : Deck, at : Double) -> Unit {
   self.sound_stop()
   let s = self.sound
-  if !@ui.stream_audio_here() || (self.speed)() != 1.0 || (self.count)() == 0 {
+  let rate = (self.speed)()
+  if !@ui.stream_audio_here() || !sounds_at(rate) || (self.count)() == 0 {
     return
   }
   let (i, inside) = self.locate(at)
@@ -1035,6 +1065,10 @@ fn Deck::sound_start(self : Deck, at : Double) -> Unit {
   s.anchors.clear()
   s.anchors.push((0.0, (self.start)(i) + sample_ms(t, from) + skip_ms))
   s.ends = -1.0
+  s.rate = rate
+  if rate != 1.0 {
+    s.ts = rp_ts_open(rate)
+  }
   s.on = true
   ntrace("sound from \{at} seg=\{i} k=\{from} skip=\{s.skip}")
   self.sound_tick()
@@ -1064,11 +1098,18 @@ fn Deck::sound_decoder(self : Deck, t : Mp4Track) -> Bool {
 fn Deck::sound_put(self : Deck, pcm : Bytes, pad? : Bool = false) -> Unit {
   let s = self.sound
   let mut i = 0
-  let n = pcm.length()
+  let mut pcm = pcm
+  let mut n = pcm.length()
   if s.skip > 0 {
     let leave = @cmp.minimum(s.skip * 4, n - n % 4)
     i = leave
     s.skip = s.skip - leave / 4
+  }
+  // (at another speed, stretched to it: what it gives, after what was left out)
+  if s.ts != 0 {
+    pcm = rp_ts_feed(s.ts, pcm, i, if pad { 1 } else { 0 })
+    n = pcm.length()
+    i = 0
   }
   while i < n {
     let take = @cmp.minimum(3840 - s.fill, n - i)
@@ -1122,7 +1163,9 @@ fn Deck::sound_more(self : Deck) -> Bool {
   // (its encoder's priming, before 0, left out)
   let first = sample_ms(n, 0)
   s.skip = s.skip + (@cmp.maximum(0.0, -first) * 48.0).round().to_int()
-  s.anchors.push((s.sent + (s.fill / 4).to_double(), (self.start)(i) + @cmp.maximum(0.0, first)))
+  // (where the stretch has it heard: after what is in it still, at its speed)
+  let lag = if s.ts != 0 { rp_ts_lag(s.ts) / s.rate } else { 0.0 }
+  s.anchors.push((s.sent + (s.fill / 4).to_double() + lag, (self.start)(i) + @cmp.maximum(0.0, first)))
   s.seg = i
   s.path = path
   s.track = Some(n)
@@ -1166,7 +1209,7 @@ fn Deck::sound_pos(self : Deck) -> Double? {
     s.anchors.remove(0) |> ignore
   }
   let (from, at) = s.anchors[0]
-  Some(at + @cmp.maximum(0.0, played - from) / 48.0)
+  Some(at + @cmp.maximum(0.0, played - from) / 48.0 * s.rate)
 }
 
 ///|
@@ -1227,10 +1270,10 @@ fn Deck::sound_tick(self : Deck) -> Unit {
         }
         if off.abs() > 150.0 {
           ntrace("sound: clock put at \{heard} (was \{ours})")
-          self.play.set({ pos: heard, at: now(), rate: 1.0, going: true })
+          self.play.set({ pos: heard, at: now(), rate: s.rate, going: true })
           self.pump()
         } else {
-          let r = if off.abs() < 12.0 { 1.0 } else { 1.0 + clamp(off / 500.0, -0.08, 0.08) }
+          let r = s.rate * (if off.abs() < 12.0 { 1.0 } else { 1.0 + clamp(off / 500.0, -0.08, 0.08) })
           if r != p.rate {
             self.play.set({ pos: ours, at: now(), rate: r, going: true })
           }
@@ -1259,7 +1302,7 @@ fn Deck::sound_retry(self : Deck) -> Unit {
         r.at_moment(now() + 1000.0, fn() {
           d.sound.retry = None
           let p = d.play.untracked()
-          if p.going && !d.sound.on && (d.speed)() == 1.0 && (d.wants)() && !(d.held)() {
+          if p.going && !d.sound.on && sounds_at((d.speed)()) && (d.wants)() && !(d.held)() {
             d.sound_start(d.pos())
           }
         }),
