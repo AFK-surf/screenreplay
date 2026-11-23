@@ -85,16 +85,26 @@ fn note_body(
       .lines_up(Is(Some(Middle)))
       .lies_along(Is(Middle))
       .edge(By(fn() { (1.0, if pic.pointed() { tone(0xFFFFFF33L, 0x00000040L) } else { hair2() }) }))
-      .image(By(fn() {
-        clips_rev.get() |> ignore
-        let k = clip_thumb(path)
-        if k == "" || k == "!" {
-          None
-        } else {
-          Some((k, "", 256))
-        }
-      }))
-      .image_contains(Is(true))
+      |> ignore
+      // the picture on a node of its own with square corners: a picture drawn on the frame takes the frame's rounded
+      // corners even where, contained, it lies inside it (a wide strip letterboxed); the frame's clip still rounds a
+      // picture as big as it
+      pic.box(fn(o) {
+        o
+        .over(Is(true))
+        .presses(Is(false))
+        .image(By(fn() {
+          clips_rev.get() |> ignore
+          let k = clip_thumb(path)
+          if k == "" || k == "!" {
+            None
+          } else {
+            Some((k, "", 256))
+          }
+        }))
+        .image_contains(Is(true))
+        |> ignore
+      })
       |> ignore
       // its length on its corner, as the library's cards have it
       pic.box(fn(o) {
