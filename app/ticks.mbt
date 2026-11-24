@@ -1,7 +1,7 @@
 // The time of day drawn into the track (the user's pick, 2026-11-24: 「E：画进轨道里」, after 「注意我们要尽可能高效利用
 // 垂直空间」 took back a ruler of its own under it), no height added. Since 「I：淡出底边只标半点」 (2026-11-24, the
-// ticks beside their times found ugly): no lines; the band's foot fades darker, each time centred on its moment over
-// it, a 2 pt notch under it. How far apart they are follows the zoom, never closer than about 200 points: the hours and
+// ticks beside their times found ugly): no lines, no fade under them (the user, 2026-11-24: 去掉渐变), each time
+// centred on its moment, a 2 pt notch under it. How far apart they are follows the zoom, never closer than about 200 points: the hours and
 // half hours at a 2 hours' view, 2 minutes at 10 minutes, seconds near a minute. On the minute, the hour or midnight
 // (whichever is a step coarser) the time is brighter and bold; midnight says the day. Under a filter of apps or with
 // gaps folded only the moments kept are marked, none in a seam. A time is left out where an app's name or 未录制 is in
@@ -104,11 +104,6 @@ fn ticks_in(a : Double, z : Double, step : Double) -> Array[Tick] {
 ///|
 /// How high the notch under a time is (points).
 let tick_h : Double = 2.0
-
-///|
-/// How high the darker fade at the band's foot is (points).
-let tick_fade_h : Double = 16.0
-
 ///|
 /// The size the times are in.
 let tick_size : Double = 10.0
@@ -118,25 +113,6 @@ let tick_size : Double = 10.0
 fn time_ticks(parent : @view.View, w : () -> Double) -> Unit {
   parent.box(fn(o) {
     o.over(Is(true)).presses(Is(false)) |> ignore
-    // (the band's foot faded toward the window's ground: none at its top, 85% at the foot, eased, in 1 pt bands)
-    o.box(fn(f) {
-      f
-      .over(Is(true))
-      .width(By(fn() { Some(w()) }))
-      .height(Is(Some(tick_fade_h)))
-      .offset(Is((0.0, strip_h - tick_fade_h)))
-      |> ignore
-      let n = tick_fade_h.to_int()
-      for i in 0..<n {
-        let k = (i + 1).to_double() / n.to_double()
-        let a = (0.85 * k * k * 255.0).round().to_int64()
-        f.box(fn(b) {
-          b.grow(Is(1.0)).basis(Is(Some(0.0))).ground(By(fn() { clear(c_bg()) | a })) |> ignore
-        })
-        |> ignore
-      }
-    })
-    |> ignore
     // (the moments in reach: the view's length on steps of 1.5x either side of it, so the list changes only as the
     // view moves on by a step or the zoom passes one; the step itself by the view's own length)
     let reach = @signals.computed(fn(_) {
