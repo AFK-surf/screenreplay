@@ -99,7 +99,9 @@ internal sealed class ScreenCapture : IDisposable
         item = CreateItem(target);
         item.Closed += (_, _) => Closed?.Invoke();
         poolSize = item.Size;
-        pool = Direct3D11CaptureFramePool.CreateFreeThreaded(gpu.WinRtDevice, poolFormat, 4, poolSize);
+        // (2 buffers: OnFrame drains immediately, GPU-copies into `latest`, and disposes the frame in finally;
+        // at 4K FP16 each buffer is 63.3 MiB, so 2 vs 4 saves ~127 MiB VRAM and halves DWM shared surface pressure)
+        pool = Direct3D11CaptureFramePool.CreateFreeThreaded(gpu.WinRtDevice, poolFormat, 2, poolSize);
         pool.FrameArrived += OnFrame;
         session = pool.CreateCaptureSession(item);
         session.IsCursorCaptureEnabled = true;
@@ -208,7 +210,7 @@ internal sealed class ScreenCapture : IDisposable
             {
                 // (the window resized: the pool's buffers made to its size; this frame still used, cut to it)
                 var prev = poolSize;
-                sender.Recreate(gpu.WinRtDevice, poolFormat, 4, content);
+                sender.Recreate(gpu.WinRtDevice, poolFormat, 2, content);
                 poolSize = content;
                 onResized?.Invoke($"{prev.Width}x{prev.Height} -> {content.Width}x{content.Height}");
             }

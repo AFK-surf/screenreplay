@@ -361,6 +361,7 @@ internal sealed class RecorderApp : IDisposable
 
                 panel.Renew(why);
                 notes.Renew();
+                RenewReplayIfHidden(why);
             });
         }
 
@@ -407,6 +408,7 @@ internal sealed class RecorderApp : IDisposable
         // its name alone (another buffer's test windows, the tray's panel and the note card have that name too))
         if (!exiting && FindReplay() is null)
         {
+            Program.TryTakeRequest(Path.Combine(paths.Root, "export.busy"));
             StartReplay(hidden: true);
         }
     }
@@ -420,6 +422,11 @@ internal sealed class RecorderApp : IDisposable
 
     /// <summary>The replay window this recorder started (the resident one), while it runs.</summary>
     private Process? replay;
+    private volatile bool renewingReplay;
+    private volatile bool openAfterRenew;
+    private bool replayWasVisible;
+    private DateTimeOffset? replayHiddenSince;
+    private DateTimeOffset replayStartedAt = DateTimeOffset.MinValue;
 
     /// <summary>The session's state changed (WM_WTSSESSION_CHANGE's code, as SystemEvents.SessionSwitch's reason was).</summary>
     private void OnSessionChanged(int code)
@@ -692,6 +699,7 @@ internal sealed class RecorderApp : IDisposable
         settings = wanted;
         recorder?.SetSkipUnrecorded(ReadFoldGaps());
         Housekeeping();
+        CheckReplayIdle();
         Relabel();
         statusArg = "";
         // (not said yes to on the first-run sheet: as turned off, nothing captured, no sound, no segment written)
@@ -1927,6 +1935,173 @@ internal sealed class RecorderApp : IDisposable
 
     private bool IsReplayWindowVisible() => FindReplay() is { } found && ForegroundApp.IsReplayShown(found.Window);
 
+    private bool IsExportBusy()
+    {
+        try
+        {
+            var busy = Path.Combine(paths.Root, "export.busy");
+            if (!File.Exists(busy))
+            {
+                return false;
+            }
+
+            return DateTimeOffset.UtcNow - File.GetLastWriteTimeUtc(busy) < TimeSpan.FromHours(2);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Replaces a hidden resident replay window with a freshly primed one so long-lived GPU decoder,
+    /// swap-chain, and heap allocations (which cannot be safely released in-process on current NVIDIA drivers)
+    /// are reclaimed while keeping instant-open responsiveness.</summary>
+    private void RenewReplayIfHidden(string why)
+    {
+        if (exiting || renewingReplay || IsExportBusy() ||
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")))
+        {
+            return;
+        }
+
+        // (skip the initial WM_POWERBROADCAST "screen on" delivered right after process startup)
+        if (!replayWasVisible && DateTimeOffset.UtcNow - replayStartedAt < TimeSpan.FromSeconds(10))
+        {
+            return;
+        }
+
+        var found = FindReplay();
+        if (found is null || ForegroundApp.IsReplayShown(found.Value.Window))
+        {
+            return;
+        }
+
+        Process? old = null;
+        try
+        {
+            if (replay is { HasExited: false } mine && mine.Id == found.Value.Pid)
+            {
+                old = mine;
+                replay = null;
+            }
+            else
+            {
+                old = Process.GetProcessById(found.Value.Pid);
+            }
+
+            renewingReplay = true;
+            replayWasVisible = false;
+            replayHiddenSince = null;
+            Log($"replay window: renewed ({why}), pid {old.Id}");
+            old.Kill();
+        }
+        catch (Exception ex)
+        {
+            renewingReplay = false;
+            old?.Dispose();
+            Log("replay window: not renewed: " + ex.Message);
+            return;
+        }
+
+        var ui = SynchronizationContext.Current;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                old.WaitForExit(2000);
+            }
+            catch (Exception)
+            {
+            }
+
+            old.Dispose();
+            Program.TryTakeRequest(Path.Combine(paths.Root, "export.busy"));
+            void Finish()
+            {
+                renewingReplay = false;
+                var show = openAfterRenew;
+                openAfterRenew = false;
+                if (exiting)
+                {
+                    return;
+                }
+
+                if (FindReplay() is null)
+                {
+                    StartReplay(hidden: !show);
+                }
+                else if (show)
+                {
+                    OpenReplay();
+                }
+            }
+
+            if (ui is null)
+            {
+                Finish();
+            }
+            else
+            {
+                ui.Post(_ => Finish(), null);
+            }
+        });
+    }
+
+    private void CheckReplayIdle()
+    {
+        if (exiting || renewingReplay || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")))
+        {
+            return;
+        }
+
+        var found = FindReplay();
+        if (found is null)
+        {
+            replayWasVisible = false;
+            replayHiddenSince = null;
+            return;
+        }
+
+        if (ForegroundApp.IsReplayShown(found.Value.Window))
+        {
+            replayWasVisible = true;
+            replayHiddenSince = null;
+            return;
+        }
+
+        var bloated = false;
+        if (!replayWasVisible)
+        {
+            try
+            {
+                using var proc = Process.GetProcessById(found.Value.Pid);
+                bloated = proc.PrivateMemorySize64 > 250L * 1024 * 1024;
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        if (!replayWasVisible && !bloated)
+        {
+            replayHiddenSince = null;
+            return;
+        }
+
+        if (IsExportBusy())
+        {
+            replayHiddenSince = null;
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        replayHiddenSince ??= now;
+        if (now - replayHiddenSince.Value >= TimeSpan.FromSeconds(30))
+        {
+            RenewReplayIfHidden(bloated ? "idle memory trim" : "idle after use");
+        }
+    }
+
     private void OpenReplay(bool showSettings = false)
     {
         if (exiting)
@@ -1937,6 +2112,12 @@ internal sealed class RecorderApp : IDisposable
         if (showSettings)
         {
             try { Program.WriteAtomic(Path.Combine(paths.Root, "settings.request"), "settings"); } catch (Exception) { }
+        }
+
+        if (renewingReplay)
+        {
+            openAfterRenew = true;
+            return;
         }
 
         if (FindReplay() is { } found)
@@ -1980,6 +2161,7 @@ internal sealed class RecorderApp : IDisposable
             {
                 replay?.Dispose();
                 replay = started;
+                replayStartedAt = DateTimeOffset.UtcNow;
             }
         }
         catch (Exception ex)
@@ -2832,6 +3014,10 @@ internal static class ForegroundApp
     public static bool IsReplayShown(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd))
+        {
+            return false;
+        }
+        if (DwmGetWindowAttribute(hwnd, 14 /* DWMWA_CLOAKED */, out var cloaked, 4) == 0 && cloaked != 0)
         {
             return false;
         }

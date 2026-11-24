@@ -62,6 +62,22 @@ fn sidecars_drop(path : String) -> Unit {
 }
 
 ///|
+/// All cached sidecar buffers dropped while the resident window is hidden (reloaded lazily on next show).
+fn sidecars_clear() -> Unit {
+  levels_of.clear()
+  input_of.clear()
+  lv_raw.clear()
+  lv_raw.shrink_to_fit()
+  lv_mip.clear()
+  lv_mip.shrink_to_fit()
+  in_raw.clear()
+  in_raw.shrink_to_fit()
+  in_mip.clear()
+  in_mip.shrink_to_fit()
+  sidecars_rev.val = -1
+}
+
+///|
 /// The segments' sidecars in `segs` order, kept in step with `rev` so a column scan indexes them directly without
 /// hashing paths or searching `segs` at each column.
 let sidecars_rev : Ref[Int] = Ref(-1)

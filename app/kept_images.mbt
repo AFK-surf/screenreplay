@@ -33,6 +33,17 @@ fn seg_images_forget(path : String) -> Unit {
 }
 
 ///|
+/// All timeline index pictures let go of while the resident window is hidden (reloaded from `.thumbs` on next show).
+fn seg_images_forget_all() -> Unit {
+  for _, keys in seg_images {
+    for k in keys {
+      @ui.forget_image(k)
+    }
+  }
+  seg_images.clear()
+}
+
+///|
 /// Pictures kept to the newest `cap` of their kind, oldest first.
 priv struct Newest {
   cap : Int
@@ -82,6 +93,15 @@ fn clip_thumb_kept(path : String, key : String) -> Unit {
     _ => ()
   }
   clip_thumb_keys[path] = key
+}
+
+///|
+/// All saved clip cover thumbnails let go of while the resident window is hidden.
+fn clip_thumbs_forget_all() -> Unit {
+  for _, key in clip_thumb_keys {
+    @ui.forget_image(key)
+  }
+  clip_thumb_keys.clear()
 }
 
 ///|

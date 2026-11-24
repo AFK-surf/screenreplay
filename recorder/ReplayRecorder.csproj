@@ -16,6 +16,8 @@
     <RootNamespace>Replay.Recorder</RootNamespace>
     <ImportDirectoryBuildProps>false</ImportDirectoryBuildProps>
     <ApplicationIcon>..\assets\ScreenReplay.ico</ApplicationIcon>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
   </PropertyGroup>
   <!-- Trimmed only where it carries its own .NET runtime (the Store's MSIX: packaging/pack-msix.ps1); the
        framework-dependent build and publish are as they were. -->

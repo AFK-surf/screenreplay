@@ -154,6 +154,17 @@ fn gif_scale(w : Double) -> Double {
 }
 
 ///|
+/// Marks an export/concat in progress for the recorder so it does not recycle the hidden resident window mid-export.
+fn set_export_busy(on : Bool) -> Unit {
+  let path = cstr(pjoin(root_dir(), "export.busy"))
+  if on {
+    rp_write(path, @utf8.encode("1")) |> ignore
+  } else {
+    rp_delete(path)
+  }
+}
+
+///|
 /// An encode under way: its file ("" none), whether it goes on the clipboard when done, how far it is (0..1).
 let export_out : @signals.Signal[String] = @signals.signal("")
 
@@ -652,6 +663,7 @@ fn save_clip(copy? : Bool = false) -> Unit {
     return
   }
   export_out.set(out)
+  set_export_busy(true)
   export_copy.val = copy
   export_done.set(0.0)
   export_error.set("")
@@ -678,6 +690,7 @@ fn follow_concat(out : String, partial : String, len : Double) -> Unit {
         rp_delete(cstr(partial))
       }
       export_out.set("")
+      set_export_busy(false)
       if r == 0 {
         let copied = export_copy.val && rp_copy_file(cstr(out)) == 1
         saved.set(tf(if copied { "已保存并复制 {0} 的片段" } else { "已保存 {0} 的片段" }, [clock(len)]))
@@ -743,6 +756,7 @@ fn export_now(copy : Bool) -> Unit {
   @ui.log("REPLAY export \{r} \{format_label(codec)} \{w}x\{h}@\{fps} rate=\{rate.to_int()} est=\{@signals.untracked(export_bytes).to_int()} crops=\{said} \{out}")
   if r == 0 {
     export_out.set(out)
+    set_export_busy(true)
     export_copy.val = copy
     export_error.set("")
     export_done.set(0.0)
@@ -778,17 +792,20 @@ fn follow_export(root : @view.View) -> Unit {
       )
       saved_path.set(out)
       export_out.set("")
+      set_export_busy(false)
       export_open.set(false)
       clipping.set(false)
       rp_export_reset()
     }
     -2 => {
       export_out.set("")
+      set_export_busy(false)
       rp_export_reset()
     }
     -1 => {
       export_error.set(tf("保存失败（{0}）", ["0x" + rp_export_failure().reinterpret_as_uint().to_string(radix=16)]))
       export_out.set("")
+      set_export_busy(false)
       rp_export_reset()
     }
     _ => root.at_moment(now() + 100.0, fn() { follow_export(root) }) |> ignore

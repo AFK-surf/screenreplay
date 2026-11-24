@@ -21,17 +21,18 @@ fn resident() -> Bool {
 
 ///|
 /// The window kept when closed, and watched (the host tells the app nothing of its window shown or hidden by another
-/// program: asked every 200 ms, nothing drawn for it).
+/// program: checked on the frame woken by WM_CLOSE / SWP_SHOWWINDOW via on_frame_take, and every 200 ms as fallback).
 fn stay_resident(root : @view.View) -> Unit {
   if !resident() || rp_stay_resident() != 1 {
     return
   }
   turns_seen.val = rp_window_turns()
+  @ui.on_frame_take(fn() { check_turns() })
   watch_turns(root)
 }
 
 ///|
-fn watch_turns(root : @view.View) -> Unit {
+fn check_turns() -> Unit {
   let now_turns = rp_window_turns()
   let was = turns_seen.val
   if now_turns != was {
@@ -43,6 +44,11 @@ fn watch_turns(root : @view.View) -> Unit {
       as_opened()
     }
   }
+}
+
+///|
+fn watch_turns(root : @view.View) -> Unit {
+  check_turns()
   again(root, 200.0, fn() { watch_turns(root) })
 }
 
@@ -89,6 +95,11 @@ fn let_go_while_hidden() -> Unit {
   tracks_read.clear()
   clip_history_free()
   hover_images.forget_all()
+  seg_images_forget_all()
+  clip_thumbs_forget_all()
+  sidecars_clear()
+  app_names.clear()
+  app_names_missed.clear()
   // (a crop being exported keeps its dialog, and its preview)
   if export_out.untracked() == "" {
     crop_images.forget_all()
@@ -117,6 +128,7 @@ fn put_away() -> Unit {
     set_full_screen(false)
   }
   let_go_while_hidden()
+  rp_resident_hidden()
 }
 
 ///|
@@ -164,6 +176,9 @@ extern "C" fn rp_start_resident_hidden() -> Unit = "rp_start_resident_hidden"
 
 ///|
 extern "C" fn rp_resident_primed() -> Unit = "rp_resident_primed"
+
+///|
+extern "C" fn rp_resident_hidden() -> Unit = "rp_resident_hidden"
 
 ///|
 extern "C" fn rp_set_bg_rgb(rgb : Int) -> Unit = "rp_set_bg_rgb"

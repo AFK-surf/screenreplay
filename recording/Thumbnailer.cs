@@ -1,17 +1,20 @@
+using System.Runtime.InteropServices;
+using System.Text;
 using Vortice;
+using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
+using Vortice.Mathematics;
 using Vortice.WIC;
 
 namespace Replay.Recording;
 
 /// <summary>
-/// The segment's thumbnails made as it is recorded: each half second (of the segment's own time) the picture just made
-/// for the encoder (NV12, SDR already) is copied on the GPU, shrunk by the video processor to at most 384 × 216 BGRA
-/// and read back a frame or two later, never waited for; JPEG'd on a pool thread and kept by its segment's writer,
-/// which writes them beside the segment as its <c>.thumbs</c> (<see cref="SegmentWriter"/>). The replay window's
-/// hover preview and filmstrip read them from there: nothing is decoded again to make them (the user, 2026-11-17:
-/// 「这个缩略图一定要高性能，占用也要尽可能少」; a key frame's alone, every 2 s, changed too seldom under the pointer).
+/// The segment's thumbnails made as it is recorded: each half second (of the segment's own time) the SDR BGRA picture
+/// already made for the encoder is shrunk on the GPU by a lightweight shader to at most 384 × 216 BGRA (avoiding an
+/// extra 4K NV12 copy texture and a second 4K ID3D11VideoProcessor) and read back a frame or two later, never waited
+/// for; JPEG'd on a pool thread and kept by its segment's writer, which writes them beside the segment as its
+/// <c>.thumbs</c> (<see cref="SegmentWriter"/>).
 /// </summary>
 internal sealed class Thumbnailer : IDisposable
 {
@@ -19,16 +22,50 @@ internal sealed class Thumbnailer : IDisposable
     private const int MaxW = 384, MaxH = 216;
     private const float Quality = 0.75f;
 
+    private const string Source = """
+        Texture2D<float4> picture : register(t0);
+        SamplerState samp : register(s0);
+        cbuffer Params : register(b0) { float2 uvMax; float2 halfStep; };
+
+        struct VsOut
+        {
+            float4 pos : SV_Position;
+            float2 uv : TEXCOORD0;
+        };
+
+        VsOut vs(uint id : SV_VertexID)
+        {
+            VsOut o;
+            float2 uv = float2((id << 1) & 2, id & 2);
+            o.pos = float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+            o.uv = uv;
+            return o;
+        }
+
+        float4 ps(VsOut i) : SV_Target
+        {
+            float2 uv = i.uv * uvMax;
+            float2 d = halfStep;
+            float3 c = 0.25 * (
+                picture.SampleLevel(samp, clamp(uv + float2(-d.x, -d.y), 0, uvMax), 0).rgb +
+                picture.SampleLevel(samp, clamp(uv + float2( d.x, -d.y), 0, uvMax), 0).rgb +
+                picture.SampleLevel(samp, clamp(uv + float2(-d.x,  d.y), 0, uvMax), 0).rgb +
+                picture.SampleLevel(samp, clamp(uv + float2( d.x,  d.y), 0, uvMax), 0).rgb);
+            return float4(c, 1);
+        }
+        """;
+
     private readonly Gpu gpu;
-    private readonly ID3D11VideoDevice videoDevice;
-    private readonly ID3D11VideoContext videoContext;
-    private readonly int inW, inH, outW, outH;
-    private readonly ID3D11Texture2D copy;
+    private readonly ID3D11Multithread multithread;
+    private readonly ID3D11VertexShader vertexShader;
+    private readonly ID3D11PixelShader pixelShader;
+    private readonly ID3D11SamplerState sampler;
+    private readonly ID3D11Buffer constants;
+    private readonly int outW, outH;
     private readonly ID3D11Texture2D small;
-    private readonly ID3D11VideoProcessorEnumerator enumerator;
-    private readonly ID3D11VideoProcessor processor;
-    private readonly ID3D11VideoProcessorInputView inputView;
-    private readonly ID3D11VideoProcessorOutputView outputView;
+    private readonly ID3D11RenderTargetView smallView;
+    private ID3D11Texture2D? inputTexture;
+    private ID3D11ShaderResourceView? inputView;
     private readonly IWICImagingFactory wic = new();
 
     // read-backs under way, oldest first: each its staging texture and whose it is
@@ -38,16 +75,17 @@ internal sealed class Thumbnailer : IDisposable
 
     // (read-backs not taken yet at most this many: a GPU that holds them back does not have a staging texture made for
     // every frame meanwhile; a thumbnail is then left out)
-    private const int MostPending = 8;
+    private const int MostPending = 4;
 
     // JPEGs being made on the thread pool: waited for before the WIC factory they use is let go of
     private int encoding;
 
     public Thumbnailer(Gpu gpu, int width, int height, int frameRate)
     {
+        _ = frameRate;
         this.gpu = gpu;
-        inW = width & ~1;
-        inH = height & ~1;
+        var inW = width & ~1;
+        var inH = height & ~1;
         outW = MaxW;
         outH = (int)((long)MaxW * inH / inW);
         if (outH > MaxH)
@@ -57,19 +95,18 @@ internal sealed class Thumbnailer : IDisposable
         }
         outW &= ~1;
         outH &= ~1;
-        videoDevice = gpu.Device.QueryInterface<ID3D11VideoDevice>();
-        videoContext = gpu.Context.QueryInterface<ID3D11VideoContext>();
-        // (the encoder's texture is a render target only: copied into one the processor reads)
-        copy = gpu.Device.CreateTexture2D(new Texture2DDescription
+
+        multithread = gpu.Device.QueryInterface<ID3D11Multithread>();
+        vertexShader = gpu.Device.CreateVertexShader(Compile("vs", "vs_5_0"));
+        pixelShader = gpu.Device.CreatePixelShader(Compile("ps", "ps_5_0"));
+        constants = gpu.Device.CreateBuffer(new BufferDescription(16, BindFlags.ConstantBuffer, ResourceUsage.Default));
+        sampler = gpu.Device.CreateSamplerState(new SamplerDescription
         {
-            Width = (uint)inW,
-            Height = (uint)inH,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = Format.NV12,
-            SampleDescription = new SampleDescription(1, 0),
-            Usage = ResourceUsage.Default,
-            BindFlags = BindFlags.Decoder,
+            Filter = Filter.MinMagMipLinear,
+            AddressU = TextureAddressMode.Clamp,
+            AddressV = TextureAddressMode.Clamp,
+            AddressW = TextureAddressMode.Clamp,
+            MaxLOD = float.MaxValue,
         });
         small = gpu.Device.CreateTexture2D(new Texture2DDescription
         {
@@ -82,60 +119,39 @@ internal sealed class Thumbnailer : IDisposable
             Usage = ResourceUsage.Default,
             BindFlags = BindFlags.RenderTarget,
         });
-        var desc = new VideoProcessorContentDescription
-        {
-            InputFrameFormat = VideoFrameFormat.Progressive,
-            InputFrameRate = new Rational((uint)frameRate, 1),
-            InputWidth = (uint)inW,
-            InputHeight = (uint)inH,
-            OutputFrameRate = new Rational((uint)frameRate, 1),
-            OutputWidth = (uint)outW,
-            OutputHeight = (uint)outH,
-            Usage = VideoUsage.OptimalSpeed,
-        };
-        videoDevice.CreateVideoProcessorEnumerator(ref desc, out var e).CheckError();
-        enumerator = e!;
-        videoDevice.CreateVideoProcessor(enumerator, 0, out var p).CheckError();
-        processor = p!;
-        videoDevice.CreateVideoProcessorInputView(copy, enumerator, new VideoProcessorInputViewDescription
-        {
-            FourCC = 0,
-            ViewDimension = VideoProcessorInputViewDimension.Texture2D,
-            Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 },
-        }, out var iv).CheckError();
-        inputView = iv!;
-        videoDevice.CreateVideoProcessorOutputView(small, enumerator, new VideoProcessorOutputViewDescription
-        {
-            ViewDimension = VideoProcessorOutputViewDimension.Texture2D,
-            Texture2D = new Texture2DVideoProcessorOutputView { MipSlice = 0 },
-        }, out var ov).CheckError();
-        outputView = ov!;
-        videoContext.VideoProcessorSetStreamFrameFormat(processor, 0, VideoFrameFormat.Progressive);
-        videoContext.VideoProcessorSetStreamSourceRect(processor, 0, true, new RawRect(0, 0, inW, inH));
-        videoContext.VideoProcessorSetStreamDestRect(processor, 0, true, new RawRect(0, 0, outW, outH));
-        videoContext.VideoProcessorSetOutputTargetRect(processor, true, new RawRect(0, 0, outW, outH));
-        videoContext.VideoProcessorSetStreamAutoProcessingMode(processor, 0, false);
-        using var context1 = videoContext.QueryInterfaceOrNull<ID3D11VideoContext1>();
-        if (context1 is not null)
-        {
-            context1.VideoProcessorSetStreamColorSpace1(processor, 0, ColorSpaceType.YcbcrStudioG22LeftP709);
-            context1.VideoProcessorSetOutputColorSpace1(processor, ColorSpaceType.RgbFullG22NoneP709);
-        }
+        smallView = gpu.Device.CreateRenderTargetView(small);
     }
 
-    /// <summary>The picture in <paramref name="target"/>'s <paramref name="slice"/> (the encoder's, just made) shrunk
-    /// and its read-back begun, its thumbnail <paramref name="writer"/>'s at <paramref name="ms"/> into its segment.
-    /// On the recorder's clock thread, as each frame is made.</summary>
-    public void Take(ID3D11Texture2D target, uint slice, SegmentWriter writer, long ms)
+    /// <summary>The SDR BGRA picture in <paramref name="source"/> (<paramref name="srcW"/> × <paramref name="srcH"/>)
+    /// shrunk and its read-back begun, its thumbnail <paramref name="writer"/>'s at <paramref name="ms"/> into its
+    /// segment. On the recorder's clock thread, as each frame is made.</summary>
+    public void Take(ID3D11Texture2D source, int srcW, int srcH, SegmentWriter writer, long ms)
     {
-        if (pending.Count >= MostPending)
+        if (pending.Count >= MostPending || srcW < 2 || srcH < 2)
         {
             return;
         }
 
-        var ctx = gpu.Context;
-        ctx.CopySubresourceRegion(copy, 0, 0, 0, 0, target, slice, new Vortice.Mathematics.Box(0, 0, 0, inW, inH, 1));
-        videoContext.VideoProcessorBlt(processor, outputView, 0, 1, [new VideoProcessorStream { Enable = true, InputSurface = inputView }]).CheckError();
+        if (inputView is null || inputTexture is null || inputTexture.NativePointer != source.NativePointer)
+        {
+            inputView?.Dispose();
+            inputTexture?.Dispose();
+            inputView = gpu.Device.CreateShaderResourceView(source);
+            // (held so that its pointer is not reused by another texture while the view is cached)
+            source.AddRef();
+            inputTexture = new ID3D11Texture2D(source.NativePointer);
+        }
+
+        var desc = source.Description;
+        var uvMaxX = Math.Min(1f, (float)srcW / Math.Max(1u, desc.Width));
+        var uvMaxY = Math.Min(1f, (float)srcH / Math.Max(1u, desc.Height));
+        var scale = Math.Min((double)outW / srcW, (double)outH / srcH);
+        var vw = Math.Max(1, Math.Min(outW, (int)Math.Round(srcW * scale)));
+        var vh = Math.Max(1, Math.Min(outH, (int)Math.Round(srcH * scale)));
+        var vx = (outW - vw) / 2;
+        var vy = (outH - vh) / 2;
+        Span<float> param = [uvMaxX, uvMaxY, uvMaxX * 0.25f / vw, uvMaxY * 0.25f / vh];
+
         var staging = free.Count > 0 ? free.Pop() : gpu.Device.CreateTexture2D(new Texture2DDescription
         {
             Width = (uint)outW,
@@ -147,7 +163,37 @@ internal sealed class Thumbnailer : IDisposable
             Usage = ResourceUsage.Staging,
             CPUAccessFlags = CpuAccessFlags.Read,
         });
-        ctx.CopyResource(staging, small);
+
+        var ctx = gpu.Context;
+        multithread.Enter();
+        try
+        {
+            if (vw < outW || vh < outH)
+            {
+                ctx.ClearRenderTargetView(smallView, new Color4(0f, 0f, 0f, 1f));
+            }
+
+            ctx.UpdateSubresource(param, constants);
+            ctx.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
+            ctx.IASetInputLayout(null);
+            ctx.VSSetShader(vertexShader);
+            ctx.PSSetShader(pixelShader);
+            ctx.PSSetShaderResource(0, inputView);
+            ctx.PSSetSampler(0, sampler);
+            ctx.PSSetConstantBuffer(0, constants);
+            ctx.RSSetViewport(new Viewport(vx, vy, vw, vh));
+            ctx.OMSetRenderTargets(smallView);
+            ctx.Draw(3, 0);
+            ctx.PSSetShaderResource(0, null!);
+            ctx.PSSetSampler(0, null!);
+            ctx.OMSetRenderTargets((ID3D11RenderTargetView)null!);
+            ctx.CopyResource(staging, small);
+        }
+        finally
+        {
+            multithread.Leave();
+        }
+
         writer.ThumbAsked();
         pending.Enqueue(new Pending(staging, writer, ms));
     }
@@ -239,6 +285,45 @@ internal sealed class Thumbnailer : IDisposable
         }
     }
 
+    [DllImport("d3dcompiler_47.dll")]
+    private static extern unsafe int D3DCompile(byte* data, nuint size, byte* name, IntPtr defines, IntPtr include, byte* entry, byte* target, uint flags1, uint flags2, out IntPtr code, out IntPtr errors);
+
+    private static unsafe byte[] Compile(string entry, string target)
+    {
+        var source = Encoding.UTF8.GetBytes(Source);
+        var name = Encoding.ASCII.GetBytes("Thumbnailer.hlsl\0");
+        var entryBytes = Encoding.ASCII.GetBytes(entry + "\0");
+        var targetBytes = Encoding.ASCII.GetBytes(target + "\0");
+        IntPtr code, errors;
+        int hr;
+        fixed (byte* s = source, n = name, e = entryBytes, t = targetBytes)
+        {
+            hr = D3DCompile(s, (nuint)source.Length, n, IntPtr.Zero, IntPtr.Zero, e, t, 1u << 15, 0, out code, out errors);
+        }
+
+        try
+        {
+            if (hr < 0)
+            {
+                var message = errors != IntPtr.Zero ? Marshal.PtrToStringAnsi(BlobPointer(errors), (int)BlobSize(errors)) : "";
+                throw new COMException("D3DCompile " + entry + ": " + message, hr);
+            }
+
+            var bytes = new byte[BlobSize(code)];
+            Marshal.Copy(BlobPointer(code), bytes, 0, bytes.Length);
+            return bytes;
+        }
+        finally
+        {
+            Native.Release(code);
+            Native.Release(errors);
+        }
+    }
+
+    private static unsafe IntPtr BlobPointer(IntPtr blob) => ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr>)(*(IntPtr**)blob)[3])(blob);
+
+    private static unsafe nuint BlobSize(IntPtr blob) => ((delegate* unmanaged[Stdcall]<IntPtr, nuint>)(*(IntPtr**)blob)[4])(blob);
+
     public void Dispose()
     {
         while (pending.Count > 0)
@@ -261,14 +346,15 @@ internal sealed class Thumbnailer : IDisposable
         }
 
         var done = Volatile.Read(ref encoding) == 0;
-        outputView.Dispose();
-        inputView.Dispose();
-        processor.Dispose();
-        enumerator.Dispose();
+        inputView?.Dispose();
+        inputTexture?.Dispose();
+        smallView.Dispose();
         small.Dispose();
-        copy.Dispose();
-        videoContext.Dispose();
-        videoDevice.Dispose();
+        sampler.Dispose();
+        constants.Dispose();
+        pixelShader.Dispose();
+        vertexShader.Dispose();
+        multithread.Dispose();
         if (done)
         {
             wic.Dispose();

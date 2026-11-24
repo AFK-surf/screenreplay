@@ -749,6 +749,8 @@ void rp_resident_primed(void) {
   }
 }
 
+void rp_resident_hidden(void) {}
+
 int32_t rp_stay_resident(void) {
   @autoreleasepool {
     NSWindow *w = rp_main_win();

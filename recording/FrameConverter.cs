@@ -53,7 +53,9 @@ internal sealed class FrameConverter : IDisposable
             OutputFrameRate = new Rational((uint)frameRate, 1),
             OutputWidth = (uint)outWidth,
             OutputHeight = (uint)outHeight,
-            Usage = VideoUsage.OptimalQuality,
+            // (PlaybackNormal instead of OptimalQuality: auto-processing is disabled below, and OptimalQuality
+            // causes NVIDIA D3D11 to allocate extra internal reference/scratch surfaces at 4K)
+            Usage = VideoUsage.PlaybackNormal,
         };
         videoDevice.CreateVideoProcessorEnumerator(ref desc, out enumerator).CheckError();
         videoDevice.CreateVideoProcessor(enumerator!, 0, out processor).CheckError();
@@ -86,8 +88,9 @@ internal sealed class FrameConverter : IDisposable
     }
 
     /// <summary>Converts <paramref name="source"/> (BGRA, or FP16 scRGB of a display as <paramref name="display"/>
-    /// says, <paramref name="width"/> × <paramref name="height"/>) into the NV12 texture's <paramref name="slice"/>.</summary>
-    public void Convert(ID3D11Texture2D source, int width, int height, DisplayColor display, ID3D11Texture2D target, uint slice)
+    /// says, <paramref name="width"/> × <paramref name="height"/>) into the NV12 texture's <paramref name="slice"/>.
+    /// Returns the SDR BGRA texture used as the video processor's input (valid until the next call).</summary>
+    public ID3D11Texture2D Convert(ID3D11Texture2D source, int width, int height, DisplayColor display, ID3D11Texture2D target, uint slice)
     {
         if (source.Description.Format == Format.R16G16B16A16_Float)
         {
@@ -133,6 +136,7 @@ internal sealed class FrameConverter : IDisposable
 
         var stream = new VideoProcessorStream { Enable = true, InputSurface = inputView };
         videoContext.VideoProcessorBlt(processor!, outputView!, 0, 1, [stream]).CheckError();
+        return source;
     }
 
     private void DropProcessor()

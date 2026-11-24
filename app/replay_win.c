@@ -576,14 +576,15 @@ extern void *mb_app_hwnd(void);
 extern void mb_app_wake(void);
 static WNDPROC rp_prev_proc;
 static volatile LONG rp_hides, rp_shows;
-static int rp_priming, rp_show_asked;
-static HWND rp_primed_hwnd;
+static int rp_priming, rp_show_asked, rp_hiding;
+static HWND rp_primed_hwnd, rp_hiding_hwnd;
 static LONG_PTR rp_primed_ex;
 static COLORREF rp_bg_rgb = RGB(0x1B, 0x1C, 0x1F);
 
 // What the hidden window holds for playing let go of at once, as it hides (replay_play.cpp, replay_mf.cpp): mbui draws
-// no frame for a hidden window, so nothing of the app's runs till it shows again; what is let go of here is what
-// native code holds (the segments kept open, the sound decoders, the thumbnail worker's and the copy's devices).
+// no frame for a hidden window, so nothing of the app's runs till it shows again; on WM_CLOSE the window is cloaked
+// immediately (0 ms visual vanish) and given one frame for MoonBit's put_away() to release GPU/image caches before
+// rp_resident_hidden() calls ShowWindow(SW_HIDE), with a short fallback timer in case no frame runs.
 extern void rp_play_release(void);
 extern void rp_aac_release_all(void);
 extern void rp_thumb_release(void);
@@ -594,12 +595,20 @@ void rp_set_bg_rgb(int32_t rgb) {
 }
 
 void rp_resident_primed(void);
+void rp_resident_hidden(void);
 
 static VOID CALLBACK rp_resident_primed_timer(HWND h, UINT msg, UINT_PTR id, DWORD at) {
   (void)msg;
   (void)at;
   KillTimer(h, id);
   rp_resident_primed();
+}
+
+static VOID CALLBACK rp_resident_hide_timer(HWND h, UINT msg, UINT_PTR id, DWORD at) {
+  (void)msg;
+  (void)at;
+  KillTimer(h, id);
+  rp_resident_hidden();
 }
 
 static void rp_unprime_now(HWND h, int hide) {
@@ -624,6 +633,26 @@ void rp_resident_primed(void) {
   rp_unprime_now(h, 1);
 }
 
+void rp_resident_hidden(void) {
+  HWND h = rp_hiding_hwnd ? rp_hiding_hwnd : (HWND)mb_app_hwnd();
+  if (!rp_hiding || !h) return;
+  KillTimer(h, 0x5253);
+  rp_hiding = 0;
+  rp_hiding_hwnd = NULL;
+  ShowWindow(h, SW_HIDE);
+  BOOL cloak = FALSE;
+  DwmSetWindowAttribute(h, DWMWA_CLOAK, &cloak, sizeof(cloak));
+}
+
+static void rp_cancel_hiding(HWND h) {
+  if (!rp_hiding || !h) return;
+  KillTimer(h, 0x5253);
+  rp_hiding = 0;
+  rp_hiding_hwnd = NULL;
+  BOOL cloak = FALSE;
+  DwmSetWindowAttribute(h, DWMWA_CLOAK, &cloak, sizeof(cloak));
+}
+
 static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_ERASEBKGND && wp) {
     RECT rc;
@@ -637,23 +666,37 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     return 1;
   }
   if (msg == WM_CLOSE) {
-    ShowWindow(h, SW_HIDE);
-    InterlockedIncrement(&rp_hides);
-    rp_play_release();
-    rp_aac_release_all();
-    rp_thumb_release();
-    rp_frame_release();
+    if (!rp_hiding) {
+      BOOL cloak = TRUE;
+      DwmSetWindowAttribute(h, DWMWA_CLOAK, &cloak, sizeof(cloak));
+      rp_hiding = 1;
+      rp_hiding_hwnd = h;
+      SetTimer(h, 0x5253, 300, rp_resident_hide_timer);
+      InterlockedIncrement(&rp_hides);
+      rp_play_release();
+      rp_aac_release_all();
+      rp_thumb_release();
+      rp_frame_release();
+      mb_app_wake();
+    }
     return 0;
   }
-  if (msg == WM_ACTIVATE && LOWORD(wp) != WA_INACTIVE && rp_priming) {
-    rp_show_asked = 1;
-    rp_unprime_now(h, 0);
-    InterlockedIncrement(&rp_shows);
-    mb_app_wake();
+  if (msg == WM_ACTIVATE && LOWORD(wp) != WA_INACTIVE) {
+    if (rp_priming) {
+      rp_show_asked = 1;
+      rp_unprime_now(h, 0);
+      InterlockedIncrement(&rp_shows);
+      mb_app_wake();
+    } else if (rp_hiding) {
+      rp_cancel_hiding(h);
+      InterlockedIncrement(&rp_shows);
+      mb_app_wake();
+    }
   }
   if (msg == WM_WINDOWPOSCHANGED && !rp_priming) {
     const WINDOWPOS *pos = (const WINDOWPOS *)lp;
     if (pos->flags & SWP_SHOWWINDOW) {
+      if (rp_hiding) rp_cancel_hiding(h);
       InterlockedIncrement(&rp_shows);
       mb_app_wake();
     }
@@ -693,10 +736,10 @@ int32_t rp_window_turns(void) {
   return (int32_t)(((rp_hides & 0x7FFF) << 16) | (rp_shows & 0xFFFF));
 }
 
-// Whether the window shows now (false while cloaked for hidden first-frame priming).
+// Whether the window shows now (false while cloaked for hidden first-frame priming or closing cleanup).
 int32_t rp_window_shown(void) {
   HWND h = (HWND)mb_app_hwnd();
-  return h && IsWindowVisible(h) && !rp_priming ? 1 : 0;
+  return h && IsWindowVisible(h) && !rp_priming && !rp_hiding ? 1 : 0;
 }
 
 // Started hidden (the recorder's resident start, REPLAY_HIDDEN=1): mbui's host shows its window as it makes it, and

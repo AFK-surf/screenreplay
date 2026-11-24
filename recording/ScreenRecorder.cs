@@ -482,7 +482,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
         type.Set(Native.MT_FRAME_SIZE, Native.Pack((uint)size.Width, (uint)size.Height));
         type.Set(Native.MT_INTERLACE_MODE, 2u);
         type.Set(Native.MT_PIXEL_ASPECT_RATIO, Native.Pack(1, 1));
-        allocator.InitializeSampleAllocatorEx(4, 24, attrs, type);
+        // (3 initial, 8 max: no B-frames and ClockLoop gates via Ready(encoder); capping at 8 keeps 4K NV12 pool
+        // <= 95 MiB instead of growing to 24 frames / 285 MiB when the GPU is briefly saturated)
+        allocator.InitializeSampleAllocatorEx(3, 8, attrs, type);
         return allocator;
     }
 
@@ -964,8 +966,11 @@ public sealed class ScreenRecorder : IAsyncDisposable
             {
                 buffer.CurrentLength = surface.ContiguousLength;
             }
-            capture!.WithLatest((source, w, h, display) => converter!.Convert(source, w, h, display, texture, (uint)slice));
-            Thumbs(writer, texture, (uint)slice, time);
+            capture!.WithLatest((source, w, h, display) =>
+            {
+                var sdr = converter!.Convert(source, w, h, display, texture, (uint)slice);
+                Thumbs(writer, sdr, w, h, time);
+            });
             if (FrameTrace.On) FrameTrace.Note($"encode at={time / 10000.0:F2} key={key} target={texture.NativePointer:x} slice={slice} captured={capture.LatestTime / 10000.0:F2}");
             writer.WriteVideo(sample, time, Period, key);
         }
@@ -996,7 +1001,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
     }
 
     /// <summary>The read-backs of thumbnails the GPU has done taken, and this frame's begun where one is due.</summary>
-    private void Thumbs(SegmentWriter writer, ID3D11Texture2D texture, uint slice, long time)
+    private void Thumbs(SegmentWriter writer, ID3D11Texture2D sdrBgra, int srcW, int srcH, long time)
     {
         if (thumbnailer is null)
         {
@@ -1009,7 +1014,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
             if (time >= writer.NextThumbHns)
             {
                 writer.NextThumbHns = (time / Thumbnailer.StepHns + 1) * Thumbnailer.StepHns;
-                thumbnailer.Take(texture, slice, writer, time / 10_000);
+                thumbnailer.Take(sdrBgra, srcW, srcH, writer, time / 10_000);
             }
         }
         catch (Exception ex)

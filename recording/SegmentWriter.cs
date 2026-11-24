@@ -87,6 +87,8 @@ internal sealed class SegmentWriter : IDisposable
             }
 
             made = thumbs.OrderBy(t => t.Ms).ToList();
+            thumbs.Clear();
+            thumbs.TrimExcess();
         }
 
         if (made.Count == 0)
@@ -94,20 +96,16 @@ internal sealed class SegmentWriter : IDisposable
             return;
         }
 
-        using var out_ = new MemoryStream();
-        using (var w = new BinaryWriter(out_))
+        using var out_ = new FileStream(Path.Combine(folder, stem + ".thumbs"), FileMode.Create, FileAccess.Write, FileShare.None, 65536);
+        using var w = new BinaryWriter(out_);
+        w.Write("RPT2"u8);
+        w.Write((uint)made.Count);
+        foreach (var (ms, jpeg) in made)
         {
-            w.Write("RPT2"u8);
-            w.Write((uint)made.Count);
-            foreach (var (ms, jpeg) in made)
-            {
-                w.Write(ms);
-                w.Write((uint)jpeg.Length);
-                w.Write(jpeg);
-            }
+            w.Write(ms);
+            w.Write((uint)jpeg.Length);
+            w.Write(jpeg);
         }
-
-        File.WriteAllBytes(Path.Combine(folder, stem + ".thumbs"), out_.ToArray());
     }
 
     /// <summary>Video frames written.</summary>
