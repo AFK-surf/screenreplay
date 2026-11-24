@@ -1764,18 +1764,7 @@ internal sealed class RecorderApp : IDisposable
     /// <summary>Whether `text` reads as a window's title of a page or a document ("a page - an app", "a file — an
     /// app", "a | b"): not an app's name.</summary>
     private static bool TitleLike(string text) =>
-        text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ") || FileLike(text);
-
-    /// <summary>Whether `text` ends as a file's name does (".html", ".png": a window titled by the document it shows,
-    /// still.fail's showing bazaarplusplus-zero-report.html): not an app's name.</summary>
-    private static bool FileLike(string text)
-    {
-        // (by hand: the published build is trimmed, and Regex's assembly is not in it)
-        var dot = text.LastIndexOf('.');
-        var ext = dot > 0 ? text[(dot + 1)..] : "";
-        return ext.Length is >= 1 and <= 5 && !char.IsWhiteSpace(text[dot - 1]) && char.IsAsciiLetter(ext[0]) &&
-            ext.All(char.IsAsciiLetterOrDigit);
-    }
+        text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ");
 
     /// <summary>The program's own name, as its FileDescription or else its ProductName writes it; empty where both are
     /// missing or are only its file's name (lower case or with "_": a game's sinking_star; Weixin's "Weixin", its file's
@@ -1809,7 +1798,10 @@ internal sealed class RecorderApp : IDisposable
             // (looked for again: a name kept as only the file's, or one a window's title gave it that holds a page's or a
             // document's name (a browser's tab, kept by a build of 2026-11-13: 「动态首页-哔哩哔哩 — Zen Browser」))
             var kept = File.Exists(named) ? File.ReadAllText(named).Trim() : "";
-            var stale = File.Exists(named) && (kept == name || TitleLike(kept));
+            // (and one kept a day: taken afresh, so a name a window's title gave it once (still.fail's, while it showed
+            // bazaarplusplus-zero-report.html) does not stay for good)
+            var stale = File.Exists(named) && (kept == name || TitleLike(kept) ||
+                DateTime.UtcNow - File.GetLastWriteTimeUtc(named) > TimeSpan.FromDays(1));
             if (!stale && File.Exists(named) && exe.Length > 0 && namesChecked.Add(name))
             {
                 var own = OwnName(exe, name);
