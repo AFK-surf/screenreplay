@@ -1,10 +1,11 @@
 // The time of day drawn into the track (the user's pick, 2026-11-24: 「E：画进轨道里」, after 「注意我们要尽可能高效利用
-// 垂直空间」 took back a ruler of its own under it): a short tick at the band's foot at each round moment (no line down it: the user, 2026-11-24, 两种线都减), its time
-// beside it, no height added. How far apart they are follows the zoom, never closer than about 90 points:
-// 10 seconds apart at a minute's view, a minute at 10 minutes, 10 at an hour, 15 or 30 at a few hours. On the minute,
-// the hour or midnight (whichever is a step coarser) the tick is stronger and its time bold; midnight says the day.
-// Under a filter of apps or with gaps folded only the moments kept are marked, none in a seam. A time is left out
-// where an app's name or 未录制 is in its way on both sides (its tick stays).
+// 垂直空间」 took back a ruler of its own under it), no height added. Since 「I：淡出底边只标半点」 (2026-11-24, the
+// ticks beside their times found ugly): no lines; the band's foot fades darker, each time centred on its moment over
+// it, a 2 pt notch under it. How far apart they are follows the zoom, never closer than about 200 points: the hours and
+// half hours at a 2 hours' view, 2 minutes at 10 minutes, seconds near a minute. On the minute, the hour or midnight
+// (whichever is a step coarser) the time is brighter and bold; midnight says the day. Under a filter of apps or with
+// gaps folded only the moments kept are marked, none in a seam. A time is left out where an app's name or 未录制 is in
+// its way.
 
 ///|
 /// The steps the moments marked may be apart (ms).
@@ -15,7 +16,7 @@ let tick_steps : Array[Double] = [
 
 ///|
 /// How near two times may come (points).
-let tick_room : Double = 90.0
+let tick_room : Double = 200.0
 
 ///|
 /// The step for a view `len` long across `w` points: the finest that keeps the times tick_room apart.
@@ -101,8 +102,12 @@ fn ticks_in(a : Double, z : Double, step : Double) -> Array[Tick] {
 }
 
 ///|
-/// How high the ticks are (points).
-let tick_h : Double = 5.0
+/// How high the notch under a time is (points).
+let tick_h : Double = 2.0
+
+///|
+/// How high the darker fade at the band's foot is (points).
+let tick_fade_h : Double = 16.0
 
 ///|
 /// The size the times are in.
@@ -113,6 +118,25 @@ let tick_size : Double = 10.0
 fn time_ticks(parent : @view.View, w : () -> Double) -> Unit {
   parent.box(fn(o) {
     o.over(Is(true)).presses(Is(false)) |> ignore
+    // (the band's foot faded toward the window's ground: none at its top, 85% at the foot, eased, in 1 pt bands)
+    o.box(fn(f) {
+      f
+      .over(Is(true))
+      .width(By(fn() { Some(w()) }))
+      .height(Is(Some(tick_fade_h)))
+      .offset(Is((0.0, strip_h - tick_fade_h)))
+      |> ignore
+      let n = tick_fade_h.to_int()
+      for i in 0..<n {
+        let k = (i + 1).to_double() / n.to_double()
+        let a = (0.85 * k * k * 255.0).round().to_int64()
+        f.box(fn(b) {
+          b.grow(Is(1.0)).basis(Is(Some(0.0))).ground(By(fn() { clear(c_bg()) | a })) |> ignore
+        })
+        |> ignore
+      }
+    })
+    |> ignore
     // (the moments in reach: the view's length on steps of 1.5x either side of it, so the list changes only as the
     // view moves on by a step or the zoom passes one; the step itself by the view's own length)
     let reach = @signals.computed(fn(_) {
@@ -182,48 +206,47 @@ fn time_ticks(parent : @view.View, w : () -> Double) -> Unit {
       ticks_in(a, z, step)
     }, fn(k) { "\{k.at}/\{k.text}" }, fn(row, k) {
       let tick = k.untracked()
-      let tw = @sf.node_words_w(tick.text, tick_size, weight=if tick.major { 600 } else { 400 }).ceil()
+      let tw = @sf.node_words_w(tick.text, tick_size, weight=if tick.major { 600 } else { 500 }).ceil()
       row.over(Is(true)).lines_up(Is(Some(Start))) |> ignore
       let x = fn(v : @view.View) { x_drawn_of(v, tick.at, w()) }
-      row.box(fn(l) {
-        l
-        .over(Is(true))
-        .width(Is(Some(1.0)))
-        .height(Is(Some(tick_h)))
-        .ground(By(fn() { if tick.major { tone(0xFFFFFF80L, 0x00000080L) } else { tone(0xFFFFFF4DL, 0x0000004DL) } }))
-        .laid_nowhere(By(fn() { x(l) < 0.0 || x(l) > w() }))
-        .offset(By(fn() { (x(l) - 0.5, strip_h - tick_h) }))
-        |> ignore
-      })
-      |> ignore
-      // (beside its line on the right; where a name is in the way there, or the band ends, on its left; else none)
+      // (centred on its moment, kept inside the band; where a name or an icon is in the way, moved aside by up to 36
+      // points, right first; else none)
       let place = fn(v : @view.View) -> Double? {
         let at = x(v)
         if at < 0.0 || at > w() {
           return None
         }
-        let right = at + 4.0
-        if right + tw <= w() - 2.0 && !in_way(v, right - 2.0, right + tw) {
-          return Some(right)
-        }
-        let left = at - 4.0 - tw
-        if left >= 2.0 && !in_way(v, left, left + tw + 2.0) {
-          return Some(left)
+        for k in 0..=12 {
+          let shift = (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2).to_double() * 6.0
+          let left = at - tw / 2.0 + shift
+          if left >= 2.0 && left + tw <= w() - 2.0 && !in_way(v, left - 2.0, left + tw + 2.0) {
+            return Some(left)
+          }
         }
         None
       }
+      row.box(fn(l) {
+        l
+        .over(Is(true))
+        .width(Is(Some(1.0)))
+        .height(Is(Some(tick_h)))
+        .ground(By(fn() { if tick.major { tone(0xFFFFFF99L, 0x00000099L) } else { tone(0xFFFFFF66L, 0x00000066L) } }))
+        .laid_nowhere(By(fn() { place(l) is None }))
+        .offset(By(fn() { (x(l) - 0.5, strip_h - tick_h) }))
+        |> ignore
+      })
+      |> ignore
       row.box(fn(b) {
         b
         .over(Is(true))
         .laid_nowhere(By(fn() { place(b) is None }))
-        .offset(By(fn() { (place(b).unwrap_or(0.0), strip_h - 14.0) }))
+        .offset(By(fn() { (place(b).unwrap_or(0.0), strip_h - 15.0) }))
         |> ignore
-        words(b, fn() { tick.text }, tick_size, if tick.major { ui_muted } else { ui_subtle }, weight=if tick.major {
+        words(b, fn() { tick.text }, tick_size, if tick.major { ui_text } else { ui_muted }, weight=if tick.major {
           600
         } else {
-          400
+          500
         })
-        .words_halo(By(fn() { (name_halo, c_s2()) }))
         |> ignore
       })
       |> ignore
