@@ -32,12 +32,37 @@ fn app_name(process : String) -> String {
   }
   let text = read_text(pjoin(pjoin(root_dir(), "AppIcons"), key + ".txt")).trim().to_owned()
   // (none, or a window's title of a page or a document kept by an earlier recorder: the program's name instead)
-  if text == "" || text.contains(" - ") || text.contains(" — ") || text.contains(" – ") || text.contains(" | ") {
+  if text == "" ||
+    text.contains(" - ") ||
+    text.contains(" — ") ||
+    text.contains(" – ") ||
+    text.contains(" | ") ||
+    file_like(text) {
     app_names_missed[key] = now
     return process
   }
   app_names[key] = text
   text
+}
+
+///|
+/// Whether `text` ends as a file's name does (".html", ".png"): a window's title naming the document it shows, kept
+/// by an earlier recorder (still.fail's 「bazaarplusplus-zero-report.html」), not an app's name.
+fn file_like(text : String) -> Bool {
+  guard text.rev_find(".") is Some(dot) && dot > 0 else { return false }
+  let ext = text[dot + 1:].to_owned()
+  if ext.length() < 1 || ext.length() > 5 || text[dot - 1:dot].to_owned() == " " {
+    return false
+  }
+  let mut i = 0
+  for c in ext {
+    let alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+    if !(alpha || (i > 0 && c >= '0' && c <= '9')) {
+      return false
+    }
+    i += 1
+  }
+  true
 }
 
 ///|

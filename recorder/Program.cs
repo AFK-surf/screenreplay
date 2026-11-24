@@ -1764,7 +1764,12 @@ internal sealed class RecorderApp : IDisposable
     /// <summary>Whether `text` reads as a window's title of a page or a document ("a page - an app", "a file — an
     /// app", "a | b"): not an app's name.</summary>
     private static bool TitleLike(string text) =>
-        text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ");
+        text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ") || FileLike(text);
+
+    /// <summary>Whether `text` ends as a file's name does (".html", ".png": a window titled by the document it shows,
+    /// still.fail's showing bazaarplusplus-zero-report.html): not an app's name.</summary>
+    private static bool FileLike(string text) =>
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"\S\.[A-Za-z][A-Za-z0-9]{0,4}$");
 
     /// <summary>The program's own name, as its FileDescription or else its ProductName writes it; empty where both are
     /// missing or are only its file's name (lower case or with "_": a game's sinking_star; Weixin's "Weixin", its file's
