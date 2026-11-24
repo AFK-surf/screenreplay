@@ -11,12 +11,149 @@ extern "C" fn rp_stay_resident() -> Int = "rp_stay_resident"
 extern "C" fn rp_window_turns() -> Int = "rp_window_turns"
 
 ///|
+extern "C" fn rp_tray_req_seq_get() -> Int = "rp_tray_req_seq_get"
+
+///|
+extern "C" fn rp_tray_req_x_get() -> Int = "rp_tray_req_x_get"
+
+///|
+extern "C" fn rp_tray_req_y_get() -> Int = "rp_tray_req_y_get"
+
+///|
+extern "C" fn rp_note_req_seq_get() -> Int = "rp_note_req_seq_get"
+
+///|
+extern "C" fn rp_prepare_popup(kind : Int) -> Unit = "rp_prepare_popup"
+
+///|
+extern "C" fn rp_style_tray_win(wid : Int, w_pt : Double, h_pt : Double, px : Int, py : Int) -> Int = "rp_style_tray_win"
+
+///|
+extern "C" fn rp_style_note_win(wid : Int, w_pt : Double, h_pt : Double) -> Int = "rp_style_note_win"
+
+///|
 /// The window's hides and shows as last seen.
 let turns_seen : Ref[Int] = Ref(0)
 
 ///|
+let tray_req_seen : Ref[Int] = Ref(0)
+
+///|
+let note_req_seen : Ref[Int] = Ref(0)
+
+///|
+let inproc_tray_wid : Ref[Int] = Ref(0)
+
+///|
+let inproc_tray_pos : Ref[(Int, Int)] = Ref((0, 0))
+
+///|
+let popups_wired : Ref[Bool] = Ref(false)
+
+///|
 fn resident() -> Bool {
   @ui.env("REPLAY_RESIDENT") == "1"
+}
+
+///|
+fn make_popup_window(wid : Int, what : String) -> (@view.View) -> Unit {
+  if what == "tray" {
+    fn(root) { tray_popup_window(wid, root) }
+  } else {
+    fn(root) { note_popup_window(wid, root) }
+  }
+}
+
+///|
+fn wire_inproc_popups() -> Unit {
+  if popups_wired.val {
+    return
+  }
+  popups_wired.val = true
+  @ui.set_window_tree(make_popup_window, around=fn(c) {
+    c.set_clear((@signals.untracked(c_s2) >> 8) & 0xFFFFFFL)
+  })
+  @ui.when_window_closed(fn(wid) {
+    if inproc_tray_wid.val == wid {
+      inproc_tray_wid.val = 0
+    }
+    if inproc_note_wid.val == wid {
+      inproc_note_wid.val = 0
+      if rp_window_shown() == 0 {
+        clip_thumbs_forget_all()
+        rp_frame_release()
+      }
+    }
+  })
+}
+
+///|
+fn check_popup_requests() -> Unit {
+  let tseq = rp_tray_req_seq_get()
+  if tseq != tray_req_seen.val {
+    tray_req_seen.val = tseq
+    let px = rp_tray_req_x_get()
+    let py = rp_tray_req_y_get()
+    inproc_tray_pos.val = (px, py)
+    load_settings()
+    status_rev.set(status_rev.untracked() + 1)
+    let h = tray_height_for(@signals.untracked(recorder_code))
+    if inproc_tray_wid.val > 0 {
+      rp_style_tray_win(inproc_tray_wid.val, tray_w, h, px, py) |> ignore
+    } else if @ui.windows_here() {
+      rp_prepare_popup(1)
+      let wid = @ui.window_open_spec(@ui.WindowSpec::new(
+        role="tray",
+        title="ScreenReplay Tray",
+        w=tray_w,
+        h=h,
+        min_w=tray_w,
+        min_h=304.0,
+        inset=Some(true),
+        what="tray",
+      ))
+      rp_prepare_popup(0)
+      if wid > 0 {
+        inproc_tray_wid.val = wid
+        rp_style_tray_win(wid, tray_w, h, px, py) |> ignore
+      }
+    }
+  }
+  let nseq = rp_note_req_seq_get()
+  if nseq != note_req_seen.val {
+    note_req_seen.val = nseq
+    match note_file_ask() {
+      Some(a) if a.mode != "" => {
+        if inproc_note_wid.val == 0 && a.id == last_note_id_closed.val {
+          return
+        }
+        load_settings()
+        inproc_note_ask.set(Some(a))
+        let h = note_ask_height(a)
+        if inproc_note_wid.val > 0 {
+          rp_style_note_win(inproc_note_wid.val, note_w, h) |> ignore
+        } else if @ui.windows_here() {
+          rp_prepare_popup(2)
+          let wid = @ui.window_open_spec(@ui.WindowSpec::new(
+            role="note",
+            title="ScreenReplay Note",
+            w=note_w,
+            h=h,
+            min_w=note_w,
+            min_h=note_line_h,
+            inset=Some(true),
+            what="note",
+          ))
+          rp_prepare_popup(0)
+          if wid > 0 {
+            inproc_note_wid.val = wid
+            rp_style_note_win(wid, note_w, h) |> ignore
+          }
+        }
+      }
+      _ => ()
+    }
+  }
 }
 
 ///|
@@ -26,13 +163,20 @@ fn stay_resident(root : @view.View) -> Unit {
   if !resident() || rp_stay_resident() != 1 {
     return
   }
+  wire_inproc_popups()
   turns_seen.val = rp_window_turns()
-  @ui.on_frame_take(fn() { check_turns() })
+  @ui.on_message_said("rp.wake", fn(_, _) {
+    check_turns()
+    true
+  })
   watch_turns(root)
 }
 
 ///|
 fn check_turns() -> Unit {
+  if @ui.current_window_id() != 0 {
+    return
+  }
   let now_turns = rp_window_turns()
   let was = turns_seen.val
   if now_turns != was {
@@ -44,6 +188,7 @@ fn check_turns() -> Unit {
       as_opened()
     }
   }
+  check_popup_requests()
 }
 
 ///|

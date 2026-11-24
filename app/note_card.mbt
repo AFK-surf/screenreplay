@@ -259,6 +259,122 @@ fn note_file_parse(path : String) -> NoteAsk? {
 }
 
 ///|
+/// Active in-process note card state (shared between Window 0's dispatcher and the secondary note window).
+let inproc_note_ask : @signals.Signal[NoteAsk?] = @signals.signal(None)
+
+///|
+let inproc_note_wid : Ref[Int] = Ref(0)
+
+///|
+let last_note_id_closed : Ref[Int] = Ref(-1)
+
+///|
+fn note_ask_height(a : NoteAsk) -> Double {
+  if a.mode == "saved" && a.path != "" {
+    note_clip_h
+  } else {
+    note_line_h
+  }
+}
+
+///|
+/// The save/status note card hosted as a secondary window inside the single resident ScreenReplayViewer process.
+fn note_popup_window(wid : Int, root : @view.View) -> Unit {
+  root.tree.hand_over_presses(false)
+  @ui.set_tree_theme(@sf.ui_theme_now)
+  root.ground(By(c_s2)) |> ignore
+  let gone = fn() {
+    match inproc_note_ask.untracked() {
+      Some(a) => last_note_id_closed.val = a.id
+      None => ()
+    }
+    @ui.window_close_here(wid)
+  }
+  let leave_gen : Ref[Int] = Ref(0)
+  fn schedule_leave(ms : Double) -> Unit {
+    leave_gen.val += 1
+    let mine = leave_gen.val
+    fn check() -> Unit {
+      if leave_gen.val != mine || inproc_note_wid.val != wid {
+        return
+      }
+      if root.pointer_within() || root.pointed() {
+        again(root, 2000.0, check)
+      } else {
+        gone()
+      }
+    }
+    again(root, ms, check)
+  }
+  let shown_at : Ref[Double] = Ref(rp_now())
+  let apply_ask = fn(a : NoteAsk) {
+    rp_style_note_win(wid, note_w, note_ask_height(a)) |> ignore
+    shown_at.val = rp_now()
+    if a.mode != "saved" || a.path != "" {
+      schedule_leave(if a.mode == "saved" { 8000.0 } else if a.warn { 7000.0 } else { 4000.0 })
+    } else {
+      leave_gen.val += 1
+    }
+  }
+  match inproc_note_ask.untracked() {
+    Some(a) => apply_ask(a)
+    None => ()
+  }
+  root.reacts(fn() { inproc_note_ask.get() }, fn(v) {
+    match v {
+      Some(a) => apply_ask(a)
+      None => ()
+    }
+  })
+  root.reacts(fn() { note_copied.get() }, fn(v) {
+    if v != "" && inproc_note_wid.val == wid {
+      schedule_leave(4000.0)
+    }
+  })
+  fn look() -> Unit {
+    if inproc_note_wid.val != wid {
+      return
+    }
+    match (inproc_note_ask.untracked(), note_file_ask()) {
+      (Some(was), Some(a)) if a.mode != "" && a.id == was.id && a.path != was.path =>
+        inproc_note_ask.set(Some(a))
+      (Some(was), Some(a)) if a.mode != "" && a.id > was.id =>
+        inproc_note_ask.set(Some(a))
+      _ => ()
+    }
+    match inproc_note_ask.untracked() {
+      Some(a) if a.mode == "saved" && a.path == "" && rp_now() - shown_at.val > 30000.0 => gone()
+      _ => again(root, 100.0, look)
+    }
+  }
+  again(root, 100.0, look)
+  root.box(fn(card) {
+    card.grow(Is(1.0)) |> ignore
+    card.pick(fn() { inproc_note_ask.get() }, fn(b, maybe) {
+      b.grow(Is(1.0)) |> ignore
+      match maybe {
+        Some(a) if a.mode == "saved" && a.path == "" =>
+          note_pending(b, fn() { tf("正在保存最近 {0} 秒…", [sets().last_seconds.to_string()]) }, gone)
+        Some(a) if a.mode == "saved" => {
+          let path = a.path
+          note_body(b, fn() { tf("已保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, path, fn() {
+            rp_launch(cstr(path)) |> ignore
+            gone()
+          }, fn() {
+            rp_reveal(cstr(path))
+            gone()
+          }, gone)
+        }
+        Some(a) if a.mode == "text" =>
+          note_body(b, fn() { a.text }, "", gone, gone, gone, warning=a.warn)
+        _ => ()
+      }
+    }, at_once=true)
+  })
+  |> ignore
+}
+
+///|
 /// The card by the tray, as made once: the whole window is the card. Kept warm (REPLAY_NOTE=warm: started with the
 /// recorder, drawn once unseen, hidden), it shows what the recorder asks the moment it is asked (the recorder shows its
 /// window, rp_note_ask, and its look here finds the ask): started only then, it took a second to come up, by when a

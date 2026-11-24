@@ -96,6 +96,14 @@ internal sealed class HdrToSdr : IDisposable
         constants = gpu.Device.CreateBuffer(new BufferDescription(16, BindFlags.ConstantBuffer, ResourceUsage.Default));
     }
 
+    /// <summary>Tone-maps <paramref name="source"/> (FP16 scRGB, <paramref name="w"/> × <paramref name="h"/>) directly
+    /// into <paramref name="targetView"/> without keeping an intermediate FP16 copy or pinning <paramref name="source"/>.</summary>
+    public void ConvertInto(ID3D11Texture2D source, ID3D11RenderTargetView targetView, int w, int h, DisplayColor display)
+    {
+        using var view = gpu.Device.CreateShaderResourceView(source);
+        Draw(view, targetView, w, h, display);
+    }
+
     /// <summary><paramref name="source"/> (FP16 scRGB, <paramref name="w"/> × <paramref name="h"/>) as SDR BGRA, in a
     /// texture of this converter's own (good till the next call).</summary>
     public ID3D11Texture2D Convert(ID3D11Texture2D source, int w, int h, DisplayColor display)
@@ -130,6 +138,12 @@ internal sealed class HdrToSdr : IDisposable
             inputTexture = new ID3D11Texture2D(source.NativePointer);
         }
 
+        Draw(inputView, outputView!, w, h, display);
+        return output;
+    }
+
+    private void Draw(ID3D11ShaderResourceView sourceView, ID3D11RenderTargetView targetView, int w, int h, DisplayColor display)
+    {
         // (SDR white brought to 1; the peak at least a little above the knee, so the curve has room)
         var white = Math.Max(1f, display.SdrWhiteNits);
         Span<float> tone = [DisplayColor.ScRgbNits / white, Math.Max(Knee + 0.25f, display.PeakNits / white), Knee, 0];
@@ -143,10 +157,10 @@ internal sealed class HdrToSdr : IDisposable
             context.IASetInputLayout(null);
             context.VSSetShader(vertexShader);
             context.PSSetShader(pixelShader);
-            context.PSSetShaderResource(0, inputView);
+            context.PSSetShaderResource(0, sourceView);
             context.PSSetConstantBuffer(0, constants);
             context.RSSetViewport(new Viewport(0, 0, w, h));
-            context.OMSetRenderTargets(outputView!);
+            context.OMSetRenderTargets(targetView);
             context.Draw(3, 0);
             context.PSSetShaderResource(0, null!);
             context.OMSetRenderTargets((ID3D11RenderTargetView)null!);
@@ -155,8 +169,6 @@ internal sealed class HdrToSdr : IDisposable
         {
             multithread.Leave();
         }
-
-        return output;
     }
 
     [DllImport("d3dcompiler_47.dll")]

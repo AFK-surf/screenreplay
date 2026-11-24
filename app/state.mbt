@@ -28,11 +28,12 @@ let clock_gap : Ref[Double] = Ref(1.0e300)
 /// 12 000 times as it was shown: 3.1 s of an empty frame, the user, 2026-11-18 「这会托盘点击又卡住了」). Due after now
 /// as the wall has it, so the hours it waited are done once.
 fn again(root : @view.View, ms : Double, f : () -> Unit) -> Unit {
-  let gap = rp_now() - now()
+  let t = root.cause_at()
+  let gap = rp_now() - t
   if gap < clock_gap.val {
     clock_gap.val = gap
   }
-  root.at_moment(now() + (gap - clock_gap.val) + ms, f, later=true) |> ignore
+  root.at_moment(t + (gap - clock_gap.val) + ms, f, later=true) |> ignore
 }
 
 ///|

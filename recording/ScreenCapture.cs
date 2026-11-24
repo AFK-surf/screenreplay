@@ -30,6 +30,9 @@ internal sealed class ScreenCapture : IDisposable
     private int suppressedErrors;
     private Windows.Graphics.SizeInt32 poolSize;
     private ID3D11Texture2D? latest;
+    private ID3D11RenderTargetView? latestView;
+    private Format latestFormat;
+    private HdrToSdr? hdrToSdr;
     private bool disposed;
 
     /// <summary>Set once the first frame is in.</summary>
@@ -237,8 +240,14 @@ internal sealed class ScreenCapture : IDisposable
                     return;
                 }
 
-                if (latest is null || Width != w || Height != h)
+                // (On HDR, tone-map FP16 scRGB straight into an SDR BGRA `latest` texture instead of keeping a 63.3 MiB
+                // 4K FP16 intermediate copy alongside HdrToSdr's 31.6 MiB BGRA output.)
+                var convertInline = Hdr && (desc.BindFlags & BindFlags.ShaderResource) != 0;
+                var wantFormat = convertInline ? Format.B8G8R8A8_UNorm : (Hdr ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm);
+                if (latest is null || Width != w || Height != h || latestFormat != wantFormat)
                 {
+                    latestView?.Dispose();
+                    latestView = null;
                     latest?.Dispose();
                     latest = gpu.Device.CreateTexture2D(new Texture2DDescription
                     {
@@ -246,16 +255,29 @@ internal sealed class ScreenCapture : IDisposable
                         Height = (uint)h,
                         MipLevels = 1,
                         ArraySize = 1,
-                        Format = Hdr ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm,
+                        Format = wantFormat,
                         SampleDescription = new SampleDescription(1, 0),
                         Usage = ResourceUsage.Default,
                         BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
                     });
+                    if (convertInline)
+                    {
+                        latestView = gpu.Device.CreateRenderTargetView(latest);
+                    }
+                    latestFormat = wantFormat;
                     Width = w;
                     Height = h;
                 }
 
-                gpu.Context.CopySubresourceRegion(latest, 0, 0, 0, 0, texture, 0, new Box(0, 0, 0, w, h, 1));
+                if (convertInline)
+                {
+                    hdrToSdr ??= new HdrToSdr(gpu);
+                    hdrToSdr.ConvertInto(texture, latestView!, w, h, display);
+                }
+                else
+                {
+                    gpu.Context.CopySubresourceRegion(latest, 0, 0, 0, 0, texture, 0, new Box(0, 0, 0, w, h, 1));
+                }
                 if (FrameTrace.On) FrameTrace.Note($"capture t={frame.SystemRelativeTime.Ticks / 10000.0:F2} surface={texture.NativePointer:x} {w}x{h}");
                 LatestTime = frame.SystemRelativeTime.Ticks;
                 Frames++;
@@ -326,8 +348,12 @@ internal sealed class ScreenCapture : IDisposable
 
         lock (gate)
         {
+            latestView?.Dispose();
+            latestView = null;
             latest?.Dispose();
             latest = null;
+            hdrToSdr?.Dispose();
+            hdrToSdr = null;
         }
 
         FirstFrame.Dispose();

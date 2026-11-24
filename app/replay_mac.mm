@@ -891,4 +891,18 @@ void rp_note_reveal(void) {
   }
 }
 
+int32_t rp_tray_req_seq_get(void) { return 0; }
+int32_t rp_tray_req_x_get(void) { return 0; }
+int32_t rp_tray_req_y_get(void) { return 0; }
+int32_t rp_note_req_seq_get(void) { return 0; }
+void rp_prepare_popup(int32_t kind) { (void)kind; }
+int32_t rp_style_tray_win(int32_t wid, double w_pt, double h_pt, int32_t px, int32_t py) {
+  (void)wid; (void)w_pt; (void)h_pt; (void)px; (void)py;
+  return 0;
+}
+int32_t rp_style_note_win(int32_t wid, double w_pt, double h_pt) {
+  (void)wid; (void)w_pt; (void)h_pt;
+  return 0;
+}
+
 }  // extern "C"

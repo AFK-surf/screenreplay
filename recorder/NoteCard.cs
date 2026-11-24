@@ -14,35 +14,30 @@ namespace Replay.Recorder;
 /// saved, written to the same ask. One shown at a time: a new one ends the one before. Shown whatever Windows'
 /// do-not-disturb says, as it answers the user's own press. Where none can be started, false: the icon's balloon instead.
 /// </summary>
-internal sealed class NoteCard(string exe, string root, Action<string> log) : IDisposable
+internal sealed class NoteCard(string exe, string root, Func<(int Pid, IntPtr Window)?> findReplay, Action<string> log) : IDisposable
 {
     [DllImport("user32.dll")]
     private static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
 
     private readonly object gate = new();
-    private Process? warm;
     private Process? shown;
+    private bool shownInProcess;
     private int id = (int)(DateTimeOffset.UtcNow.ToUnixTimeSeconds() % 1_000_000);
     private (string Mode, string Path, string Text, bool Warn) asked;
 
     private string NoteFile => Path.Combine(root, "note.json");
 
-    /// <summary>Let go of (the recorder quits): none started again after, not even by the re-warm 3 s after an ask.</summary>
+    /// <summary>Let go of (the recorder quits): none started again after.</summary>
     private bool disposed;
 
-    /// <summary>Whether `pid` is a card's (the one kept warm or the one shown), not the replay window's.</summary>
+    /// <summary>Whether `pid` is a fallback standalone card's (not the resident replay window's).</summary>
     public bool Owns(int pid)
     {
         lock (gate)
         {
-            return Is(warm, pid) || Is(shown, pid);
-        }
-
-        static bool Is(Process? p, int pid)
-        {
             try
             {
-                return p is { HasExited: false } && p.Id == pid;
+                return shown is { HasExited: false } && shown.Id == pid;
             }
             catch (InvalidOperationException)
             {
@@ -51,38 +46,11 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
         }
     }
 
-    /// <summary>One started now (hidden) if none is kept, so the next ask shows at once.</summary>
-    public void Warm()
-    {
-        lock (gate)
-        {
-            if (disposed || warm is { HasExited: false })
-            {
-                return;
-            }
+    /// <summary>No-op: note cards are hosted in-process inside the single resident ScreenReplayViewer.exe.</summary>
+    public void Warm() { }
 
-            warm?.Dispose();
-            warm = Start("warm", "", "", false);
-        }
-    }
-
-    /// <summary>After the screen came on or the displays changed: the one kept warm started anew, its drawing made on
-    /// the device as it is now (as the tray's panel is, TrayPanel.Renew).</summary>
-    public void Renew()
-    {
-        lock (gate)
-        {
-            if (disposed)
-            {
-                return;
-            }
-
-            Kill(warm);
-            warm = null;
-        }
-
-        Warm();
-    }
+    /// <summary>No-op: the resident viewer is renewed as a whole by RecorderApp.RenewReplayIfHidden.</summary>
+    public void Renew() { }
 
     /// <summary>A clip being saved: the card shown at once, one quiet line (the user: 「saving过程我觉得应该降低打扰」);
     /// grown to the clip's card by Saved; a failure's line (Text) takes its place.</summary>
@@ -94,6 +62,17 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
     {
         lock (gate)
         {
+            if (shownInProcess && asked.Mode == "saved")
+            {
+                asked = ("saved", path, "", false);
+                var wrote = Write();
+                if (findReplay() is { } found && found.Window != IntPtr.Zero)
+                {
+                    PostMessageW(found.Window, 0x8000 + 0x53, IntPtr.Zero, IntPtr.Zero);
+                }
+                return wrote;
+            }
+
             if (shown is { HasExited: true } && asked.Mode == "saved")
             {
                 return true;
@@ -114,7 +93,6 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
 
     private bool Ask(string mode, string path, string text, bool warning)
     {
-        bool ok;
         lock (gate)
         {
             if (disposed)
@@ -124,34 +102,23 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
 
             Kill(shown);
             shown = null;
+            shownInProcess = false;
             id++;
             asked = (mode, path, text, warning);
             Write();
-            var window = warm is { HasExited: false } ? ForegroundApp.TopWindowOf(warm.Id) : IntPtr.Zero;
-            if (window != IntPtr.Zero && PostMessageW(window, 0x8000 + 0x53, IntPtr.Zero, IntPtr.Zero))
+
+            if (findReplay() is { } found && found.Window != IntPtr.Zero &&
+                PostMessageW(found.Window, 0x8000 + 0x53, IntPtr.Zero, IntPtr.Zero))
             {
-                shown = warm;
-                warm = null;
-                log($"note card: {mode} shown (kept warm), pid {shown!.Id}");
-            }
-            else
-            {
-                Kill(warm);
-                warm = null;
-                shown = Start(mode, path, text, warning);
-                log($"note card: {mode} shown (started), pid {shown?.Id}");
+                shownInProcess = true;
+                log($"note card: {mode} shown (in-process), pid {found.Pid}");
+                return true;
             }
 
-            ok = shown is not null;
+            shown = Start(mode, path, text, warning);
+            log($"note card: {mode} shown (fallback), pid {shown?.Id}");
+            return shown is not null;
         }
-
-        // (another kept warm once this one has come up and what was pressed is done)
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(3000);
-            Warm();
-        });
-        return ok;
     }
 
     /// <summary>The ask as it is now into note.json, written whole then moved in.</summary>
@@ -229,9 +196,8 @@ internal sealed class NoteCard(string exe, string root, Action<string> log) : ID
         {
             disposed = true;
             Kill(shown);
-            Kill(warm);
             shown = null;
-            warm = null;
+            shownInProcess = false;
         }
     }
 }

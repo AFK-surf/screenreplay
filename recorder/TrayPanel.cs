@@ -4,129 +4,35 @@ using System.Runtime.InteropServices;
 namespace Replay.Recorder;
 
 /// <summary>
-/// The tray's panel (the user, 2026-11-14: the menu drawn as the replay window is, not Windows' own): the replay
-/// window's program run with REPLAY_TRAY=1 (app/tray_panel.mbt), started the first time it is asked for and kept,
-/// hidden; shown at the pointer when the icon is pressed with the right button, over the other windows, given the
-/// focus (it hides itself as it loses it). What is chosen in it comes back to the recorder's window
-/// (MessageWindow.PanelChose). Where it cannot be shown the icon's own menu opens instead.
+/// The tray's panel (the user, 2026-11-14: the menu drawn as the replay window is, not Windows' own): hosted as an
+/// in-process secondary window inside the single resident ScreenReplayViewer.exe (WM_APP + 0x54), sharing its D3D11
+/// device, shaders, and font atlas instead of keeping a second idle viewer process alive. Where the resident viewer
+/// is unavailable (e.g. mid-renew), returns false so the icon's own menu opens immediately instead.
 /// </summary>
-internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action<string> log) : IDisposable
+internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Func<(int Pid, IntPtr Window)?> findReplay, Action<string> log) : IDisposable
 {
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect
-    {
-        public int Left, Top, Right, Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Point
-    {
-        public int X, Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public Rect Monitor;
-        public Rect Work;
-        public uint Flags;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromPoint(Point pt, uint flags);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int pid);
 
-    private Process? process;
+    [DllImport("user32.dll")]
+    private static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
 
-    /// <summary>Let go of (the recorder quits): never started again after.</summary>
     private volatile bool disposed;
 
-    /// <summary>Started anew (Renew): the one before still ending; none started meanwhile (the icon's own menu opens).</summary>
-    private volatile bool renewing;
+    /// <summary>No separate tray process is owned anymore (hosted in-process inside the resident viewer).</summary>
+    public bool Owns(int pid) => false;
 
-    /// <summary>Whether `pid` is the panel's (not the replay window's).</summary>
-    public bool Owns(int pid)
-    {
-        try
-        {
-            return process is { HasExited: false } p && p.Id == pid;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-    }
+    /// <summary>No-op: the tray menu shares the single resident viewer process.</summary>
+    public void Warm() { }
 
-    /// <summary>Started now if it is not running, so the first press shows it at once.</summary>
-    public void Warm()
-    {
-        if (disposed || renewing)
-        {
-            return;
-        }
-
-        try
-        {
-            if (process is { HasExited: false })
-            {
-                return;
-            }
-
-            process?.Dispose();
-            var info = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! };
-            info.Environment["REPLAY_TRAY"] = "1";
-            info.Environment["REPLAY_ROOT"] = root;
-            info.Environment["REPLAY_RECORDER_HWND"] = recorder.ToInt64().ToString("x");
-            // (beside the replay window's run, never handed to it as the same program started again would be)
-            info.Environment["MBUI_WINDOW"] = "tray";
-            // (it plays no video: mbui's video device and decoders' threads not made for it, 13 MB of the GPU's memory,
-            // 16 MB and 9 threads of its own)
-            info.Environment["MBUI_NO_VIDEO_GPU"] = "1";
-            info.Environment.Remove("REPLAY_RESIDENT");
-            info.Environment.Remove("REPLAY_HIDDEN");
-            // (what mbui says on its own (a frame that stalled: HANG …; no DirectComposition) kept in tray.log, so a
-            // panel shown empty can be told by its time from one that stalled and one whose drawing failed: the user's,
-            // 2026-11-17, 「打开tray menu的时候卡住了，显示了这么个框」, once, not again on trying)
-            info.RedirectStandardError = true;
-            info.RedirectStandardOutput = true;
-            process = Process.Start(info);
-            if (process is not null)
-            {
-                // (ended with the recorder however it ends: ChildJob)
-                ChildJob.Hold(process);
-                process.ErrorDataReceived += (_, e) => Note(e.Data);
-                process.OutputDataReceived += (_, e) => Note(e.Data);
-                process.BeginErrorReadLine();
-                process.BeginOutputReadLine();
-                Note("started, pid " + process.Id);
-            }
-        }
-        catch (Exception ex)
-        {
-            log("tray panel: not started: " + ex.Message);
-            process = null;
-        }
-    }
+    /// <summary>No-op: the resident viewer is renewed as a whole by RecorderApp.RenewReplayIfHidden.</summary>
+    public void Renew(string why) { }
 
     private readonly object noteLock = new();
 
-    /// <summary>A line of the panel's own (or of its life) put in tray.log beside the buffer, with its time; the file
-    /// begun again past 1 MB.</summary>
     private void Note(string? line)
     {
         if (string.IsNullOrEmpty(line))
@@ -155,78 +61,7 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
         }
     }
 
-    /// <summary>
-    /// After the screen came on again or the displays changed: a panel kept hidden through it started anew, its
-    /// drawing made on the device as it is now. (mbui makes its Direct3D device once and never again: one lost to a
-    /// driver's reset while the panel was hidden would leave it drawing nothing, its window shown as an empty frame.)
-    /// One showing is left as it is.
-    /// </summary>
-    public void Renew(string why)
-    {
-        if (disposed)
-        {
-            return;
-        }
-
-        try
-        {
-            if (process is not { HasExited: false })
-            {
-                return;
-            }
-
-            var window = ForegroundApp.TopWindowOf(process.Id);
-            if (window != IntPtr.Zero && IsWindowVisible(window))
-            {
-                return;
-            }
-
-            Note("renewed: " + why);
-            var old = process;
-            process = null;
-            renewing = true;
-            old.Kill();
-            // (its end waited for off the recorder's thread (up to 2 s, the tray and its timers going on meanwhile), then
-            // the new one started on it: one started while the old still ran would be handed to it, as the same program
-            // started again is)
-            var ui = SynchronizationContext.Current;
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    old.WaitForExit(2000);
-                }
-                catch (Exception)
-                {
-                }
-
-                old.Dispose();
-                if (ui is null)
-                {
-                    renewing = false;
-                    Warm();
-                }
-                else
-                {
-                    ui.Post(_ =>
-                    {
-                        renewing = false;
-                        Warm();
-                    }, null);
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            log("tray panel: not renewed: " + ex.Message);
-        }
-    }
-
-    [DllImport("user32.dll")]
-    private static extern bool IsWindowVisible(IntPtr hwnd);
-
-    /// <summary>Shown with its corner at the pointer (x, y: screen pixels), opening towards the screen's middle as a
-    /// tray menu does; false where it could not be.</summary>
+    /// <summary>Opens the tray panel at screen pixels (x, y) inside the resident viewer; false if unavailable.</summary>
     public bool Show(int x, int y)
     {
         if (disposed)
@@ -234,69 +69,29 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Action
             return false;
         }
 
-        Warm();
-        if (process is null)
+        _ = exe;
+        var target = findReplay();
+        if (target is not { } found || found.Window == IntPtr.Zero)
         {
+            log("tray panel: resident viewer unavailable, using native menu");
             return false;
         }
 
-        // (just started: its window made within 2 s, or the menu instead)
-        var window = IntPtr.Zero;
-        for (var i = 0; i < 40 && window == IntPtr.Zero && !process.HasExited; i++)
-        {
-            window = ForegroundApp.TopWindowOf(process.Id);
-            if (window == IntPtr.Zero)
-            {
-                Thread.Sleep(50);
-            }
-        }
-
-        if (window == IntPtr.Zero || !GetWindowRect(window, out var r))
-        {
-            log("tray panel: no window");
-            return false;
-        }
-
-        var w = r.Right - r.Left;
-        var h = r.Bottom - r.Top;
-        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-        // MONITOR_DEFAULTTONEAREST
-        GetMonitorInfoW(MonitorFromPoint(new Point { X = x, Y = y }, 2), ref info);
-        var work = info.Work;
-        var left = x - w < work.Left ? x : x - w;
-        var top = y - h < work.Top ? y : y - h;
-        left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - w));
-        top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - h));
         // (the recorder in front first, as the icon's menu was, so it may hand the focus on to the panel)
         SetForegroundWindow(recorder);
-        AllowSetForegroundWindow(process.Id);
-        // HWND_TOPMOST; SWP_NOSIZE | SWP_SHOWWINDOW
-        SetWindowPos(window, new IntPtr(-1), left, top, 0, 0, 0x0001 | 0x0040);
-        SetForegroundWindow(window);
-        Note("shown");
+        AllowSetForegroundWindow(found.Pid);
+        if (!PostMessageW(found.Window, 0x8000 + 0x54, (IntPtr)x, (IntPtr)y))
+        {
+            log("tray panel: post failed, using native menu");
+            return false;
+        }
+
+        Note("shown (in-process, pid " + found.Pid + ")");
         return true;
     }
 
     public void Dispose()
     {
-        if (disposed)
-        {
-            return;
-        }
-
         disposed = true;
-        try
-        {
-            if (process is { HasExited: false })
-            {
-                process.Kill();
-            }
-        }
-        catch (Exception)
-        {
-        }
-
-        process?.Dispose();
-        process = null;
     }
 }

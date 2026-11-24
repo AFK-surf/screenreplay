@@ -88,27 +88,8 @@ fn tray_rule(parent : @view.View) -> Unit {
 }
 
 ///|
-/// The panel as made once.
-fn tray_window(root : @view.View) -> Unit {
-  the_root.val = Some(root)
-  root.tree.hand_over_presses(false)
-  @ui.set_tree_theme(@sf.ui_theme_now)
-  load_prefs()
-  ask_system(root)
-  keep_theme(root)
-  load_settings()
-  root.ground(By(c_s2)).pad(Is(4.0)) |> ignore
-  // (its window made a panel once it is up; while it shows, the recorder's word read every second)
-  // (and drawn once unseen, its device made, before anyone presses for it: rp_tray_window, rp_tray_primed)
-  root.at_moment(now() + 1.0, fn() { rp_tray_window(tray_w, tray_height_for(@signals.untracked(recorder_code))) |> ignore }) |> ignore
-  root.reacts(recorder_code, fn(code) { rp_tray_window(tray_w, tray_height_for(code)) |> ignore })
-  fn look() -> Unit {
-    if rp_window_shown() == 1 {
-      status_rev.set(status_rev.untracked() + 1)
-    }
-    again(root, 1000.0, look)
-  }
-  look()
+/// The panel's interior, shared by the standalone REPLAY_TRAY=1 process and the in-process secondary tray window.
+fn tray_content(root : @view.View, do_cmd : (Int) -> Unit) -> Unit {
   // the head: the mark and the name; how the recorder stands at the right, its dot red while it records
   root.box(fn(head) {
     head.row(Is(true)).height(Is(Some(36.0))).padding(Is((10.0, 0.0, 10.0, 0.0))).gap(Is(8.0)).lines_up(Is(Some(Middle))) |> ignore
@@ -154,29 +135,77 @@ fn tray_window(root : @view.View) -> Unit {
   tray_rule(root)
   // what it is for, first: the last moments saved
   let mac = is_mac()
-  tray_item(root, fn() { tf("保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, if mac { "⌃⌥S" } else { "Ctrl+Alt+S" }, fn() { tray_do(5) }, strong=true)
-  tray_item(root, fn() { t("打开回放") }, if mac { "⌃⌥R" } else { "Ctrl+Alt+R" }, fn() { tray_do(1) })
-  tray_item(root, fn() { t("标记此刻") }, if mac { "⌃⌥M" } else { "Ctrl+Alt+M" }, fn() { tray_do(4) })
-  tray_item(root, fn() { t("打开已保存片段文件夹") }, "", fn() { tray_do(3) })
+  tray_item(root, fn() { tf("保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, if mac { "⌃⌥S" } else { "Ctrl+Alt+S" }, fn() { do_cmd(5) }, strong=true)
+  tray_item(root, fn() { t("打开回放") }, if mac { "⌃⌥R" } else { "Ctrl+Alt+R" }, fn() { do_cmd(1) })
+  tray_item(root, fn() { t("标记此刻") }, if mac { "⌃⌥M" } else { "Ctrl+Alt+M" }, fn() { do_cmd(4) })
+  tray_item(root, fn() { t("打开已保存片段文件夹") }, "", fn() { do_cmd(3) })
   tray_rule(root)
   // recording held or let go, as it stands now
   root.pick(fn() { recorder_code() }, fn(b, code) {
     if code == "paused" {
       tray_item(b, fn() { t("继续录制") }, "", fn() {
         asked_recorder("recording", t("录制中"))
-        tray_do(8)
+        do_cmd(8)
       })
-      tray_item(b, fn() { t("关闭后台录制") }, "", fn() { tray_do(9) })
+      tray_item(b, fn() { t("关闭后台录制") }, "", fn() { do_cmd(9) })
     } else if code == "disabled" {
-      tray_item(b, fn() { t("开启后台录制") }, "", fn() { tray_do(10) })
+      tray_item(b, fn() { t("开启后台录制") }, "", fn() { do_cmd(10) })
     } else {
-      tray_item(b, fn() { t("暂停 15 分钟") }, "", fn() { tray_do(6) })
-      tray_item(b, fn() { t("暂停 1 小时") }, "", fn() { tray_do(7) })
-      tray_item(b, fn() { t("关闭后台录制") }, "", fn() { tray_do(9) })
+      tray_item(b, fn() { t("暂停 15 分钟") }, "", fn() { do_cmd(6) })
+      tray_item(b, fn() { t("暂停 1 小时") }, "", fn() { do_cmd(7) })
+      tray_item(b, fn() { t("关闭后台录制") }, "", fn() { do_cmd(9) })
     }
   }, at_once=true)
   tray_rule(root)
-  tray_item(root, fn() { t("设置…") }, "", fn() { tray_do(2) })
+  tray_item(root, fn() { t("设置…") }, "", fn() { do_cmd(2) })
   tray_rule(root)
-  tray_item(root, fn() { t("退出") }, "", fn() { tray_do(11) })
+  tray_item(root, fn() { t("退出") }, "", fn() { do_cmd(11) })
+}
+
+///|
+/// The panel hosted as a secondary window inside the single resident ScreenReplayViewer process.
+fn tray_popup_window(wid : Int, root : @view.View) -> Unit {
+  root.tree.hand_over_presses(false)
+  @ui.set_tree_theme(@sf.ui_theme_now)
+  root.ground(By(c_s2)).pad(Is(4.0)) |> ignore
+  root.reacts(recorder_code, fn(code) {
+    let (px, py) = inproc_tray_pos.val
+    rp_style_tray_win(wid, tray_w, tray_height_for(code), px, py) |> ignore
+  })
+  fn look() -> Unit {
+    if inproc_tray_wid.val == wid {
+      status_rev.set(status_rev.untracked() + 1)
+      again(root, 1000.0, look)
+    }
+  }
+  again(root, 1000.0, look)
+  tray_content(root, fn(cmd) {
+    rp_tray_tell(cmd) |> ignore
+    @ui.window_close_here(wid)
+  })
+}
+
+///|
+/// The panel as made once (standalone REPLAY_TRAY=1 fallback / macOS).
+fn tray_window(root : @view.View) -> Unit {
+  the_root.val = Some(root)
+  root.tree.hand_over_presses(false)
+  @ui.set_tree_theme(@sf.ui_theme_now)
+  load_prefs()
+  ask_system(root)
+  keep_theme(root)
+  load_settings()
+  root.ground(By(c_s2)).pad(Is(4.0)) |> ignore
+  // (its window made a panel once it is up; while it shows, the recorder's word read every second)
+  // (and drawn once unseen, its device made, before anyone presses for it: rp_tray_window, rp_tray_primed)
+  root.at_moment(now() + 1.0, fn() { rp_tray_window(tray_w, tray_height_for(@signals.untracked(recorder_code))) |> ignore }) |> ignore
+  root.reacts(recorder_code, fn(code) { rp_tray_window(tray_w, tray_height_for(code)) |> ignore })
+  fn look() -> Unit {
+    if rp_window_shown() == 1 {
+      status_rev.set(status_rev.untracked() + 1)
+    }
+    again(root, 1000.0, look)
+  }
+  look()
+  tray_content(root, tray_do)
 }

@@ -482,9 +482,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
         type.Set(Native.MT_FRAME_SIZE, Native.Pack((uint)size.Width, (uint)size.Height));
         type.Set(Native.MT_INTERLACE_MODE, 2u);
         type.Set(Native.MT_PIXEL_ASPECT_RATIO, Native.Pack(1, 1));
-        // (3 initial, 8 max: no B-frames and ClockLoop gates via Ready(encoder); capping at 8 keeps 4K NV12 pool
-        // <= 95 MiB instead of growing to 24 frames / 285 MiB when the GPU is briefly saturated)
-        allocator.InitializeSampleAllocatorEx(3, 8, attrs, type);
+        // (2 initial, 6 max: no B-frames and ClockLoop gates via Ready(encoder); starting at 2 and capping at 6 keeps
+        // 4K NV12 pool at ~24-71 MiB instead of 48-285 MiB)
+        allocator.InitializeSampleAllocatorEx(2, 6, attrs, type);
         return allocator;
     }
 

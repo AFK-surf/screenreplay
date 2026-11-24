@@ -96,6 +96,14 @@ internal sealed class Gpu : IDisposable
         {
             Marshal.Release(inspectable);
         }
+
+        try
+        {
+            shared = SharedMemory ? 1 : 0;
+        }
+        catch (Exception)
+        {
+        }
     }
 
     /// <summary>The GPU shares the computer's memory (D3D11's UnifiedMemoryArchitecture: integrated graphics, Intel's

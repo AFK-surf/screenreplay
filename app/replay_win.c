@@ -484,12 +484,13 @@ static BOOL CALLBACK rp_affinity_one(HWND hwnd, LPARAM on) {
 // every 30 s for a window another thread of the process made)
 static BOOL CALLBACK rp_affinity_thread(HWND hwnd, LPARAM on) { return rp_affinity_one(hwnd, on); }
 
+static int rp_last_affinity = -1;
+
 void rp_hide_from_capture(int32_t on) {
-  static int last = -1;
   static ULONGLONG walked = 0;
   ULONGLONG now = GetTickCount64();
-  if (last != on || now - walked >= 30000) {
-    last = on;
+  if (rp_last_affinity != on || now - walked >= 30000) {
+    rp_last_affinity = on;
     walked = now;
     EnumWindows(rp_affinity_one, (LPARAM)on);
     return;
@@ -573,9 +574,16 @@ moonbit_bytes_t rp_gpu(void) {
 // its close (the title bar's ×, Alt+F4, WM_CLOSE) taken here before mbui's host would end the program. How many times it
 // was hidden and shown, for the app to put itself back as at a fresh open (rp_window_turns).
 extern void *mb_app_hwnd(void);
+extern void *mb_app_hwnd_of(int wid);
 extern void mb_app_wake(void);
+extern void mb_post(const char *channel, const char *json, size_t len, const uint8_t *bytes, size_t blen);
+static void rp_wake_moonbit(void) {
+  mb_post("rp.wake", "", 0, NULL, 0);
+}
 static WNDPROC rp_prev_proc;
 static volatile LONG rp_hides, rp_shows;
+static volatile LONG rp_tray_req_seq, rp_note_req_seq;
+static volatile int rp_tray_req_x, rp_tray_req_y;
 static int rp_priming, rp_show_asked, rp_hiding;
 static HWND rp_primed_hwnd, rp_hiding_hwnd;
 static LONG_PTR rp_primed_ex;
@@ -665,6 +673,18 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     return 1;
   }
+  if (msg == WM_APP + 0x54) {
+    rp_tray_req_x = (int)(intptr_t)wp;
+    rp_tray_req_y = (int)(intptr_t)lp;
+    InterlockedIncrement(&rp_tray_req_seq);
+    rp_wake_moonbit();
+    return 0;
+  }
+  if (msg == WM_APP + 0x53) {
+    InterlockedIncrement(&rp_note_req_seq);
+    rp_wake_moonbit();
+    return 0;
+  }
   if (msg == WM_CLOSE) {
     if (!rp_hiding) {
       BOOL cloak = TRUE;
@@ -677,7 +697,7 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
       rp_aac_release_all();
       rp_thumb_release();
       rp_frame_release();
-      mb_app_wake();
+      rp_wake_moonbit();
     }
     return 0;
   }
@@ -686,11 +706,11 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
       rp_show_asked = 1;
       rp_unprime_now(h, 0);
       InterlockedIncrement(&rp_shows);
-      mb_app_wake();
+      rp_wake_moonbit();
     } else if (rp_hiding) {
       rp_cancel_hiding(h);
       InterlockedIncrement(&rp_shows);
-      mb_app_wake();
+      rp_wake_moonbit();
     }
   }
   if (msg == WM_WINDOWPOSCHANGED && !rp_priming) {
@@ -698,7 +718,7 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     if (pos->flags & SWP_SHOWWINDOW) {
       if (rp_hiding) rp_cancel_hiding(h);
       InterlockedIncrement(&rp_shows);
-      mb_app_wake();
+      rp_wake_moonbit();
     }
   }
   return CallWindowProcW(rp_prev_proc, h, msg, wp, lp);
@@ -1054,6 +1074,176 @@ void rp_note_reveal(void) {
 void rp_tray_hide(void) {
   HWND h = (HWND)mb_app_hwnd();
   if (h) ShowWindow(h, SW_HIDE);
+}
+
+// In-process secondary popups (tray menu and save note card hosted inside the single resident ScreenReplayViewer.exe,
+// sharing its D3D11 device, shaders, and 64 MB font atlas so the background app stays at 2 processes total).
+int32_t rp_tray_req_seq_get(void) { return (int32_t)rp_tray_req_seq; }
+int32_t rp_tray_req_x_get(void) { return (int32_t)rp_tray_req_x; }
+int32_t rp_tray_req_y_get(void) { return (int32_t)rp_tray_req_y; }
+int32_t rp_note_req_seq_get(void) { return (int32_t)rp_note_req_seq; }
+
+static HHOOK rp_popup_cbt;
+static int rp_popup_kind;
+static HWND rp_sub_tray_hwnd, rp_sub_note_hwnd;
+static WNDPROC rp_sub_tray_prev, rp_sub_note_prev;
+static HHOOK rp_sub_tray_mouse;
+static int rp_sub_tray_active;
+
+static LRESULT CALLBACK rp_sub_note_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+  if (msg == WM_WINDOWPOSCHANGING) {
+    WINDOWPOS *pos = (WINDOWPOS *)lp;
+    pos->flags |= SWP_NOACTIVATE;
+  }
+  WNDPROC prev = rp_sub_note_prev;
+  if (msg == WM_DESTROY) {
+    if (rp_sub_note_hwnd == h) {
+      rp_sub_note_hwnd = NULL;
+      rp_sub_note_prev = NULL;
+    }
+    if (prev) SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)prev);
+  }
+  return prev ? CallWindowProcW(prev, h, msg, wp, lp) : DefWindowProcW(h, msg, wp, lp);
+}
+
+static LRESULT CALLBACK rp_popup_cbt_proc(int code, WPARAM wp, LPARAM lp) {
+  if (code == HCBT_CREATEWND && rp_popup_kind != 0) {
+    CBT_CREATEWNDW *c = (CBT_CREATEWNDW *)lp;
+    if (c->lpcs->hwndParent == NULL && !(c->lpcs->style & WS_CHILD)) {
+      HWND h = (HWND)wp;
+      int kind = rp_popup_kind;
+      rp_popup_kind = 0;
+      if (rp_popup_cbt) {
+        UnhookWindowsHookEx(rp_popup_cbt);
+        rp_popup_cbt = NULL;
+      }
+      c->lpcs->style = (c->lpcs->style & ~(LONG)(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)) | WS_POPUP;
+      c->lpcs->dwExStyle = (c->lpcs->dwExStyle & ~(DWORD)WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | (kind == 2 ? WS_EX_NOACTIVATE : 0);
+      if (kind == 2 && !rp_sub_note_prev) {
+        rp_sub_note_hwnd = h;
+        rp_sub_note_prev = (WNDPROC)SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)rp_sub_note_proc);
+      }
+      return 0;
+    }
+  }
+  return CallNextHookEx(rp_popup_cbt, code, wp, lp);
+}
+
+void rp_prepare_popup(int32_t kind) {
+  if (kind == 0) {
+    rp_popup_kind = 0;
+    if (rp_popup_cbt) {
+      UnhookWindowsHookEx(rp_popup_cbt);
+      rp_popup_cbt = NULL;
+    }
+    return;
+  }
+  rp_popup_kind = (int)kind;
+  if (!rp_popup_cbt) rp_popup_cbt = SetWindowsHookExW(WH_CBT, rp_popup_cbt_proc, NULL, GetCurrentThreadId());
+}
+
+static LRESULT CALLBACK rp_sub_tray_mouse_proc(int code, WPARAM wp, LPARAM lp) {
+  if (code == HC_ACTION && (wp == WM_LBUTTONDOWN || wp == WM_RBUTTONDOWN || wp == WM_MBUTTONDOWN) && rp_sub_tray_hwnd) {
+    MSLLHOOKSTRUCT *m = (MSLLHOOKSTRUCT *)lp;
+    RECT r;
+    if (IsWindowVisible(rp_sub_tray_hwnd) && GetWindowRect(rp_sub_tray_hwnd, &r) && !PtInRect(&r, m->pt))
+      PostMessageW(rp_sub_tray_hwnd, WM_CLOSE, 0, 0);
+  }
+  return CallNextHookEx(rp_sub_tray_mouse, code, wp, lp);
+}
+
+static LRESULT CALLBACK rp_sub_tray_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_ACTIVATE) {
+    if (LOWORD(wp) != WA_INACTIVE) {
+      rp_sub_tray_active = 1;
+    } else if (rp_sub_tray_active) {
+      PostMessageW(h, WM_CLOSE, 0, 0);
+    }
+  } else if (msg == WM_KEYDOWN && wp == VK_ESCAPE) {
+    PostMessageW(h, WM_CLOSE, 0, 0);
+    return 0;
+  }
+  WNDPROC prev = rp_sub_tray_prev;
+  if (msg == WM_DESTROY) {
+    if (rp_sub_tray_mouse) {
+      UnhookWindowsHookEx(rp_sub_tray_mouse);
+      rp_sub_tray_mouse = NULL;
+    }
+    if (rp_sub_tray_hwnd == h) {
+      rp_sub_tray_hwnd = NULL;
+      rp_sub_tray_prev = NULL;
+      rp_sub_tray_active = 0;
+    }
+    if (prev) SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)prev);
+  }
+  return prev ? CallWindowProcW(prev, h, msg, wp, lp) : DefWindowProcW(h, msg, wp, lp);
+}
+
+int32_t rp_style_tray_win(int32_t wid, double w_pt, double h_pt, int32_t px, int32_t py) {
+  HWND h = (HWND)mb_app_hwnd_of((int)wid);
+  if (!h) return 0;
+  LONG_PTR style = GetWindowLongPtrW(h, GWL_STYLE);
+  style = (style & ~(LONG_PTR)(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)) | WS_POPUP;
+  SetWindowLongPtrW(h, GWL_STYLE, style);
+  LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & ~(LONG_PTR)WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_TOPMOST);
+  DWORD corner = 2;
+  DwmSetWindowAttribute(h, 33, &corner, sizeof(corner));
+  if (rp_last_affinity >= 0) rp_affinity_one(h, (LPARAM)rp_last_affinity);
+  int dpi = (int)GetDpiForWindow(h);
+  int w = (int)(w_pt * dpi / 96.0 + 0.5);
+  int hh = (int)(h_pt * dpi / 96.0 + 0.5);
+  POINT pt = {px, py};
+  MONITORINFO mi = {sizeof(mi)};
+  HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+  RECT work = {0, 0, 1920, 1080};
+  if (mon && GetMonitorInfoW(mon, &mi)) work = mi.rcWork;
+  int left = px - w < work.left ? px : px - w;
+  int top = py - hh < work.top ? py : py - hh;
+  int max_left = work.right - w > work.left ? work.right - w : work.left;
+  int max_top = work.bottom - hh > work.top ? work.bottom - hh : work.top;
+  if (left < work.left) left = work.left;
+  if (left > max_left) left = max_left;
+  if (top < work.top) top = work.top;
+  if (top > max_top) top = max_top;
+  if (rp_sub_tray_hwnd != h) {
+    rp_sub_tray_hwnd = h;
+    rp_sub_tray_active = 0;
+    rp_sub_tray_prev = (WNDPROC)SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)rp_sub_tray_proc);
+  }
+  if (!rp_sub_tray_mouse) {
+    rp_sub_tray_mouse = SetWindowsHookExW(WH_MOUSE_LL, rp_sub_tray_mouse_proc, GetModuleHandleW(NULL), 0);
+  }
+  SetWindowPos(h, HWND_TOPMOST, left, top, w, hh, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+  SetForegroundWindow(h);
+  return 1;
+}
+
+int32_t rp_style_note_win(int32_t wid, double w_pt, double h_pt) {
+  HWND h = (HWND)mb_app_hwnd_of((int)wid);
+  if (!h) return 0;
+  LONG_PTR style = GetWindowLongPtrW(h, GWL_STYLE);
+  style = (style & ~(LONG_PTR)(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)) | WS_POPUP;
+  SetWindowLongPtrW(h, GWL_STYLE, style);
+  LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+  SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & ~(LONG_PTR)WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
+  DWORD corner = 2;
+  DwmSetWindowAttribute(h, 33, &corner, sizeof(corner));
+  if (rp_last_affinity >= 0) rp_affinity_one(h, (LPARAM)rp_last_affinity);
+  if (rp_sub_note_hwnd != h) {
+    rp_sub_note_hwnd = h;
+    rp_sub_note_prev = (WNDPROC)SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)rp_sub_note_proc);
+  }
+  RECT work;
+  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  int dpi = (int)GetDpiForWindow(h);
+  int w = (int)(w_pt * dpi / 96.0 + 0.5);
+  int hh = (int)(h_pt * dpi / 96.0 + 0.5);
+  int margin = MulDiv(12, dpi, 96);
+  SetWindowPos(h, HWND_TOPMOST, work.right - w - margin, work.bottom - hh - margin, w, hh,
+               SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  return 1;
 }
 
 // What was chosen in the panel told to the recorder: its window (REPLAY_RECORDER_HWND, hex) sent WM_APP + 0x51 with

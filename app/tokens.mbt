@@ -9,6 +9,9 @@
 ///|
 /// One colour in the dark and in the light.
 fn tone(dark : Int64, light : Int64) -> Int64 {
+  if @ui.current_window_id() != 0 {
+    return if is_dark() { dark } else { light }
+  }
   match (theme_way.val, the_root.val) {
     // (between the two over 160 ms as the theme turns, from the moment it turned)
     (Some(way), Some(root)) => mix(light, dark, way.shown(root))

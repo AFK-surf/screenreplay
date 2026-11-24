@@ -282,10 +282,10 @@ internal sealed class RecorderApp : IDisposable
             Visible = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")),
         };
 
-        // (the right button's panel, drawn as the replay window is; started a little after the recorder, so the first
-        // press shows it at once)
-        panel = new TrayPanel(paths.ReplayExe, paths.Root, window.Handle, Log);
-        notes = new NoteCard(paths.ReplayExe, paths.Root, Log);
+        // (the right button's panel and save note cards are hosted as in-process secondary windows inside the single
+        // resident ScreenReplayViewer.exe, avoiding 2 extra idle viewer processes and ~75 MB VRAM / ~250 MB RAM)
+        panel = new TrayPanel(paths.ReplayExe, paths.Root, window.Handle, FindReplay, Log);
+        notes = new NoteCard(paths.ReplayExe, paths.Root, FindReplay, Log);
         updater = new Updater(
             paths.Root,
             IsReplayWindowVisible,
@@ -294,21 +294,6 @@ internal sealed class RecorderApp : IDisposable
             wasUpdated);
         tray.Panel = (x, y) => panel.Show(x, y);
         window.PanelChose += Chosen;
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")))
-        {
-            warmTimer = window.Every(5000, () =>
-            {
-                window.Stop(warmTimer);
-                warmTimer = 0;
-                if (exiting)
-                {
-                    return;
-                }
-
-                panel.Warm();
-                notes.Warm();
-            });
-        }
 
         window.HotkeyPressed += id =>
         {
@@ -415,9 +400,7 @@ internal sealed class RecorderApp : IDisposable
 
     private readonly FileSystemWatcher asks;
 
-    /// <summary>The timers that start the tray's panel and the note card (5 s after starting) and start them anew (3 s
-    /// after the displays changed): stopped as the recorder quits, so neither is started again behind it.</summary>
-    private nuint warmTimer;
+    /// <summary>The timer that renews the resident viewer 3 s after the displays changed: stopped as the recorder quits.</summary>
     private nuint renewTimer;
 
     /// <summary>The replay window this recorder started (the resident one), while it runs.</summary>
@@ -1971,7 +1954,8 @@ internal sealed class RecorderApp : IDisposable
         }
 
         var found = FindReplay();
-        if (found is null || ForegroundApp.IsReplayShown(found.Value.Window))
+        if (found is null || ForegroundApp.IsReplayShown(found.Value.Window) ||
+            ForegroundApp.HasOtherVisibleWindow(found.Value.Pid, found.Value.Window))
         {
             return;
         }
@@ -2069,6 +2053,12 @@ internal sealed class RecorderApp : IDisposable
             return;
         }
 
+        if (ForegroundApp.HasOtherVisibleWindow(found.Value.Pid, found.Value.Window))
+        {
+            replayHiddenSince = null;
+            return;
+        }
+
         var bloated = false;
         if (!replayWasVisible)
         {
@@ -2143,6 +2133,7 @@ internal sealed class RecorderApp : IDisposable
         info.Environment["REPLAY_DIR"] = paths.Buffer;
         info.Environment["REPLAY_ROOT"] = paths.Root;
         info.Environment["REPLAY_RESIDENT"] = "1";
+        info.Environment["REPLAY_RECORDER_HWND"] = window.Handle.ToInt64().ToString("x");
         try
         {
             var started = Process.Start(info);
@@ -2202,14 +2193,7 @@ internal sealed class RecorderApp : IDisposable
 
         exiting = true;
         window.Stop(watch);
-        // (nothing started again behind it while it stops the recorder below: the panel's and the card's timers, the
-        // folder's news)
-        if (warmTimer != 0)
-        {
-            window.Stop(warmTimer);
-            warmTimer = 0;
-        }
-
+        // (nothing started again behind it while it stops the recorder below: the renew timer, the folder's news)
         if (renewTimer != 0)
         {
             window.Stop(renewTimer);
@@ -3022,6 +3006,31 @@ internal static class ForegroundApp
             return false;
         }
         return GetWindowRect(hwnd, out var r) && (r.Right - r.Left) >= 600;
+    }
+
+    public static bool HasOtherVisibleWindow(int pid, IntPtr mainHwnd)
+    {
+        var any = false;
+        EnumWindows((h, _) =>
+        {
+            if (h == mainHwnd)
+            {
+                return true;
+            }
+            GetWindowThreadProcessId(h, out var owner);
+            if (owner == (uint)pid && IsWindowVisible(h))
+            {
+                var title = new StringBuilder(64);
+                GetWindowText(h, title, 64);
+                if (title.ToString() is "ScreenReplay Tray" or "ScreenReplay Note")
+                {
+                    any = true;
+                    return false;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return any;
     }
 
     public static void Bring(IntPtr hwnd)
