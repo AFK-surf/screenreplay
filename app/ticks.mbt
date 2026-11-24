@@ -1,10 +1,10 @@
 // The time of day drawn into the track (the user's pick, 2026-11-24: 「E：画进轨道里」, after 「注意我们要尽可能高效利用
-// 垂直空间」 took back a ruler of its own under it): a faint line down the band at each round moment, its time at the
-// line's foot beside it, no height added. How far apart they are follows the zoom, never closer than about 90 points:
+// 垂直空间」 took back a ruler of its own under it): a short tick at the band's foot at each round moment (no line down it: the user, 2026-11-24, 两种线都减), its time
+// beside it, no height added. How far apart they are follows the zoom, never closer than about 90 points:
 // 10 seconds apart at a minute's view, a minute at 10 minutes, 10 at an hour, 15 or 30 at a few hours. On the minute,
-// the hour or midnight (whichever is a step coarser) the line is stronger and its time bold; midnight says the day.
+// the hour or midnight (whichever is a step coarser) the tick is stronger and its time bold; midnight says the day.
 // Under a filter of apps or with gaps folded only the moments kept are marked, none in a seam. A time is left out
-// where an app's name or 未录制 is in its way (its line stays).
+// where an app's name or 未录制 is in its way on both sides (its tick stays).
 
 ///|
 /// The steps the moments marked may be apart (ms).
@@ -101,6 +101,10 @@ fn ticks_in(a : Double, z : Double, step : Double) -> Array[Tick] {
 }
 
 ///|
+/// How high the ticks are (points).
+let tick_h : Double = 5.0
+
+///|
 /// The size the times are in.
 let tick_size : Double = 10.0
 
@@ -185,10 +189,10 @@ fn time_ticks(parent : @view.View, w : () -> Double) -> Unit {
         l
         .over(Is(true))
         .width(Is(Some(1.0)))
-        .height(Is(Some(strip_h)))
-        .ground(By(fn() { if tick.major { tone(0xFFFFFF38L, 0x00000038L) } else { tone(0xFFFFFF1CL, 0x0000001CL) } }))
+        .height(Is(Some(tick_h)))
+        .ground(By(fn() { if tick.major { tone(0xFFFFFF80L, 0x00000080L) } else { tone(0xFFFFFF4DL, 0x0000004DL) } }))
         .laid_nowhere(By(fn() { x(l) < 0.0 || x(l) > w() }))
-        .offset(By(fn() { (x(l) - 0.5, 0.0) }))
+        .offset(By(fn() { (x(l) - 0.5, strip_h - tick_h) }))
         |> ignore
       })
       |> ignore

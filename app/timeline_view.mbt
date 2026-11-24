@@ -207,8 +207,40 @@ fn hatch_d(x : Double, w : Double, h : Double) -> String {
 }
 
 ///|
+/// The least width (points) a stretch is cut off from the next at: two stretches touching are drawn as one where
+/// either is narrower (the user, 2026-11-24, of a long view: 「细线就会很密集，其实没啥必要」, then 「两种线都减」).
+let cut_min_w : Double = 6.0
+
+///|
+/// The stretches in the view from `from` `len` long across `w` as drawn: (left, right) points, the pixel apart at
+/// each cut not taken off yet; touching ones joined where one of them is narrower than cut_min_w.
+fn drawn_spans(w : Double, from : Double, len : Double) -> Array[(Double, Double)] {
+  let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
+  let out : Array[(Double, Double)] = []
+  let mut last_end = -1.0e300
+  let mut last_w = 0.0
+  for p in pieces_now.get() {
+    if p.1 <= from || p.0 >= from + len {
+      continue
+    }
+    let a = x_of(p.0)
+    let b = x_of(p.1)
+    let touching = out.length() > 0 && p.0 - last_end <= 1.0
+    if touching && (b - a < cut_min_w || last_w < cut_min_w) {
+      let k = out.length() - 1
+      out[k] = (out[k].0, b)
+    } else {
+      out.push((a, b))
+    }
+    last_end = p.1
+    last_w = b - a
+  }
+  out
+}
+
+///|
 /// The band's grounds as one picture `w` wide, for the view from `from` `len` long: each app's stretch square, a pixel
-/// apart; where nothing was recorded a faint hatching and a hairline inside.
+/// apart (drawn_spans: not where they are too narrow); where nothing was recorded a faint hatching and a hairline inside.
 fn grounds_picture(w : Double, from : Double, len : Double) -> @pixels.Vector? {
   if w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return None
@@ -217,12 +249,8 @@ fn grounds_picture(w : Double, from : Double, len : Double) -> @pixels.Vector? {
   let fill = StringBuilder()
   let hatches = StringBuilder()
   let boxes = StringBuilder()
-  for p in pieces_now.get() {
-    if p.1 <= from || p.0 >= from + len {
-      continue
-    }
-    let a = x_of(p.0)
-    let b = x_of(p.1)
+  for sp in drawn_spans(w, from, len) {
+    let (a, b) = sp
     if b - a >= 2.0 {
       fill.write_string(rect_d(a, 0.0, b - a - 1.0, strip_h))
     }
@@ -289,14 +317,10 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> @pixels
   if !any {
     return None
   }
-  let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
   let all_d = StringBuilder()
-  for p in pieces_now.get() {
-    if p.1 <= from || p.0 >= from + len {
-      continue
-    }
-    let a = x_of(p.0)
-    let b = x_of(p.1) - 1.0
+  for sp in drawn_spans(w, from, len) {
+    let a = sp.0
+    let b = sp.1 - 1.0
     if b - a < 1.0 {
       continue
     }
