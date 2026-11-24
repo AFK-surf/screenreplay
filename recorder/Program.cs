@@ -1768,8 +1768,14 @@ internal sealed class RecorderApp : IDisposable
 
     /// <summary>Whether `text` ends as a file's name does (".html", ".png": a window titled by the document it shows,
     /// still.fail's showing bazaarplusplus-zero-report.html): not an app's name.</summary>
-    private static bool FileLike(string text) =>
-        System.Text.RegularExpressions.Regex.IsMatch(text, @"\S\.[A-Za-z][A-Za-z0-9]{0,4}$");
+    private static bool FileLike(string text)
+    {
+        // (by hand: the published build is trimmed, and Regex's assembly is not in it)
+        var dot = text.LastIndexOf('.');
+        var ext = dot > 0 ? text[(dot + 1)..] : "";
+        return ext.Length is >= 1 and <= 5 && !char.IsWhiteSpace(text[dot - 1]) && char.IsAsciiLetter(ext[0]) &&
+            ext.All(char.IsAsciiLetterOrDigit);
+    }
 
     /// <summary>The program's own name, as its FileDescription or else its ProductName writes it; empty where both are
     /// missing or are only its file's name (lower case or with "_": a game's sinking_star; Weixin's "Weixin", its file's
