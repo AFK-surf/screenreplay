@@ -3,7 +3,7 @@
 // privacy policy, feedback), the diagnostics and a foot (© the year, recordings stay on this PC).
 
 ///|
-let app_version : String = "0.1.23"
+let app_version : String = "0.1.24"
 
 ///|
 extern "C" fn rp_install_kind() -> Int = "rp_install_kind"

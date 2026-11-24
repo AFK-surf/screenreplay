@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.23):** Added 20× playback speed and clear silent-mode indication on the speaker icon for speeds above 4×. Refined the timeline playhead into a single continuous vector path so approaching the left or right edge tapers smoothly into the vertical line without a sharp corner overhang, and rounded/clamped the overview playhead within its track.
+**What's new in this version (0.1.24):** The timeline now shows the time of day, centred under each moment and spaced to suit the zoom, with no extra height. App stretches too narrow to show are joined when zoomed far out, so no more dense separator lines. The tray panel and save card now share the resident replay process (one background process instead of three, less memory and video memory). Fixed an app occasionally keeping a file's name on the timeline.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.23）：** 新增 20× 高倍速回放，并在高于 4× 倍速无声时于音量按钮上直接提示静音状态；将时间轴播放头胶囊、颈部与竖线合并为一条连续矢量路径，靠近左右边缘时平滑收束为贴边形态，消除直角凸台与接缝，同时收口底部总览条播放头的边缘表现。
+**此版本新增内容（0.1.24）：** 时间轴上直接标出钟点，居中对准对应时刻、间隔随缩放调整，不增加高度；缩小时过窄的应用片段合并显示，不再出现密集分隔线；托盘面板和保存卡片并入常驻回放程序，后台进程由三个减为一个，内存和显存占用更低；修复程序名偶尔被记成文件名的问题。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

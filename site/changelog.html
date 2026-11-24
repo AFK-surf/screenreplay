@@ -51,6 +51,16 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.24</h2><span>2026-11-24</span></div>
+      <ul>
+        <li data-zh="时间轴上直接标出钟点：居中写在对应时刻下方，间隔随缩放自动调整（看 2 小时时标整点和半点），不增加时间轴高度。" data-en="The timeline now shows the time of day: centred under each moment, spaced to suit the zoom (hours and half hours across a 2-hour view), with no extra height.">时间轴上直接标出钟点：居中写在对应时刻下方，间隔随缩放自动调整（看 2 小时时标整点和半点），不增加时间轴高度。</li>
+        <li data-zh="缩小时间轴时，过窄的应用片段不再各自切开，避免出现一排密集的分隔线。" data-en="When zoomed far out, app stretches too narrow to show are joined instead of cut apart, so the timeline no longer fills with dense separator lines.">缩小时间轴时，过窄的应用片段不再各自切开，避免出现一排密集的分隔线。</li>
+        <li data-zh="托盘面板和保存卡片并入常驻的回放程序，后台进程由三个减为一个，内存和显存占用更低。" data-en="The tray panel and the save card now live in the resident replay window's process: one background process instead of three, using less memory and video memory.">托盘面板和保存卡片并入常驻的回放程序，后台进程由三个减为一个，内存和显存占用更低。</li>
+        <li data-zh="修复时间轴上程序名偶尔被记成某个文件名、且一直不更新的问题：记下的程序名每天重新获取。" data-en="Fixed an app sometimes being named after a file it once showed, for good: kept app names are now looked up again each day.">修复时间轴上程序名偶尔被记成某个文件名、且一直不更新的问题：记下的程序名每天重新获取。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.23</h2><span>2026-11-23</span></div>
       <ul>
         <li data-zh="优化时间轴播放头边缘表现：胶囊、过渡颈与竖线合并为一条连续矢量路径，靠近左右边缘时圆角与凹颈平滑融合收束，消除尖角凸台与接缝；底部总览条播放头同步收口在轨道内。" data-en="Refined the timeline playhead near edges: unified the capsule, neck and stem into one continuous vector path so approaching either edge tapers smoothly without a sharp overhang or seam, and rounded/clamped the overview playhead inside the track.">优化时间轴播放头边缘表现：胶囊、过渡颈与竖线合并为一条连续矢量路径，靠近左右边缘时圆角与凹颈平滑融合收束，消除尖角凸台与接缝；底部总览条播放头同步收口在轨道内。</li>
