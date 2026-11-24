@@ -1076,6 +1076,7 @@ fn timeline(parent : @view.View) -> Unit {
           |> ignore
         })
         |> ignore
+        time_ticks(s, w)
         piece_labels(s, w)
         gap_labels(s, w)
         // the stretches of the apps not ticked dimmed, over their names too, while a filter of apps is on
