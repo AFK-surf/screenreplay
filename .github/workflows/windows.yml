@@ -23,7 +23,10 @@ permissions:
   contents: read
 jobs:
   package:
-    runs-on: windows-latest
+    # (Visual Studio 2022, as the releases made by hand were built with: windows-latest's 2026 has MSVC 14.52.37025,
+    # whose /O2 miscompiles mbui's @dmath.sin/cos, and its clang-cl, which mbui would take in its place, does not take
+    # the replay window's C++ as cl does)
+    runs-on: windows-2022
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -47,9 +50,15 @@ jobs:
             if ($LASTEXITCODE) { throw "Inno Setup did not install" }
           }
 
+      # (MBC_REAL_CC: MSVC's cl named, so that mbui does not take Visual Studio's clang-cl where it is installed)
       - name: Build ScreenReplay
         shell: pwsh
-        run: .\scripts\build.ps1
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $msvc = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          $env:MBC_REAL_CC = "$vs\VC\Tools\MSVC\$msvc\bin\Hostx64\x64\cl.exe"
+          if (-not (Test-Path $env:MBC_REAL_CC)) { throw "no cl.exe at $env:MBC_REAL_CC" }
+          .\scripts\build.ps1
 
       - name: The replay window's build log
         if: failure()
