@@ -333,6 +333,16 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     self.updater = Updater(paths: paths, logger: logger, headlessTest: headlessTest)
     super.init()
 
+    // (an update waits while the replay window is open; before the new app takes this one's place, the helper and the
+    // window this run started end with it)
+    updater.isReplayShown = { [weak self] in self?.viewerProcess?.isRunning ?? false }
+    updater.beforeQuit = { [weak self] in
+      guard let self else { return }
+      if let v = self.viewerProcess, v.isRunning { v.terminate() }
+      self.shutdown()
+    }
+    updater.notify = { [weak self] title, body in self?.logger.log("update: \(title): \(body)") }
+
     helper.onHelperEvent = { [weak self] ev in
       self?.queue.async {
         self?.handleHelperEvent(ev)

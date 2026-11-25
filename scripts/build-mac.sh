@@ -8,8 +8,9 @@ set -euo pipefail
 unset SDKROOT
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${MODE:-release}"
-VERSION="${VERSION:-0.1.22}"
-BUILD_NUM="${BUILD_NUM:-22}"
+# (the version app/about.mbt names, the one the Windows build and the viewer show)
+VERSION="${VERSION:-$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' "$ROOT/app/about.mbt")}"
+BUILD_NUM="${BUILD_NUM:-${VERSION##*.}}"
 
 # Locate MoonBit toolchain
 if ! command -v moon >/dev/null 2>&1; then
@@ -244,9 +245,9 @@ if [ -z "$SIGN_ID" ]; then
 fi
 SIGN_OPTS=()
 [ "$SIGN_ID" != "-" ] && SIGN_OPTS+=(--options runtime)
-echo "build-mac.sh: signing with identity '$SIGN_ID' ${SIGN_OPTS[*]:-}"
+echo "build-mac.sh: signing with identity '$SIGN_ID' ${SIGN_OPTS[*]+"${SIGN_OPTS[*]}"}"
 
-codesign --force --sign "$SIGN_ID" "${SIGN_OPTS[@]}" --timestamp=none "$HELPER_BUNDLE"
+codesign --force --sign "$SIGN_ID" ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --timestamp=none "$HELPER_BUNDLE"
 
 # Outer ScreenReplay.app
 cp "$SWIFT_BIN_DIR/ScreenReplayMac" "$APP_BUNDLE/Contents/MacOS/ScreenReplay"
@@ -297,10 +298,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
 </plist>
 EOF
 
-codesign --force --sign "$SIGN_ID" "${SIGN_OPTS[@]}" --timestamp=none "$APP_BUNDLE/Contents/MacOS/ScreenReplayViewer"
-codesign --force --sign "$SIGN_ID" "${SIGN_OPTS[@]}" --timestamp=none "$APP_BUNDLE"
+codesign --force --sign "$SIGN_ID" ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --timestamp=none "$APP_BUNDLE/Contents/MacOS/ScreenReplayViewer"
+codesign --force --sign "$SIGN_ID" ${SIGN_OPTS[@]+"${SIGN_OPTS[@]}"} --timestamp=none "$APP_BUNDLE"
 
-ZIP="$OUT/ScreenReplay-mac-arm64.zip"
+ZIP="$OUT/ScreenReplay-mac.zip"
 rm -f "$ZIP"
 (cd "$OUT" && ditto -c -k --sequesterRsrc --keepParent "ScreenReplay.app" "$(basename "$ZIP")")
 

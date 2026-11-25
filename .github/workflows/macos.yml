@@ -1,0 +1,65 @@
+name: macOS package
+# ScreenReplay.app for Apple silicon: built (scripts/build-mac.sh), signed with AFK AI's Developer ID and notarized
+# (scripts/sign-mac.sh), kept as the run's artifact and, for a v* tag, attached to its release, where
+# packaging/publish-setup.ps1 takes it for the download site and latest.json.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  # (a change to what the Mac build is made of, built, signed and notarized before it is merged)
+  pull_request:
+    paths:
+      - 'mac/**'
+      - 'app/**'
+      - 'scripts/build-mac.sh'
+      - 'scripts/sign-mac.sh'
+      - 'scripts/fetch-stillfail.sh'
+      - 'stillfail.lock'
+      - '.github/workflows/macos.yml'
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # (vendor/PermissionFlow needs Swift tools 6.2: the newest Xcode on the runner, not its default)
+      - name: Select the newest Xcode
+        run: |
+          x=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$x"
+          swift --version
+
+      - name: Install MoonBit
+        run: |
+          set -eu
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          "$HOME/.moon/bin/moon" version --all
+
+      - name: Build ScreenReplay.app
+        run: bash scripts/build-mac.sh
+
+      # (a fork's run, without the secrets, fails here rather than put out an ad hoc build)
+      - name: Sign and notarize ScreenReplay.app
+        env:
+          MACOS_DEVELOPER_ID_KEYCHAIN_B64_1: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_1 }}
+          MACOS_DEVELOPER_ID_KEYCHAIN_B64_2: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_2 }}
+          KEYCHAIN_PASSWORD_AFK: ${{ secrets.KEYCHAIN_PASSWORD_AFK }}
+        run: bash scripts/sign-mac.sh out/mac/ScreenReplay.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenReplay-mac
+          path: out/mac/ScreenReplay-mac.zip
+
+      # (a tag's build goes on its release too, once the release is there)
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 20); do gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break; sleep 30; done
+          gh release upload "$GITHUB_REF_NAME" out/mac/ScreenReplay-mac.zip --clobber

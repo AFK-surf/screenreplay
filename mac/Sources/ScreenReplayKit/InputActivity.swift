@@ -261,7 +261,7 @@ public final class InputActivityMonitor: @unchecked Sendable {
     guard let pad = controller.extendedGamepad else { return }
     let id = ObjectIdentifier(controller)
     controllerAxes[id] = (0, 0, 0, 0, 0, 0, 0)
-    pad.valueChangedHandler = { [weak self] gamepad, _ in
+    pad.valueChangedHandler = { [weak self] (gamepad: GCExtendedGamepad, _: GCControllerElement) in
       guard let self else { return }
       let prev = self.controllerAxes[id] ?? (0, 0, 0, 0, 0, 0, 0)
       var btnMask: UInt32 = 0
@@ -283,11 +283,14 @@ public final class InputActivityMonitor: @unchecked Sendable {
       let ry = gamepad.rightThumbstick.yAxis.value
       let lt = gamepad.leftTrigger.value
       let rt = gamepad.rightTrigger.value
-      let travel = Double(
-        abs(lx - prev.lx) * 0.5 + abs(ly - prev.ly) * 0.5 +
-        abs(rx - prev.rx) * 0.5 + abs(ry - prev.ry) * 0.5 +
-        abs(lt - prev.lt) + abs(rt - prev.rt)
-      )
+      // (summed a term at a time: as one expression, Swift 6.2 gave up type-checking it on CI's runner)
+      var sticks: Float = abs(lx - prev.lx)
+      sticks += abs(ly - prev.ly)
+      sticks += abs(rx - prev.rx)
+      sticks += abs(ry - prev.ry)
+      var triggers: Float = abs(lt - prev.lt)
+      triggers += abs(rt - prev.rt)
+      let travel = Double(sticks * 0.5 + triggers)
       if travel >= 0.01 {
         self.activity.recordAxes(travel: travel)
       }
