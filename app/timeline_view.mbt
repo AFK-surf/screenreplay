@@ -1027,7 +1027,17 @@ fn timeline(parent : @view.View) -> Unit {
         }
         for played in [true, false] {
           band.box(fn(o) {
-            o.over(Is(true)).presses(Is(false)).lines_up(Is(Some(Start))).offset(Is((0.0, -heat_gap - heat_h))) |> ignore
+            // (clipped to the band: the played side reaches a band's width left of the playhead, and with heat recorded
+            // before the view it showed out past the band's start, the user, 2026-11-25 「热力条有问题」)
+            o
+            .over(Is(true))
+            .presses(Is(false))
+            .lines_up(Is(Some(Start)))
+            .offset(Is((0.0, -heat_gap - heat_h)))
+            .width(By(fn() { Some(w()) }))
+            .height(Is(Some(heat_h)))
+            .clips(Is(true))
+            |> ignore
             // (a box as wide as the band, its far edge at the playhead (played) or its near edge there (ahead), what it
             // holds slid back as far)
             o.box(fn(c) {
