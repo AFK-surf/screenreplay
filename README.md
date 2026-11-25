@@ -71,11 +71,11 @@ powershell -File packaging/pack-msix.ps1 -Viewer out   # Builds Microsoft Store 
 
 Needs Xcode (Swift 6) and MoonBit (`moon`). `bash scripts/build-mac.sh` builds `out/mac/ScreenReplay.app` and `out/mac/ScreenReplay-mac.zip` (ad hoc signed). The **macOS package** workflow (`.github/workflows/macos.yml`, run by hand or by the release workflow) builds the same, then signs it with AFK AI's Developer ID and notarizes it (`scripts/sign-mac.sh`, using the `MACOS_DEVELOPER_ID_KEYCHAIN_B64_1` / `_2` and `KEYCHAIN_PASSWORD_AFK` secrets). `packaging/publish-setup.ps1` takes that build of the commit it publishes and puts it on the download site and in `latest.json` (`-NoMac`: Windows only).
 
+`scripts/fetch-stillfail.sh` (invoked automatically by the build) sparse-fetches `libs/mbui` and `libs/sf-ui` from [`AFK-surf/monoid`](https://github.com/AFK-surf/monoid) at the commit pinned in `stillfail.lock` into `deps/stillfail`.
+
 ## Releases
 
 A pushed `v<version>` tag makes the release (`.github/workflows/release.yml`): the **Windows package** and **macOS package** workflows build `ScreenReplay-Setup-<version>.exe` and `ScreenReplay-mac.zip` from the tag and put them on its GitHub release; then, once approved in the `release` environment (which alone holds the update-signing key and the Cloudflare token), `packaging/publish-setup.ps1` signs `latest.json` and puts the downloads in R2, and the site is deployed. The tag must be the version in `app/about.mbt` and `recorder/Updater.cs`.
-
-`scripts/fetch-stillfail.sh` (invoked automatically by the build) sparse-fetches `libs/mbui` and `libs/sf-ui` from [`AFK-surf/monoid`](https://github.com/AFK-surf/monoid) at the commit pinned in `stillfail.lock` into `deps/stillfail`.
 
 ## Sponsor
 
