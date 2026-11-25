@@ -1,0 +1,70 @@
+name: Windows package
+# ScreenReplay-Setup-<version>.exe (the standalone installer): the recorder and the replay window built
+# (scripts/build.ps1), staged self-contained and packed with Inno Setup (packaging/pack-setup.ps1), kept as the run's
+# artifact. The release workflow calls it for a tag.
+on:
+  workflow_dispatch:
+  workflow_call:
+  # (a change to what the Windows build is made of, built and packed before it is merged)
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'recorder/**'
+      - 'recording/**'
+      - 'assets/**'
+      - 'scripts/build.ps1'
+      - 'scripts/build-app.sh'
+      - 'scripts/fetch-stillfail.sh'
+      - 'packaging/pack-setup.ps1'
+      - 'packaging/ScreenReplay.iss'
+      - 'stillfail.lock'
+      - '.github/workflows/windows.yml'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install MoonBit
+        shell: pwsh
+        run: |
+          irm https://cli.moonbitlang.com/install/powershell.ps1 | iex
+          "$HOME\.moon\bin" >> $env:GITHUB_PATH
+          & "$HOME\.moon\bin\moon.exe" version --all
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE) { throw "Inno Setup did not install" }
+          }
+
+      - name: Build ScreenReplay
+        shell: pwsh
+        run: .\scripts\build.ps1
+
+      - name: The replay window's build log
+        if: failure()
+        shell: pwsh
+        run: if (Test-Path out\build-app.log) { Get-Content out\build-app.log -Tail 200 }
+
+      - name: Pack the installer
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path app\about.mbt -Pattern '^let app_version : String = "([^"]+)"').Matches[0].Groups[1].Value
+          $setup = .\packaging\pack-setup.ps1 -Version $ver | Select-Object -Last 1
+          "$($setup.Name): $($setup.Length) bytes, sha256 $((Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower())"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenReplay-windows
+          path: out/setup/ScreenReplay-Setup-*.exe
+          if-no-files-found: error

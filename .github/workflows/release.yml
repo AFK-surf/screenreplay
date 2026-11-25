@@ -1,0 +1,62 @@
+name: Release
+# A pushed tag v<version> makes the release: ScreenReplay-Setup-<version>.exe (Windows package) and
+# ScreenReplay-mac.zip (macOS package, signed and notarized) built from the tag and put on its GitHub release, which is
+# made here when it is not there yet (made by hand first, with notes of its own, it is kept and only given the files).
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # (the recorder's own, too: left behind, the new version takes itself for an old one and updates again and again)
+      - name: The tag is the app's version
+        run: |
+          app=$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' app/about.mbt)
+          rec=$(sed -n 's/.*const string AppVersion = "\(.*\)";.*/\1/p' recorder/Updater.cs)
+          if [ "v$app" != "$GITHUB_REF_NAME" ] || [ "$rec" != "$app" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, app_version $app (app/about.mbt) and AppVersion $rec (recorder/Updater.cs) are not one version"
+            exit 1
+          fi
+
+  windows:
+    needs: version
+    uses: ./.github/workflows/windows.yml
+
+  macos:
+    needs: version
+    uses: ./.github/workflows/macos.yml
+    secrets: inherit
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Put the files on the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l assets
+          setup="assets/ScreenReplay-Setup-${GITHUB_REF_NAME#v}.exe"
+          sha256sum "$setup" assets/ScreenReplay-mac.zip
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$setup" assets/ScreenReplay-mac.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes \
+              "$setup" assets/ScreenReplay-mac.zip
+          fi
