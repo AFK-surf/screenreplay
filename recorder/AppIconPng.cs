@@ -5,11 +5,6 @@ using System.Text;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// A program's icon written as a PNG, for the replay window's timeline: the icon Windows shows for the file
-/// (ExtractAssociatedIcon, at the system's icon size, as System.Drawing's Icon.ExtractAssociatedIcon gave it), its
-/// pixels with their own alpha, or with its mask's where the icon has none (an old icon of 24 bits).
-/// </summary>
 internal static class AppIconPng
 {
     [StructLayout(LayoutKind.Sequential)]
@@ -76,7 +71,6 @@ internal static class AppIconPng
     [DllImport("user32.dll")]
     private static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
 
-    /// <summary>`exe`'s icon written to `file`; false when it has none that can be read.</summary>
     public static bool Save(string exe, string file)
     {
         ushort index = 0;
@@ -95,7 +89,6 @@ internal static class AppIconPng
 
             try
             {
-                // (a monochrome icon, without colours: none of today's programs, passed over)
                 if (info.Color == IntPtr.Zero || GetObjectW(info.Color, Marshal.SizeOf<BitmapObject>(), out var bitmap) == 0)
                 {
                     return false;
@@ -145,7 +138,6 @@ internal static class AppIconPng
         }
     }
 
-    /// <summary>A bitmap's top `h` rows as 32-bit BGRA pixels, top row first (null when they cannot be read).</summary>
     private static byte[]? Bits(IntPtr bitmap, int w, int h)
     {
         if (bitmap == IntPtr.Zero)
@@ -165,7 +157,6 @@ internal static class AppIconPng
         var dc = GetDC(IntPtr.Zero);
         try
         {
-            // DIB_RGB_COLORS
             return GetDIBits(dc, bitmap, 0, (uint)h, bits, ref header, 0) == h ? bits : null;
         }
         finally
@@ -179,7 +170,6 @@ internal static class AppIconPng
         var header = new byte[13];
         BinaryPrimitives.WriteInt32BigEndian(header, w);
         BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), h);
-        // 8 bits a channel, RGBA; deflate, the filters' set, no interlace
         header[8] = 8;
         header[9] = 6;
         var raw = new MemoryStream();
@@ -187,7 +177,6 @@ internal static class AppIconPng
         {
             for (var y = 0; y < h; y++)
             {
-                // (each row without a filter)
                 z.WriteByte(0);
                 z.Write(rgba, y * w * 4, w * 4);
             }

@@ -4,15 +4,6 @@ import "pixels"
 import "signals"
 import "view"
 
-// Picking a window to clip (clip mode): over the picture, the window under the pointer lit, a press picks it (empty
-// room: the whole screen), the one picked keeping the rest under a 60% shade; under the track a strip saying where it
-// was in view; in the controls' row its chip, the note of where it was not and the fix; its options in a card over
-// their button.
-
-/// Where the pointer is over the picture (its own points), None off it.
-
-
-/// The front windows as the picture shows them at the playhead, and the scale from the screen to the picture `w` wide.
 fn picker_snap(v : view::View, w : Double) -> Option[(Snap, Double)] {
   data()
   let abs = t0() + pos_drawn(v)
@@ -21,11 +12,6 @@ fn picker_snap(v : view::View, w : Double) -> Option[(Snap, Double)] {
     _ => Option::None
   }}
 
-/// The picker's layer over the picture (window_picker).
-
-
-/// The window under the pointer over the picture `w` wide, as node `v` has it: none once the pointer has left the
-/// picture or something is over it.
 fn picker_under(v : view::View, w : Double) -> Option[Win] {
   match picker_layer.v {
     Some(l) if l.pointer_within() && !layer_over() => ()
@@ -36,8 +22,6 @@ fn picker_under(v : view::View, w : Double) -> Option[Win] {
     _ => Option::None
   }}
 
-/// The window lit under the pointer: none while a region is dragged, or over the region (a press there is the
-/// region's).
 fn hover_window(v : view::View, w : Double) -> Option[Win] {
   if clip_kind.get() != 1 || region_grab.get() != 0 {
     return Option::None
@@ -53,13 +37,10 @@ fn hover_window(v : view::View, w : Double) -> Option[Win] {
   }
   picker_under(v, w)}
 
-/// The picker over the picture (`pic`), in clip mode: windows to pick where they were noted, a region to drag out.
 fn window_picker(pic : view::View) -> Unit {
   pic.by_room(fn(lay, room) {
     picker_layer.v = Some(lay)
     let w = fn() { room.width() }
-    // (a click: the window under it picked, the one picked let go, empty room the whole screen; with no windows noted
-    // and no region, playing or pausing as the picture's own press does)
     let click = fn(x : Double, y : Double) {
       if snaps.is_empty() {
         set_playing(!want_play.untracked())
@@ -78,22 +59,17 @@ fn window_picker(pic : view::View) -> Unit {
     }
     lay
     .over(view::Live::Is(true))
-    // (in clip mode: a region is dragged out with or without the windows noted)
-    // (in 整屏 none: a press on the picture plays or pauses as ever)
     .presses(view::Live::By(fn() { clipping.get() && clip_kind.get() != 0 }))
     .cursor(view::Live::By(fn() {
       if !clipping.get() {
         return Some(view::Cursor::Arrow)
       }
       if clip_kind.get() == 1 {
-        // (a window to pick under the pointer)
         return Some(if hover_window(lay, w()) is Some(_) { view::Cursor::Arrow } else { view::Cursor::Arrow })
       }
       let (sw, _) = rec_size()
       match region_cursor(if sw > 0.0 { w() / sw } else { 1.0 }, picker_at.get()) {
         Option::Some(c) => Some(c)
-        // (outside it: room to drag one out)
-        // (outside it: room to drag one out)
         Option::None => Some(view::Cursor::Crosshair)
       }
     }))
@@ -105,12 +81,10 @@ fn window_picker(pic : view::View) -> Unit {
     |> ignore
     lay.show(fn() { clipping.get() }, fn(o) {
       o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
-      // (the picture's height for its width: the recording's shape)
       let h = fn() { w() / picture_aspect.get() }
       let to_view = fn(s : Snap, k : Double, r : (Double, Double, Double, Double)) {
         ((r.0 - s.sx) * k, (r.1 - s.sy) * k, r.2 * k, r.3 * k)
       }
-      // the shade round the window picked, its frame, the frame of the one under the pointer
       o.box(fn(p) {
         p
         .width(view::Live::By(fn() { Some(w()) }))
@@ -119,8 +93,7 @@ fn window_picker(pic : view::View) -> Unit {
           let width = w()
           let height = h()
           let layers : Array[pixels::VectorPath] = []
-          // (a side on the picture's own edge drawn not at all: there the picture's edge is the frame, and a line
-          // there would stand out of the picture as a rim round it)
+          // Omit border edges flush with the picture boundary so they don't protrude as an outer rim.
           let frame = fn(r : (Double, Double, Double, Double), fill : Int64) {
             let (rx, ry, rw, rh) = r
             if fill != 0L {
@@ -152,10 +125,7 @@ fn window_picker(pic : view::View) -> Unit {
             }
           }
           let shade = 0x08090A99L
-          // (the rest of the picture shaded round what is kept: one path, the picture with what is kept cut out of it
-          // (wound the other way). Four rectangles meeting at the kept edges' rows, off the pixel grid at 150%, each
-          // covered a shared pixel row in part, together less than the shade: a light line across the whole picture
-          // at its top and bottom edges (the user, 2026-11-16: 「area select时，看起来视窗有白色线」))
+          // Single opposite-wound cutout path (4 separate rects leave subpixel AA light seams at 150% DPI).
           let shade_round = fn(r : (Double, Double, Double, Double)) {
             let (rx, ry, rw, rh) = r
             let x0 = clamp(rx, 0.0, width)
@@ -173,7 +143,6 @@ fn window_picker(pic : view::View) -> Unit {
               let v = (r.0 * k, r.1 * k, r.2 * k, r.3 * k)
               let (rx, ry, rw, rh) = v
               shade_round(v)
-              // (thirds while the hand is on it)
               if region_grab.get() != 0 {
                 let third = 0xFFFFFF47L
                 for i in 1..<3 {
@@ -182,10 +151,6 @@ fn window_picker(pic : view::View) -> Unit {
                   layers.push(layer(rect_d(rx, ry + rh * f - 0.5, rw, 1.0), third))
                 }
               }
-              // its frame as the user picked it (方案 A, 2026-11-16, over the 2 wide white line in a black one and its
-              // 8 square handles: 「感觉这个框选框不好看」): a 1 wide line just outside it (a side on the picture's own
-              // edge left out, as `frame`'s), L marks 12 long and 3 thick at its corners, and while selected a bar 16
-              // by 3 at each side's middle; the marks each on a faint dark rim so they hold on a light picture
               let line = 0xEDEEF0E6L
               let white = 0xEDEEF0FFL
               let rim = 0x00000073L
@@ -210,7 +175,6 @@ fn window_picker(pic : view::View) -> Unit {
                 for hy in [-1, 1] {
                   let sx = hx.to_double()
                   let sy = hy.to_double()
-                  // (its outer corner 3 out from the region's, held inside the picture; its arms back along the sides)
                   let ex = if hx < 0 { rx } else { rx + rw }
                   let ey = if hy < 0 { ry } else { ry + rh }
                   let px = clamp(ex + sx * thick, 0.0, width)
@@ -264,7 +228,6 @@ fn window_picker(pic : view::View) -> Unit {
         |> ignore
       })
       |> ignore
-      // the tag of the window lit or picked: its icon and words, 8 in from its frame's corner
       let tag = fn(v : view::View) -> Option[(Double, Double, String, String)] {
         guard picker_snap(v, w()) is Some((s, k)) else { return None }
         match hover_window(v, w()) {
@@ -315,8 +278,6 @@ fn window_picker(pic : view::View) -> Unit {
         |> ignore
       })
       |> ignore
-      // the region's size, as it is exported: over its frame's top left, outside it (inside where there is no room
-      // over it), following the hand as it is dragged
       o.box(fn(t) {
         t.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
         t.box(fn(b) {
@@ -344,13 +305,10 @@ fn window_picker(pic : view::View) -> Unit {
       |> ignore
     }, at_once=true)
   })
-  // (over the picture itself, not after the player in its column, where it was laid out none tall and the press went
-  // to the picture: playing, 2026-11-13)
+  // Overlay on pic (otherwise laid out with 0 height in column and clicks fall through to player).
   .over(view::Live::Is(true))
   |> ignore}
 
-/// The note in the controls' row about the picked window, with its fix: (words, fix's label, whether the fix keeps
-/// only the fully visible part); "" none.
 fn window_note() -> (String, String, Bool) {
   if picked_hwnd.get() == 0L {
     return ("", "", false)
@@ -379,13 +337,9 @@ fn window_note() -> (String, String, Bool) {
     ("", "", false)
   }}
 
-/// The clip mode's left: the window picked (a chip, its icon, ×), its note in amber and the fix, underlined; none
-/// picked, how to pick one.
 fn window_bar(parent : view::View) -> Unit {
-  // (what the clip is of: the whole picture, a window, an area; one at a time)
   segmented(parent, fn() { [t("整屏"), t("选窗口"), t("框选区域")] }, fn() { clip_kind.get() }, set_clip_kind)
   parent.box(fn(g) { g.width(view::Live::Is(Some(8.0))) |> ignore }) |> ignore
-  // 0 the whole picture, 1 a window to pick, 2 one picked, 3 an area to drag out, 4 one drawn
   parent.pick(fn() {
     match clip_kind.get() {
       1 => if picked_hwnd.get() != 0L { 2 } else { 1 }
@@ -431,8 +385,6 @@ fn window_bar(parent : view::View) -> Unit {
     }, at_once=true)
   }, at_once=true)}
 
-/// The region's chip, where a picked window's is: 「自定义区域」 and its ratio's chevron, pressed for a menu of the
-/// ratios (the one in force ticked); × lets the region go. While it is selected, after it, how the keys move it.
 fn region_chip(parent : view::View) -> Unit {
   let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
   parent.box(fn(chip) {
@@ -440,7 +392,7 @@ fn region_chip(parent : view::View) -> Unit {
     let body = pressable(chip, fn() { t("自定义区域") }, fn() {
       guard key.v is Some(b) else { return }
       let now = region_ratio.untracked()
-      // (the region stays selected or not as it was: choosing its shape is no press elsewhere)
+      // Preserve selection state across opening/picking from the aspect-ratio menu.
       let was = region_selected.untracked()
       open_menu_under(b, mbt_compat::arr_makei(region_ratios.length(), fn(i) {
           Some(MenuEntry::{
@@ -479,8 +431,6 @@ fn region_chip(parent : view::View) -> Unit {
   |> ignore
   words(parent, fn() { if region_selected.get() { t(if is_mac() { "方向键微调 · Shift 加快 · ⌥ 改大小" } else { "方向键微调 · Shift 加快 · Alt 改大小" }) } else { "" } }, 12.0, ui_subtle) |> ignore}
 
-/// Under the track in clip mode with a window picked, 3 high across the clip: s3, and the muted grey where the window
-/// was fully in view (fainter where partly covered).
 fn window_strip(parent : view::View, w : () -> Double) -> Unit {
   parent.box(fn(o) {
     o.height(view::Live::By(fn() { Some(if clipping.get() && picked_hwnd.get() != 0L { 7.0 } else { 0.0 }) })) |> ignore
@@ -512,8 +462,6 @@ fn window_strip(parent : view::View, w : () -> Double) -> Unit {
   })
   |> ignore}
 
-/// A switch, 34 by 20: on, the accent with its knob in the accent's opposite; off, s4 with a grey one; its knob sliding
-/// over 140 ms.
 fn switch(parent : view::View, label : () -> String, on : () -> Bool, set : (Bool) -> Unit) -> Unit {
   pressable(parent, label, fn() { set(!signals::untracked(on)) }, fn(b) {
     let way = motion::NodeWay::new(if signals::untracked(on) { 1.0 } else { 0.0 })
@@ -551,10 +499,6 @@ fn switch(parent : view::View, label : () -> String, on : () -> Bool, set : (Boo
   })
   |> ignore}
 
-/// The options button's node, for the card to stand over it.
-
-
-/// The clip's options button (only with a window picked).
 fn window_options_button(parent : view::View) -> Unit {
   parent.show(fn() { picked_hwnd.get() != 0L }, fn(b) {
     let key = icon_button(b, fn() { "sliders" }, fn() { t("选项") }, fn() {
@@ -564,8 +508,6 @@ fn window_options_button(parent : view::View) -> Unit {
     options_anchor.v = Some(key.id())
   }, at_once=true)}
 
-/// The clip's options in a card over their button: follow the window or keep a fixed area, its menus and dialogs or
-/// not, as the settings' rows are. A press beside it closes it.
 fn window_options_layer(root : view::View) -> Unit {
   root.box(fn(o) {
     o.over(view::Live::Is(true)).over_all(view::Live::Is(true)) |> ignore

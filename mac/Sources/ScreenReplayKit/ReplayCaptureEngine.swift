@@ -13,8 +13,8 @@ public struct CaptureOptions: Sendable, Equatable {
   public var maxBytes: Int64
   public var fps: Int
   public var maxHeight: Int
-  public var codec: String // "HEVC" or "H264"
-  public var quality: String // "low", "medium", "high", "ultra"
+  public var codec: String
+  public var quality: String
   public var systemAudio: Bool
   public var microphone: Bool
   public var recordCursor: Bool
@@ -116,12 +116,11 @@ public struct CaptureMetrics: Sendable, Equatable {
   public var bufferDir: String
 }
 
-/// Optional 48 kHz stereo microphone capture & ring buffer for mixing with system audio.
 final class MicrophoneMixerSource: @unchecked Sendable {
   private let engine = AVAudioEngine()
   private let lock = NSLock()
-  private var ring: [Int16] = [] // interleaved stereo samples
-  private let maxStereoFrames = 48_000 / 2 // 500 ms cap
+  private var ring: [Int16] = []
+  private let maxStereoFrames = 48_000 / 2
   private var running = false
   private var converter: AVAudioConverter?
   private var targetFormat: AVAudioFormat?
@@ -177,7 +176,6 @@ final class MicrophoneMixerSource: @unchecked Sendable {
     lock.unlock()
   }
 
-  /// Mixes available microphone samples into `systemSamples` (`frames * 2` Int16 values).
   func mixInto(_ systemSamples: inout [Int16], frames: Int) {
     lock.lock()
     let take = min(frames * 2, ring.count)
@@ -214,7 +212,6 @@ final class MicrophoneMixerSource: @unchecked Sendable {
   }
 }
 
-/// Zero-Backpressure `ScreenCaptureKit` + `Synthetic` Rolling Segment Recorder.
 public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
   private static let excludedBundleIDs: Set<String> = [
     "dev.pengx17.screenreplay",
@@ -469,7 +466,7 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
   }
 
   private func emitSyntheticAudioPacket() {
-    let frames = 960 // 20 ms @ 48 kHz
+    let frames = 960
     let baseSample = syntheticAudioFrameCounter
     syntheticAudioFrameCounter += Int64(frames)
 
@@ -478,7 +475,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
     for i in 0..<frames {
       let sampleIdx = baseSample + Int64(i)
       let t = Double(sampleIdx) / rate
-      // 150 ms 440 Hz / 660 Hz beep pulse every 0.5 s, soft carrier otherwise.
       let phaseInHalfSec = sampleIdx % Int64(SegmentWriter.audioSampleRate / 2)
       let amp: Double = phaseInHalfSec < Int64(SegmentWriter.audioSampleRate * 15 / 100) ? 0.35 : 0.03
       pcm[i * 2] = Int16((sin(2.0 * .pi * 440.0 * t) * amp) * 32767.0)
@@ -491,7 +487,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
     }
   }
 
-  /// Renders a moving diagonal/vertical color bar + bottom timestamp progress bar directly into a `420v` `IOSurface`.
   public static func fillSynthetic420vFrame(_ pb: CVPixelBuffer, width: Int, height: Int, tick: Int, fps: Int) {
     CVPixelBufferLockBaseAddress(pb, [])
     defer { CVPixelBufferUnlockBaseAddress(pb, []) }
@@ -508,7 +503,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
     let barYStart = height - barHeight - 16
     let progressWidth = ((tick % max(1, fps * 2)) * (width - 64)) / max(1, fps * 2)
 
-    // Plane 0: Y (video range 16...235)
     for y in 0..<height {
       let row = yBase.advanced(by: y * yStride).assumingMemoryBound(to: UInt8.self)
       memset(row, 30, width)
@@ -527,7 +521,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
       }
     }
 
-    // Plane 1: interleaved Cb, Cr (neutral = 128, 128)
     let uvW = width / 2
     let uvH = height / 2
     let uvStripeX = stripeX / 2
@@ -541,8 +534,8 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
         let end = min(uvW, uvStripeX + uvStripeW)
         if end > uvStripeX {
           for ux in uvStripeX..<end {
-            row[ux * 2] = 96     // Cb
-            row[ux * 2 + 1] = 208 // Cr (warm red/coral)
+            row[ux * 2] = 96
+            row[ux * 2 + 1] = 208
           }
         }
       }
@@ -551,8 +544,8 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
         let endUX = min(uvW - 16, startUX + uvProgressW)
         if endUX > startUX {
           for ux in startUX..<endUX {
-            row[ux * 2] = 188    // Cb (cyan/blue accent)
-            row[ux * 2 + 1] = 92 // Cr
+            row[ux * 2] = 188
+            row[ux * 2 + 1] = 92
           }
         }
       }
@@ -731,8 +724,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
     }
   }
 
-  // MARK: - SCStreamOutput & SCStreamDelegate (Zero-Backpressure)
-
   public func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
     switch type {
     case .screen:
@@ -742,7 +733,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
          let status = SCFrameStatus(rawValue: rawStatus),
          status != .complete
       {
-        // Skip .idle / .blank / .suspended frames immediately with zero work.
         return
       }
       let pts = CMSampleBufferGetPresentationTimeStamp(sample)
@@ -852,7 +842,7 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
       paceSkipped += 1
     }
     let nowHns = MonotonicClock.nowHns()
-    if nowHns - paceWindowStartHns >= 100_000_000 { // 10 s
+    if nowHns - paceWindowStartHns >= 100_000_000 {
       let enc = paceEncoded
       let skp = paceSkipped
       paceEncoded = 0
@@ -936,7 +926,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
     }
   }
 
-  /// Flushes the active segment on demand (`flush.request` / `record.flush`) and waits until it lands in `Buffer/`.
   @discardableResult
   public func flush(minDurationSeconds: Double = 0.0) -> Segment? {
     var rotated = false
@@ -958,7 +947,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
     return store.list().last
   }
 
-  /// Stops capture and finalizes the active segment cleanly.
   public func stop() {
     syntheticVideoTimer?.cancel()
     syntheticVideoTimer = nil
@@ -1027,8 +1015,6 @@ public final class ReplayCaptureEngine: NSObject, SCStreamOutput, SCStreamDelega
       "bufferDir": m.bufferDir,
     ]
   }
-
-  // MARK: - Audio Conversion Helper (48 kHz Float32 / Int16 Planar or Interleaved -> Stereo Int16)
 
   public static func extractStereoPCM16(_ sample: CMSampleBuffer, asbd: AudioStreamBasicDescription) -> [Int16]? {
     let frames = CMSampleBufferGetNumSamples(sample)

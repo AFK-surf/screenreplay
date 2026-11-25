@@ -2,15 +2,7 @@ import "mbt_compat"
 import "ui"
 import "hostapi"
 
-// What the recorder left in REPLAY_ROOT: the buffer's segments (`Buffer\<yyyyMMdd-HHmmss-fff>-<id>.mp4`, each with a
-// `.json` beside it saying its `durationMs`: recording/SegmentStore.cs), the markers (`markers.jsonl`, `{"at"}`)
-// and the app in front as it changed (`apps.jsonl`, `{"at","app"}`), times in ms since the epoch (UTC).
-
-
-/// How far local time is ahead of UTC (minutes), asked of Windows at most once a second: the title bar's moment
-/// and the axis asked it three times a frame while playing, each a walk of the time zone's rules.
-
-
+// Cache local UTC offset for 1 s; querying OS timezone rules every frame is expensive.
 fn rp_local_offset() -> Int {
   let t = rp_now()
   let (at, v) = local_offset_read.v
@@ -43,8 +35,6 @@ fn root_dir() -> String {
 fn buffer_dir() -> String {
   env_or("REPLAY_DIR", pjoin(root_dir(), "Buffer"))}
 
-/// The folders segments are in: the recorder's buffers.json (where it writes now, then those it wrote into before,
-/// till what is there expires), else buffer_dir().
 fn buffer_dirs() -> Array[String] {
   match parse(read_text(pjoin(root_dir(), "buffers.json"))) {
     Option::Some(Object(o)) => {
@@ -76,13 +66,7 @@ pub struct Seg {
   fps : Int
 }
 
-
-/// When 删除全部录像 was last asked (ms since the epoch): what began before it is no longer read.
-
-
-/// 删除全部录像 asked: what is shown of the recordings gone at once, not left till the recorder has deleted them (the
-/// reviewer's 88th): playing stopped, the segments, markers and apps let go, each segment's index, levels and input with them;
-/// the window shows it has nothing; what the recorder writes after it comes as ever.
+// Clear UI state immediately and stamp purged_before so not-yet-deleted files are ignored.
 fn purge_now() -> Unit {
   purged_before.v = rp_now()
   set_playing(false)
@@ -102,12 +86,6 @@ fn purge_now() -> Unit {
   clear_windows()
   current.v = -1
   data_changed()}
-
-/// The markers, ms since the epoch.
-
-
-/// The app in front from each time on: (ms since the epoch, its process name).
-
 
 fn digits(s : String, from : Int, n : Int) -> Option[Int] {
   let mut v = 0
@@ -146,7 +124,6 @@ fn civil_from_days(z0 : Int) -> (Int, Int, Int) {
   let m = if mp < 10 { mp + 3 } else { mp - 9 }
   ((if m <= 2 { y + 1 } else { y }), m, d)}
 
-/// A segment's start by its name, `yyyyMMdd-HHmmss-fff-…`.
 fn start_of(name : String) -> Option[Double] {
   match
     (
@@ -170,7 +147,7 @@ fn start_of(name : String) -> Option[Double] {
   }}
 
 fn read_text(path : String) -> String {
-  // (opened once: its size and its bytes from the one handle, rp_read reading no more than the file holds)
+  // Single handle read; rp_read clamps to EOF.
   let bytes = rp_read(cstr(path), 0.0, 256 * 1024 * 1024)
   if bytes.length() == 0 {
     return ""
@@ -204,7 +181,6 @@ fn duration_of(json_path : String) -> Option[(Double, Int)] {
     _ => Option::None
   }}
 
-/// What the folder holds now: its segments (in order), the markers, the apps.
 fn load() -> Unit {
   index_start()
   let old_base = t0()
@@ -271,7 +247,6 @@ fn load() -> Unit {
       current.v = -1
       for i, seg in segs { if seg.path == current_path { current.v = i; break } }
       if current.v < 0 && !segs.is_empty() {
-        // (the segment shown expired: to the oldest kept)
         seek_to(0.0)
       }
     }
@@ -289,7 +264,6 @@ fn load() -> Unit {
     data_changed()
   }}
 
-/// Incrementally reads appended lines from `markers.jsonl` (re-reading from scratch if pruned/rewritten).
 fn load_marks_incremental() -> Bool {
   let path = pjoin(root_dir(), "markers.jsonl")
   let size = rp_size(cstr(path))
@@ -340,7 +314,6 @@ fn load_marks_incremental() -> Bool {
     false
   }}
 
-/// Incrementally reads appended lines from `apps.jsonl` (re-reading from scratch if pruned/rewritten).
 fn load_apps_incremental() -> Bool {
   let path = pjoin(root_dir(), "apps.jsonl")
   let size = rp_size(cstr(path))
@@ -411,9 +384,8 @@ fn two(n : Int) -> String {
     n.to_string()
   }}
 
-/// `m:ss` or `h:mm:ss` of a length.
 fn clock(ms : Double) -> String {
-  // (a length: rounded, 29.97 s is 0:30; moments of the day are cut to their second: wall)
+  // Round durations to nearest second (unlike wall(), which floors).
   let total = (dmax(0.0, ms) / 1000.0).round().to_int()
   let h = total / 3600
   let m = total % 3600 / 60
@@ -424,13 +396,11 @@ fn clock(ms : Double) -> String {
     "\{m}:\{two(s)}"
   }}
 
-/// The milliseconds of `at` (.mmm), to follow `wall`'s HH:MM:SS.
 fn ms_words(at : Double) -> String {
   let ms = (at - (at / 1000.0).floor() * 1000.0).floor().to_int()
   let m = if ms < 10 { "00\{ms}" } else if ms < 100 { "0\{ms}" } else { ms.to_string() }
   "." + m}
 
-/// The local time of day of a moment (ms since the epoch), `HH:mm:ss` (`HH:mm` with `short`).
 fn wall(at : Double, short? : Bool) -> String {
   let short = match short { Some(__mbt_v) => __mbt_v, None => false }
 
@@ -443,7 +413,6 @@ fn wall(at : Double, short? : Bool) -> String {
     "\{two(s / 3600)}:\{two(s % 3600 / 60)}:\{two(s % 60)}"
   }}
 
-/// A local `yyyy-MM-dd HH-mm-ss` for file names.
 fn stamp(at : Double) -> String {
   let here = at + rp_local_offset().to_double() * 60000.0
   let days = (here / 86400000.0).floor()

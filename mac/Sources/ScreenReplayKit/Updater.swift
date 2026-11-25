@@ -3,12 +3,6 @@ import CryptoKit
 import Foundation
 import Security
 
-/// ECDSA P-256 release verification and `update.json` state manager matching `recorder/Updater.cs` and `app/about.mbt`.
-/// On a copy signed by AFK AI's Developer ID in Applications it updates itself as the Windows build does: latest.json's
-/// `mac_sha256` / `mac_signature` (the release key's signature of the zip's SHA-256, `packaging/publish-setup.ps1`),
-/// `ScreenReplay-mac.zip` fetched and checked, installed once the replay window is closed and the Mac idle for two minutes
-/// (or at once when asked): opened next to the app, its code signature checked for that team, the apps swapped, and the
-/// new one started with --updated once this run has ended.
 public final class Updater: @unchecked Sendable {
   public static let appVersion: String = {
     let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -49,11 +43,8 @@ public final class Updater: @unchecked Sendable {
   private var readyNoted = false
   private var progressWatch: NSKeyValueObservation?
 
-  /// Whether the replay window is open (no update under it), set by the host.
   public var isReplayShown: () -> Bool = { false }
-  /// Ends everything this run started (the helper, the replay window) before the new app takes its place.
   public var beforeQuit: () -> Void = {}
-  /// Tells the user something (the ready-for-a-day note).
   public var notify: (String, String) -> Void = { _, _ in }
 
   public init(paths: RecorderPaths, logger: RecorderLogger? = nil, headlessTest: Bool = false) {
@@ -75,8 +66,6 @@ public final class Updater: @unchecked Sendable {
     testMode(env) && !(env["REPLAY_TEST_UPDATE_NOW"] ?? "").isEmpty
   }
 
-  /// 1 a copy in Applications (or, in a test run, anywhere) that updates itself; 0 one that does not: a dev build, or one
-  /// not signed by AFK AI's Developer ID (what it would be replaced with is not what it is).
   public static func detectInstallKind() -> Int {
     let bundlePath = Bundle.main.bundlePath
     guard bundlePath.hasSuffix(".app") else { return 0 }
@@ -99,8 +88,6 @@ public final class Updater: @unchecked Sendable {
     return SecCodeCheckValidity(me, [], req) == errSecSuccess
   }
 
-  /// The app at `path`, all of it (nested code too), signed by AFK AI's Developer ID; in a test run with
-  /// REPLAY_TEST_ANY_SIGNER, by anyone (tests sign ad hoc).
   static func signedByUs(_ path: String) -> Bool {
     let env = ProcessInfo.processInfo.environment
     let anySigner = testMode(env) && !(env["REPLAY_TEST_ANY_SIGNER"] ?? "").isEmpty
@@ -257,7 +244,6 @@ public final class Updater: @unchecked Sendable {
         return
       }
 
-      // (the Mac's own: the zip's, signed as Windows' setup is; a release with no Mac build is one to fetch by hand)
       let sha = ((obj["mac_sha256"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
       let sig = ((obj["mac_signature"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
       let signedOK = Self.isPlainSHA256(sha) && Self.verifyReleaseSignature(
@@ -281,7 +267,6 @@ public final class Updater: @unchecked Sendable {
     }.resume()
   }
 
-  /// A test run's release key (REPLAY_TEST_RELEASE_KEY, hex of x || y): its runs are the tester's.
   static func testReleaseKey() -> Data? {
     let env = ProcessInfo.processInfo.environment
     guard testMode(env), let hex = env["REPLAY_TEST_RELEASE_KEY"], !hex.isEmpty else { return nil }
@@ -392,7 +377,6 @@ public final class Updater: @unchecked Sendable {
     }
   }
 
-  /// Puts the release downloaded in this app's place and ends this run for it; a failure leaves this app as it is.
   private func installNow() {
     lock.lock()
     if busy || state != "ready" {
@@ -529,8 +513,6 @@ public final class Updater: @unchecked Sendable {
       AtomicFile.writeWhole(path: paths.updatePath, data: data)
     }
   }
-
-  // MARK: - Pure Verification Helpers
 
   public static func isURLAllowed(_ url: URL, env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
     let scheme = url.scheme?.lowercased()

@@ -4,11 +4,6 @@ import "view"
 
 let app_version : String = "0.1.24"
 
-// Settings > About (letter 30): who it is (the icon, the name, what it does, its version and build), updates (signed
-// ECDSA P-256 background updates for standalone Setup installs; Store updates for MSIX), links (the change log, the
-// privacy policy, feedback), the diagnostics and a foot (© the year, recordings stay on this PC).
-
-
 pub struct UpdateStatus {
   state : String
   version : String
@@ -115,12 +110,6 @@ fn update_action_pressed() -> Unit {
     }
   }}
 
-// (the public site: the repository is private, its pages a 404 to everyone else)
-
-
-/// Whether it runs from its package (the Store's): its build then is no development one.
-
-/// The build: the commit it was built from (build.txt beside the program, written by the build), "" unknown.
 fn build_id() -> String {
   let beside = read_text(pjoin(exe_dir(), "build.txt")).trim()
   if beside != "" || !is_mac() {
@@ -129,9 +118,7 @@ fn build_id() -> String {
     read_text(pjoin(exe_dir(), "../Resources/build.txt")).trim()
   }}
 
-
-/// What is copied as the diagnostics: the app, the OS, the graphics card, how it records. No window titles, apps,
-/// paths or user names.
+// Privacy invariant: omit window titles, app names, paths, and usernames.
 fn diagnostics_text() -> String {
   let info = recording_info()
   let codec = if info.codec == "" { "-" } else { info.codec }
@@ -163,8 +150,6 @@ fn diagnostics_text() -> String {
   )
   lines.join("\n")}
 
-/// A row of a card that opens something: its icon, its words, a note, a mark at its right (an external link or an
-/// arrow); a hairline over all but the first.
 fn link_row(parent : view::View, first : Bool, icon : String, label : () -> String, press : () -> Unit, note? : () -> String, external? : Bool) -> Unit {
   let note = match note { Some(__mbt_v) => __mbt_v, None => fn() { "" } }
   let external = match external { Some(__mbt_v) => __mbt_v, None => false }
@@ -186,7 +171,6 @@ fn link_row(parent : view::View, first : Bool, icon : String, label : () -> Stri
     .ground(view::Live::By(fn() { mix(clear(c_s3()), c_s3(), hand.shown(b) * 0.5) }))
     |> ignore
     if icon == "x-logo" {
-      // (X's mark, filled: none in the icon set)
       b.box(fn(g) {
         g
         .width(view::Live::Is(Some(16.0)))
@@ -198,7 +182,6 @@ fn link_row(parent : view::View, first : Bool, icon : String, label : () -> Stri
       })
       |> ignore
     } else if icon == "envelope" {
-      // (an envelope, lines as the icon set's: its "mail" is not among what icon_node draws)
       b.box(fn(g) {
         g
         .width(view::Live::Is(Some(16.0)))
@@ -209,7 +192,6 @@ fn link_row(parent : view::View, first : Bool, icon : String, label : () -> Stri
       })
       |> ignore
     } else if icon == "coffee" {
-      // (a cup, lines as the icon set's: it has none, and the row's place for it stood empty, the user, 2026-11-21)
       b.box(fn(g) {
         g
         .width(view::Live::Is(Some(16.0)))
@@ -229,14 +211,6 @@ fn link_row(parent : view::View, first : Bool, icon : String, label : () -> Stri
   })
   |> ignore}
 
-/// Where ScreenReplay is sponsored (free to use since 0.1.7).
-
-
-/// X's mark (24 square).
-
-
-/// The app's mark drawn as paths (assets/svg/icon-rec.svg: a graphite rounded square with a faint rim, two chevrons,
-/// the red dot), sharp at any size and scale.
 fn app_logo(parent : view::View, size : Double) -> Unit {
   parent.box(fn(l) {
     l
@@ -260,7 +234,6 @@ fn app_logo(parent : view::View, size : Double) -> Unit {
   |> ignore}
 
 fn about_page(p : view::View) -> Unit {
-  // who it is
   p.box(fn(who) {
     who.row(view::Live::Is(true)).padding(view::Live::Is((0.0, 4.0, 0.0, 8.0))).gap(view::Live::Is(16.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     app_logo(who, 56.0)
@@ -322,8 +295,6 @@ fn about_page(p : view::View) -> Unit {
     })
     |> ignore
   }
-  // (free, a sponsor's page for who wants to give: the user, 2026-11-19 「把这个项目直接免费提供。然后提供赞助链接」)
-  // (a card of its own: sponsor_card.mbt, the user's 方案 B, 2026-11-21)
   sponsor_card(p)
   p.box(fn(card) {
     card
@@ -338,11 +309,9 @@ fn about_page(p : view::View) -> Unit {
     link_row(card, false, "shield-check", fn() { t("隐私政策") }, fn() {
       rp_launch(cstr(site_url + "/privacy" + (if is_english() { "?lang=en" } else { "" }))) |> ignore
     }, external=true)
-    // (the first run's sheet read again: its words alone, 知道了)
     link_row(card, false, "monitor", fn() { t("录制说明") }, consent_reread)
   })
   |> ignore
-  // (who made it, to reach: the user, 2026-11-15 「about加上我的twitter pengx17和邮箱 pengxiao@outlook.com」)
   setting_group(p, fn() { t("联系作者") }, fn(g) {
     link_row(g, true, "x-logo", fn() { "X (Twitter)" }, note=fn() { "@pengx17" }, fn() {
       rp_launch(cstr("https://x.com/pengx17")) |> ignore

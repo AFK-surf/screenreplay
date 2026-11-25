@@ -7,16 +7,11 @@ internal enum StallAction
     Restart,
 }
 
-/// <summary>
-/// Tracks whether the active screen capture has stopped delivering new frames despite input or foreground/desktop
-/// activity, decides when to attempt a lightweight capture renewal, and escalates to a full recorder/GPU restart
-/// when repeated renewals fail or stall again without producing live frames.
-/// </summary>
 internal sealed class StallWatcher
 {
-    public const long StallWindow = 20_000_000;      // 2 s after first poke with no new frame
-    public const long RenewInterval = 300_000_000;   // at most once per 30 s
-    public const long FailRetryDelay = 50_000_000;   // retry sooner (5 s) after a failed renewal before escalating
+    public const long StallWindow = 20_000_000;
+    public const long RenewInterval = 300_000_000;
+    public const long FailRetryDelay = 50_000_000;
 
     private long lastFrames;
     private long lastFrameAt;
@@ -38,7 +33,6 @@ internal sealed class StallWatcher
         lastFrameAt = nowHns;
     }
 
-    /// <summary>Records the active capture's current frame count and latest input/foreground timestamps.</summary>
     public void Observe(long currentFrames, long nowHns, long pokedHns)
     {
         if (currentFrames != lastFrames)
@@ -61,7 +55,6 @@ internal sealed class StallWatcher
         }
     }
 
-    /// <summary>Checks whether a stall action (lightweight renew or full restart) is due now.</summary>
     public StallAction Evaluate(long nowHns, bool canStallRenew)
     {
         if (!canStallRenew || nowHns - lastRenew < RenewInterval)
@@ -82,13 +75,11 @@ internal sealed class StallWatcher
         return StallAction.Renew;
     }
 
-    /// <summary>Records that a renewal attempt (for stall or screen-on) has started.</summary>
     public void NoteRenewStarted(long nowHns)
     {
         lastRenew = nowHns;
     }
 
-    /// <summary>Records that a pending capture delivered its first frame and replaced the active capture.</summary>
     public void NoteSwapped(long newFrames, long nowHns, bool fromStall)
     {
         lastFrames = newFrames;
@@ -108,8 +99,6 @@ internal sealed class StallWatcher
         }
     }
 
-    /// <summary>Records that a pending capture gave no first frame within GiveUp; returns true when escalation to a
-    /// full recorder/GPU restart is warranted.</summary>
     public bool NoteSourceFailed(long nowHns, bool fromStall, bool screenActive)
     {
         if (!fromStall || !screenActive)

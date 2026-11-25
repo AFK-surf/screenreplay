@@ -1,18 +1,10 @@
 import "mbt_compat"
 import "ui"
 
-// A saved GIF in the window's player (the user, 2026-11-14: no other app opened for it): its frames composed by WIC
-// (replay_gif.cpp) and played by the same Deck as a video, a track of its own made of them (each frame a sample, its
-// time its delays added up, every one a key frame), each frame handed to the deck's stream as a picture of its own
-// (`Stream::jpeg`, which the Windows host decodes by WIC whatever the picture's format: a BMP here). No sound. Played to
-// its end it goes on from its start, as a GIF does; its controls, keys and hover preview the player's.
-
-
 fn is_gif_path(path : String) -> Bool {
   path.ends_with(".gif")}
 
-/// The GIF at `path` as a deck reads a file: one picture track, codec "gif", in ms, a sample a frame (`at` its number);
-/// none where it cannot be read.
+// Represent GIF frames as a 1000 Hz Mp4Track (sample.at holds frame index, not byte offset).
 fn gif_tracks(path : String) -> Array[Mp4Track] {
   let info = text_of(rp_gif_info(cstr(path)))
   let parts = info.split(" ")
@@ -44,11 +36,6 @@ fn gif_tracks(path : String) -> Array[Mp4Track] {
     },
   ]}
 
-/// Each GIF read's length (ms): its frames' delays added up.
-
-
-/// The image key of the hover preview's picture for moment `at` (ms) of the GIF at `path`: the frame shown at the
-/// whole second before it, small (a second's frame made once each, at most as many as its seconds).
 fn gif_frame_key(path : String, at : Double) -> String {
   guard track_of(path, "vide") is Some(t) else { return "" }
   let k = imax(0, sample_at(t, (at / 1000.0).floor() * 1000.0 + 0.5))

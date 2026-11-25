@@ -2,11 +2,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
-/// Lossless MP4 segment joiner (`AVMutableComposition` + `AVAssetExportPresetPassthrough`)
-/// for Instant Replay ("Save the last N seconds", matching `recording/ClipJoiner.cs`).
 public enum ClipJoiner {
-  /// Joins the last `duration` of `segments` (oldest first, matching resolution of the newest segment)
-  /// into `outputPath` without re-encoding. Returns `true` on success.
   public static func saveLast(segments: [Segment], duration: TimeInterval, outputPath: String) -> Bool {
     guard !segments.isEmpty, duration > 0 else { return false }
     let newest = segments[segments.count - 1]

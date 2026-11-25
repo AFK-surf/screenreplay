@@ -2,22 +2,6 @@ import "mbt_compat"
 import "signals"
 import "view"
 
-// The time of day drawn into the track (the user's pick, 2026-11-24: 「E：画进轨道里」, after 「注意我们要尽可能高效利用
-// 垂直空间」 took back a ruler of its own under it), no height added. Since 「I：淡出底边只标半点」 (2026-11-24, the
-// ticks beside their times found ugly): no lines, no fade under them (the user, 2026-11-24: 去掉渐变), each time
-// centred on its moment, a 2 pt notch under it. How far apart they are follows the zoom, never closer than about 200 points: the hours and
-// half hours at a 2 hours' view, 2 minutes at 10 minutes, seconds near a minute. On the minute, the hour or midnight
-// (whichever is a step coarser) the time is brighter and bold; midnight says the day. Under a filter of apps or with
-// gaps folded only the moments kept are marked, none in a seam. A time is left out where an app's name or 未录制 is in
-// its way.
-
-/// The steps the moments marked may be apart (ms).
-
-
-/// How near two times may come (points).
-
-
-/// The step for a view `len` long across `w` points: the finest that keeps the times tick_room apart.
 fn tick_step(len : Double, w : Double) -> Double {
   let least = tick_room / dmax(1.0, w) * len
   for s in tick_steps {
@@ -27,7 +11,6 @@ fn tick_step(len : Double, w : Double) -> Double {
   }
   tick_steps[tick_steps.length() - 1]}
 
-/// What a step a coarser moment is to `step`: the minute under a minute, the hour under an hour, else midnight.
 fn tick_major(step : Double) -> Double {
   if step < 60000.0 {
     60000.0
@@ -37,8 +20,6 @@ fn tick_major(step : Double) -> Double {
     86400000.0
   }}
 
-/// Whether moment `at` (ms into the buffer) is shown along the axis: under a filter of apps or with gaps folded, only
-/// in a kept stretch.
 fn tick_kept(at : Double) -> Bool {
   match axis() {
     Option::None => true
@@ -48,8 +29,6 @@ fn tick_kept(at : Double) -> Bool {
     }
   }}
 
-/// A moment marked: ms into the buffer, its words, whether it is a coarser one.
-
 #derive(Eq)
 pub struct Tick {
   at : Double
@@ -57,7 +36,6 @@ pub struct Tick {
   major : Bool
 }
 
-/// The moments to mark along the axis from `a` to `z` (its units), `step` apart on the lt clock.
 fn ticks_in(a : Double, z : Double, step : Double) -> Array[Tick] {
   let out : Array[Tick] = []
   if segs.is_empty() {
@@ -92,17 +70,10 @@ fn ticks_in(a : Double, z : Double, step : Double) -> Array[Tick] {
   }
   out}
 
-/// How high the notch under a time is (points).
-
-/// The size the times are in.
-
-
-/// The times and their lines in the band (`parent`, `w` wide), under the apps' names.
 fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
-    // (the moments in reach: the view's length on steps of 1.5x either side of it, so the list changes only as the
-    // view moves on by a step or the zoom passes one; the step itself by the view's own length)
+    // Quantize visible range on 1.5x steps so tick nodes only rebuild when crossing a bucket.
     let reach = signals::computed_by(fn(_) {
       let (from, len) = shown(o)
       let width = dmax(1.0, w())
@@ -110,8 +81,6 @@ fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
       let at = (from / q).floor() * q
       (at - q, at + 3.0 * q, tick_step(len, width))
     }, fn(a, b) { a == b })
-    // (what is in a time's way, in the same reach: the stretches wide enough for their icon (their names' widths), and
-    // the gaps wide enough for 未录制)
     let named = signals::computed_ref(fn(_) {
       let (a, z, _) = reach.get()
       let (_, len) = shown(o)
@@ -136,7 +105,7 @@ fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
       arr_filter(gaps_now.get(), fn(g) { ax_d(g.1, vl) > a && ax_d(g.0, vl) < z })
     })
     let gap_w = sf_node_words_w(t("未录制"), 11.0).ceil()
-    // (whether a time from `x0` to `x1` across the band meets a name, as piece_labels and gap_labels lay them)
+    // Mirror piece_labels/gap_labels layout widths to detect label collisions.
     let in_way = fn(v : view::View, x0 : Double, x1 : Double) -> Bool {
       let width = w()
       for p in named.get() {
@@ -173,8 +142,6 @@ fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
       let tw = sf_node_words_w(tick.text, tick_size, weight=if tick.major { 600 } else { 500 }).ceil()
       row.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
       let x = fn(v : view::View) { x_drawn_of(v, tick.at, w()) }
-      // (centred on its moment, kept inside the band; where a name or an icon is in the way, moved aside by up to 36
-      // points, right first; else none)
       let place = fn(v : view::View) -> Option[Double] {
         let at = x(v)
         if at < 0.0 || at > w() {

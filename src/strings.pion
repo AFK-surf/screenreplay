@@ -7,7 +7,6 @@ fn t(zh : String) -> String {
     Option::None => zh
   }}
 
-/// A sentence with blanks: {0}, {1} … filled with `args` in order (after its words are looked up).
 fn tf(zh : String, args : Array[String]) -> String {
   let mut s = t(zh)
   for i, a in args {

@@ -3,22 +3,12 @@ using Vortice.MediaFoundation;
 
 namespace Replay.Recording;
 
-/// <summary>A piece of a clip: a segment's file, where its first moment lands in the clip (100 ns from the first
-/// part's start), and the stretch of it kept (100 ns into the file: from, to).</summary>
 public sealed record ClipPart(string Path, long OffsetHns, long TrimStartHns, long EndHns);
 
-/// <summary>
-/// Segments joined into one MP4 without encoding again: each file's samples read as they are (Media Foundation's
-/// source reader, nothing decoded) and written in turn to one sink writer, their times moved to the clip's. The clip
-/// starts on the keyframe at or before the moment asked for, so its first frame is whole.
-/// </summary>
 public static class ClipJoiner
 {
     private const int AnyStream = unchecked((int)0xFFFFFFFE);
 
-    /// <summary>The last <paramref name="length"/> of <paramref name="segments"/> (oldest first) saved to
-    /// <paramref name="output"/> (written under a temporary name, renamed when complete). 0 when it was saved; else an
-    /// HRESULT or -1 (nothing to save).</summary>
     public static int SaveLast(IReadOnlyList<Segment> segments, TimeSpan length, string output)
     {
         if (segments.Count == 0)
@@ -28,7 +18,6 @@ public static class ClipJoiner
 
         var last = segments[^1];
         var from = last.EndUtc - length;
-        // only the newest run of one picture size (what was recorded at another size cannot be joined to it as it is)
         var parts = new List<Segment>();
         for (var i = segments.Count - 1; i >= 0; i--)
         {
@@ -80,7 +69,6 @@ public static class ClipJoiner
         return result;
     }
 
-    /// <summary>The parts joined into <paramref name="output"/>. 0 when it was written; else the HRESULT that stopped it.</summary>
     public static int Join(IReadOnlyList<ClipPart> parts, string output)
     {
         if (parts.Count == 0)
@@ -161,8 +149,6 @@ public static class ClipJoiner
                         reader.SetStreamSelection(audio, true);
                     }
 
-                    // from the keyframe at or before the moment asked for: found by seeking there and reading the
-                    // first frame, then the file read again from that frame's time, its sound with it
                     long start = 0;
                     if (part.TrimStartHns > 0)
                     {
@@ -252,8 +238,7 @@ public static class ClipJoiner
         }
     }
 
-    /// <summary>Renames MP4 HEVC sample entry <c>hev1</c> to <c>hvc1</c> in place so lossless joined clips play in
-    /// QuickTime, Safari, and iOS without remuxing.</summary>
+    // Renames MP4 HEVC sample entry hev1 -> hvc1 in place for QuickTime/Safari/iOS compatibility.
     internal static void PatchHev1ToHvc1(string path)
     {
         try
@@ -356,13 +341,10 @@ public static class ClipJoiner
     }
 }
 
-/// <summary>What Media Foundation can decode here.</summary>
 public static class Decoders
 {
     private static readonly Lazy<bool> hevc = new(() => Has(Native.VideoFormat_HEVC));
 
-    /// <summary>Whether an HEVC decoder is installed (a GPU's, or the HEVC Video Extensions): what the replay window
-    /// needs to show and re-encode an HEVC recording. Asked once.</summary>
     public static bool Hevc => hevc.Value;
 
     private static unsafe bool Has(Guid subtype)

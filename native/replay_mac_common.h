@@ -78,7 +78,6 @@ static inline bool rp_write_file_raw(const char *path, const void *data, size_t 
   return true;
 }
 
-// 32-bit top-down BMP (54-byte header + w*h*4 BGRA with opaque alpha=255), matching replay_mf.cpp / replay_gif.cpp.
 static inline std::vector<uint8_t> rp_bmp_from_bgra(const uint8_t *bgra, int w, int h, int stride) {
   if (!bgra || w <= 0 || h <= 0 || stride < w * 4) return {};
   const int32_t header = 14 + 40;
@@ -164,7 +163,6 @@ static inline std::vector<uint8_t> rp_jpeg_from_bgra(const uint8_t *bgra, int w,
   return jpg;
 }
 
-// Convert any CGImageRef into top-down BGRA rows (with optional crop in source image pixels and fit into max_w x max_h).
 static inline bool rp_cgimage_to_bgra(CGImageRef img, int max_w, int max_h,
                                       int cx, int cy, int cw, int ch,
                                       std::vector<uint8_t> &bgra, int &out_w, int &out_h) {

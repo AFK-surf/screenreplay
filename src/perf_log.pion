@@ -2,12 +2,6 @@ import "hostapi"
 import "mbt_compat"
 import "view"
 
-// While it plays, a line every 5 s into the folder's perf.log (the reviewer's 64th: how much CPU in the user's own use,
-// not a test window's behind others): the process's CPU (% of one core), whether the window was in front, minimized,
-// shown, the speed. Nothing of what is shown or of other windows; kept under 1 MB. (Frames are not counted: the app
-// sees no frame of its own, a binding being asked more than once a frame.)
-
-
 fn perf_watch(root : view::View) -> Unit {
   let last : mbt_compat::Ref[(Double, Double)] = mbt_compat::ref_new((now(), hostapi::cpu_ms()))
   let tick = fn() -> Unit { __mbt_local_perf_watch_tick_11(last, root) }

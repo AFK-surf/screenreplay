@@ -1,4 +1,3 @@
-// System, filesystem, clipboard, Finder, diagnostics, and AppKit window hooks for ScreenReplayViewer on macOS.
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
@@ -109,7 +108,6 @@ static bool rp_mkdirs_str(const std::string &path) {
   return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-// Resident / hidden startup state
 static std::atomic<int32_t> rp_hides{0};
 static std::atomic<int32_t> rp_shows{0};
 static std::atomic<int> rp_priming{0};
@@ -148,7 +146,6 @@ static void rp_swizzled_makeKeyAndOrderFront(id self, SEL _cmd, id sender) {
       });
       return;
     } else {
-      // Plain hidden (tray / note): keep ordered out and accessory policy.
       w.alphaValue = 0.0;
       w.ignoresMouseEvents = YES;
       [w orderOut:nil];
@@ -171,7 +168,7 @@ static void rp_install_start_hidden_hook(int mode) {
   }
 }
 
-}  // namespace
+}
 
 @interface RPResidentDelegate : NSObject <NSWindowDelegate>
 @property(nonatomic, strong) id<NSWindowDelegate> forwardDelegate;
@@ -361,7 +358,6 @@ int32_t rp_append(moonbit_bytes_t path, moonbit_bytes_t data) {
   return ok ? 1 : 0;
 }
 
-// Move `from` to `to` without replacing an existing target (matching MoveFileExW without MOVEFILE_REPLACE_EXISTING).
 int32_t rp_rename(moonbit_bytes_t from, moonbit_bytes_t to) {
   std::string a = rp_str(from), b = rp_str(to);
   if (a.empty() || b.empty()) return 0;
@@ -547,7 +543,6 @@ int32_t rp_launch_recorder(void) {
     std::string dir = exe.substr(0, slash);
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    // Check sibling binary ScreenReplay in Contents/MacOS/ or build output dir
     NSString *binPath = [NSString stringWithUTF8String:(dir + "/ScreenReplay").c_str()];
     if (binPath && [fm isExecutableFileAtPath:binPath]) {
       NSTask *task = [[NSTask alloc] init];
@@ -557,7 +552,6 @@ int32_t rp_launch_recorder(void) {
       return [task launchAndReturnError:&err] ? 1 : 0;
     }
 
-    // Check app bundles relative to helper/viewer bundle locations
     NSArray<NSString *> *bundleCandidates = @[
       [NSString stringWithUTF8String:(dir + "/ScreenReplay.app").c_str()],
       [NSString stringWithUTF8String:(dir + "/../../../ScreenReplay.app").c_str()],
@@ -761,7 +755,6 @@ int32_t rp_stay_resident(void) {
     rp_res_delegate.wasHidden = !w.isVisible || rp_priming.load() != 0;
     w.delegate = rp_res_delegate;
 
-    // Listen for distributed notification from ScreenReplay menu bar host to reveal resident window instantaneously.
     [[NSDistributedNotificationCenter defaultCenter]
         addObserverForName:@"dev.pengx17.screenreplay.openViewer"
                     object:nil
@@ -905,4 +898,4 @@ int32_t rp_style_note_win(int32_t wid, double w_pt, double h_pt) {
   return 0;
 }
 
-}  // extern "C"
+}

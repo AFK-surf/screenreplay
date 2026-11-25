@@ -1,20 +1,6 @@
 import "mbt_compat"
 
-// The sound's loudness on the timeline (the design review's letter 15, the user's wish to see the volume): the
-// recorder keeps beside each segment a `.levels` file, one byte every 100 ms (the loudest track's RMS, -50 dB 0 and
-// 0 dB 255: recording/SegmentWriter.cs), gone with the segment. Drawn as thin bars along the foot of the apps'
-// stretches, lighter where already played; nothing where it is quiet or a segment has none (older recordings).
-// Beside it an `.input` file the same way: how busy the mouse and the keyboard were (counts only, 0 none, 255 as busy
-// as it gets: recording/InputActivity.cs), drawn as a heat lane over the stretches (timeline_view.mbt's heat_picture).
-
-
-/// Each segment's levels and 16-sample (1.6 s) peaks, read once (empty when it has none).
-
-
-/// Each segment's input activity and 16-sample (1.6 s) peaks, read once (empty when it has none).
-
-
-/// Each 16 samples' (1.6 s) peak of `b`, so a wide view's scan steps by 1.6 s instead of 100 ms.
+// Sidecar format (.levels / .input): 1 byte (0..255) per 100 ms (level_step), with 16-sample (1.6 s) max-mip blocks.
 fn make_mip(b : Bytes) -> Bytes {
   let n = b.length()
   if n == 0 {
@@ -34,7 +20,6 @@ fn make_mip(b : Bytes) -> Bytes {
     best.to_byte()
   })}
 
-/// A segment's sidecar `ext`, read once into `cache` (empty when it has none).
 fn seg_sidecar(cache : mbt_compat::OrderedMap[String, (Bytes, Bytes)], s : Seg, ext : String) -> (Bytes, Bytes) {
   match cache.get(s.path) {
     Option::Some(pair) => pair
@@ -47,13 +32,11 @@ fn seg_sidecar(cache : mbt_compat::OrderedMap[String, (Bytes, Bytes)], s : Seg, 
     }
   }}
 
-/// A segment let go of: what was read of it with it.
 fn sidecars_drop(path : String) -> Unit {
   levels_of.remove(path)
   input_of.remove(path)
   sidecars_rev.v = -1}
 
-/// All cached sidecar buffers dropped while the resident window is hidden (reloaded lazily on next show).
 fn sidecars_clear() -> Unit {
   levels_of.clear()
   input_of.clear()
@@ -66,10 +49,6 @@ fn sidecars_clear() -> Unit {
   in_mip.clear()
 
   sidecars_rev.v = -1}
-
-/// The segments' sidecars in `segs` order, kept in step with `rev` so a column scan indexes them directly without
-/// hashing paths or searching `segs` at each column.
-
 
 fn sync_sidecars() -> Unit {
   let r = rev.untracked()
@@ -90,7 +69,6 @@ fn sync_sidecars() -> Unit {
     in_mip.push(im)
   }}
 
-/// The peak byte of `raw` (with 16-sample peaks `mip`) over indices `from0..=to0`.
 fn seg_peak(raw : Bytes, mip : Bytes, from0 : Int, to0 : Int) -> Int {
   let n = raw.length()
   if n == 0 {
@@ -135,8 +113,6 @@ fn seg_peak(raw : Bytes, mip : Bytes, from0 : Int, to0 : Int) -> Int {
   }
   best}
 
-/// The peak (0..255) of each column `k0 + idx` (`idx` in `0..<n`, each `cell` ms wide) walked in one pass along
-/// `segs`, and whether any column was above 0.
 fn peaks_grid(k0 : Double, n : Int, cell : Double, is_input : Bool) -> (Array[Int], Bool) {
   sync_sidecars()
   let out = Array::make(n, 0)

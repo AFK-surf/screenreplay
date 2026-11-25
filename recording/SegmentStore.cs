@@ -3,26 +3,16 @@ using System.Text.Json;
 
 namespace Replay.Recording;
 
-/// <summary>A recorded segment in the buffer's folder.</summary>
 public sealed record Segment(string Path, DateTimeOffset StartUtc, DateTimeOffset EndUtc, long Bytes, int Width, int Height, double DurationMs);
 
-/// <summary>
-/// The buffer's folder: its segments, <c>yyyyMMdd-HHmmss-fff-&lt;id&gt;.mp4</c> (their start, UTC), each with a
-/// <c>.json</c> saying when it starts, how long it is and its picture's size, a <c>.levels</c> of its sound and an
-/// <c>.input</c> of how busy the mouse, keyboard and game controllers were.
-/// </summary>
 public sealed class SegmentStore(string folder)
 {
-    /// <summary>The files beside a segment's <c>.mp4</c>, by their extension: gone with it.</summary>
     public static readonly string[] Sidecars = [".json", ".levels", ".input", ".thumbs"];
 
     public string Folder { get; } = folder;
 
-    // (the segments read before, by their path: a complete segment does not change, and reading each one's .json and
-    // size again on every listing, 761 of them, took 1.3 % of a core, 2026-11-15)
     private readonly Dictionary<string, Segment> read = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The complete segments, oldest first (one being written is not among them).</summary>
     public IReadOnlyList<Segment> List()
     {
         var found = new List<Segment>();
@@ -93,7 +83,6 @@ public sealed class SegmentStore(string folder)
         }
     }
 
-    /// <summary>A segment's start by its name, <c>yyyyMMdd-HHmmss-fff…</c>.</summary>
     public static bool TryStartOfName(string name, out DateTimeOffset start)
     {
         start = default;
@@ -107,8 +96,6 @@ public sealed class SegmentStore(string folder)
         return true;
     }
 
-    /// <summary>The segments that ended before <paramref name="before"/> deleted, with their sidecars; one another
-    /// program holds is left for the next time. Returns how many went.</summary>
     public int Prune(DateTimeOffset before)
     {
         var gone = 0;
@@ -128,9 +115,6 @@ public sealed class SegmentStore(string folder)
         return gone;
     }
 
-    /// <summary>Keeps segments newest-first until their cumulative recorded duration reaches <paramref name="keep"/>,
-    /// deleting older segments and their sidecars. Unrecorded gaps (sleep, paused, app closed) do not count against
-    /// <paramref name="keep"/>.</summary>
     public int PruneRecorded(TimeSpan keep)
     {
         var segments = List();
@@ -164,8 +148,6 @@ public sealed class SegmentStore(string folder)
         return gone;
     }
 
-    /// <summary>As <see cref="PruneRecorded"/>, applied jointly across multiple buffer folders (previous buffer dirs +
-    /// the active one) ordered by segment start time.</summary>
     public static int PruneRecordedAcross(IReadOnlyList<SegmentStore> stores, TimeSpan keep)
     {
         var all = new List<(SegmentStore Store, Segment Segment)>();
@@ -238,7 +220,6 @@ public sealed class SegmentStore(string folder)
         return true;
     }
 
-    /// <summary>What a crash left half written (the temporary files of segments never completed) deleted.</summary>
     public void DeleteUnfinished()
     {
         if (!Directory.Exists(Folder))

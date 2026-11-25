@@ -1,4 +1,3 @@
-// Saved GIF playback on macOS: GIF89a header/disposal parsing + ImageIO frame decode + canvas composition -> 32-bit BMP.
 #include <map>
 
 #include "replay_mac_common.h"
@@ -28,7 +27,6 @@ struct Gif {
 
 Gif *open_gif = nullptr;
 
-// Stream-read GIF89a blocks to obtain exact Logical Screen size and per-frame (Left, Top, Width, Height, Delay, Disposal).
 bool parse_gif_stream(const char *path, int &scr_w, int &scr_h, std::vector<GifFrame> &frames) {
   int fd = open(path, O_RDONLY);
   if (fd < 0) return false;
@@ -291,7 +289,7 @@ moonbit_bytes_t gif_bmp_of(std::vector<uint8_t> &px, int w, int h, int max_w) {
   return rp_bytes_from(bmp.data(), bmp.size());
 }
 
-}  // namespace
+}
 
 extern "C" moonbit_bytes_t rp_gif_info(moonbit_bytes_t path) {
   Gif *g = gif_of(rp_str(path));

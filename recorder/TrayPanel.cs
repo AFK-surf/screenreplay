@@ -3,12 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// The tray's panel (the user, 2026-11-14: the menu drawn as the replay window is, not Windows' own): hosted as an
-/// in-process secondary window inside the single resident ScreenReplayViewer.exe (WM_APP + 0x54), sharing its D3D11
-/// device, shaders, and font atlas instead of keeping a second idle viewer process alive. Where the resident viewer
-/// is unavailable (e.g. mid-renew), returns false so the icon's own menu opens immediately instead.
-/// </summary>
 internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Func<(int Pid, IntPtr Window)?> findReplay, Action<string> log) : IDisposable
 {
     [DllImport("user32.dll")]
@@ -22,13 +16,10 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Func<(
 
     private volatile bool disposed;
 
-    /// <summary>No separate tray process is owned anymore (hosted in-process inside the resident viewer).</summary>
     public bool Owns(int pid) => false;
 
-    /// <summary>No-op: the tray menu shares the single resident viewer process.</summary>
     public void Warm() { }
 
-    /// <summary>No-op: the resident viewer is renewed as a whole by RecorderApp.RenewReplayIfHidden.</summary>
     public void Renew(string why) { }
 
     private readonly object noteLock = new();
@@ -61,7 +52,6 @@ internal sealed class TrayPanel(string exe, string root, IntPtr recorder, Func<(
         }
     }
 
-    /// <summary>Opens the tray panel at screen pixels (x, y) inside the resident viewer; false if unavailable.</summary>
     public bool Show(int x, int y)
     {
         if (disposed)

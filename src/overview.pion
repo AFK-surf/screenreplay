@@ -2,25 +2,6 @@ import "pixels"
 import "signals"
 import "view"
 
-// The overview right under the track (letter 26; thin since 2026-11-16, the user's option E): all of the buffer along a
-// track 10 high, as wide as the track, no times beside it. A band 4 high, hatched where nothing may be, solid where
-// something was recorded; the markers dots that take a press; the playhead a line across it; the part in view a
-// viewfinder (a 1.5 edge, 12% inside, radius 2.5, a handle 4 in from each end), at least 24 wide. Its viewfinder
-// dragged by its middle moves the view; by an end, that end (so it zooms); a press beside it brings the view's middle
-// there.
-
-
-/// What a press on the overview took: 0 nothing, 1 the frame's start, 2 its end, 3 the frame; and the view's start and
-/// length when it was pressed.
-
-
-/// The viewfinder held (what is costly to make again as the view moves waits for its letting go).
-
-
-/// An end of the viewfinder held (the view's scale changing continuously till let go).
-
-
-/// The viewfinder across the track `w` wide: its left and width (at least 24, about its middle).
 fn finder(w : Double) -> (Double, Double) {
   let total = ax_span(view_len())
   let k = if total > 0.0 { w / total } else { 0.0 }
@@ -28,7 +9,6 @@ fn finder(w : Double) -> (Double, Double) {
   let tw = view_len() * k
   let fw = dmax(24.0, tw)
   (clamp(tx + tw / 2.0 - fw / 2.0, 0.0, dmax(0.0, w - fw)), fw)}
-
 
 fn overview_drag(d : view::Drag, w : Double) -> Unit {
   let total = ax_span(signals::untracked(view_len))
@@ -52,13 +32,12 @@ fn overview_drag(d : view::Drag, w : Double) -> Unit {
       }
       let len = signals::untracked(view_len)
       if part == 0 {
-        // beside the frame: the view's middle brought there, then dragged as the frame
         set_view(px / k - len / 2.0, len)
       }
       over_grab.v = (if part == 0 { 3 } else { part }, view_from.untracked(), signals::untracked(view_len))
       view_dragging.set(true)
       view_resizing.set(part == 1 || part == 2)
-      // (where it went down: a raw event's own `ox` is where it is now)
+      // Save press-down x because raw drag events report current x rather than origin.
       over_down_x.v = d.x
     }
     Moved => {
@@ -88,8 +67,6 @@ fn overview_drag(d : view::Drag, w : Double) -> Unit {
 
 fn overview(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    // (a thin strip right under the track, as wide as it, no times beside it: the user's option E, 2026-11-16,
-    // 「感觉屏幕下方的内容好像占的空间有点大了」)
     row.row(view::Live::Is(true)).margin(view::Live::Is((0.0, 4.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     row.box(fn(cell) {
       cell.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))) |> ignore
@@ -100,7 +77,6 @@ fn overview(parent : view::View) -> Unit {
           let total = ax_span(view_len())
           if total > 0.0 { w() / total } else { 0.0 }
         }
-        // (where the pointer is along it, a quarter of a point at least; -1 off it)
         let at = fn() {
           if !track.pointer_within() {
             return -1.0
@@ -110,7 +86,6 @@ fn overview(parent : view::View) -> Unit {
         track
         .height(view::Live::Is(Some(overview_h)))
         .presses(view::Live::Is(true))
-        // (the viewfinder's ends resize it, its inside moves it, outside it the view goes there)
         .cursor(view::Live::By(fn() {
           let x = at()
           let (a, fw) = finder(w())
@@ -126,7 +101,6 @@ fn overview(parent : view::View) -> Unit {
         }))
         .on_drag(fn(d) { overview_drag(d, room.width()) }, captures=true)
         |> ignore
-        // the moment under the pointer, over it (11, subtle on s2)
         track.box(fn(o) {
           o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(tag) {
@@ -151,7 +125,6 @@ fn overview(parent : view::View) -> Unit {
           |> ignore
         })
         |> ignore
-        // the band, hatched, a hairline round it; solid where something was recorded
         track.box(fn(b) {
           b
           .over(view::Live::Is(true))
@@ -164,7 +137,6 @@ fn overview(parent : view::View) -> Unit {
             let layers : Array[pixels::VectorPath] = [
               layer(hatch_d(0.0, width, 4.0), 0L, stroke=tone(0xFFFFFF17L, 0x00000017L), width=1.0),
             ]
-            // (under a filter of apps, its stretches along its axis, the seams between them left hatched)
             let vl = view_len()
             let spans = match axis_now.get() {
               Option::Some(a) => a.ks
@@ -178,13 +150,11 @@ fn overview(parent : view::View) -> Unit {
               }
             }
             layers.push(layer(rect_d(0.5, 0.5, width - 1.0, 3.0), 0L, stroke=hair(), width=1.0))
-            // (the band 4 high, centered vertically inside overview_h)
             Some(pixels::Vector::{ w: width, h: overview_h, layers: arr_map(layers, fn(l) { pixels::VectorPath::{ d: l.d, fill: l.fill, stroke: l.stroke, width: l.width, even_odd: l.even_odd, sx: l.sx, sy: l.sy, tx: l.tx, ty: (overview_h - 4.0) / 2.0 } }) })
           }))
           |> ignore
         })
         |> ignore
-        // the viewfinder and its handles
         track.box(fn(o) {
           o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(f) {
@@ -219,7 +189,6 @@ fn overview(parent : view::View) -> Unit {
           })
           |> ignore
         }
-        // the playhead, 3 over and under the band
         track.box(fn(o) {
           o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(p) {
@@ -237,7 +206,6 @@ fn overview(parent : view::View) -> Unit {
           |> ignore
         })
         |> ignore
-        // the markers: dots that take a press (the moment brought into view)
         track.box(fn(o) {
           o.over(view::Live::Is(true)) |> ignore
           o.each(fn() {

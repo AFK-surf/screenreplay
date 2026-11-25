@@ -1,4 +1,3 @@
-// Segment file reader LRU cache + background warmup, AudioToolbox AAC decoder, and WSOLA time-stretcher on macOS.
 #import <AudioToolbox/AudioToolbox.h>
 #include <math.h>
 #include <atomic>
@@ -9,8 +8,6 @@
 #include "replay_mac_common.h"
 
 __asm__(".linker_option \"-framework\", \"AudioToolbox\"");
-
-// ---- reads ----
 
 namespace {
 
@@ -37,7 +34,7 @@ static int rp_play_open_fd(const char *utf8) {
   return fd;
 }
 
-// (under rp_kept_mu) keeps `fd` for `path`, evicting LRU slot; returns false if `path` is already cached.
+// Caller must hold rp_kept_mu.
 static bool rp_kept_put(const std::string &path, int fd) {
   int slot = 0;
   for (int i = 0; i < 6; i++) {
@@ -95,7 +92,7 @@ static void rp_warm_loop() {
   }
 }
 
-}  // namespace
+}
 
 extern "C" moonbit_bytes_t rp_play_read(moonbit_bytes_t path, double offset, int32_t length) {
   if (length <= 0) return moonbit_make_bytes(0, 0);
@@ -175,8 +172,6 @@ extern "C" void rp_play_release(void) {
   rp_warm_todo.clear();
   rp_warm_gen.fetch_add(1);
 }
-
-// ---- sound (AudioToolbox AAC -> 48 kHz stereo PCM16) ----
 
 namespace {
 
@@ -272,7 +267,6 @@ static RpAac *rp_aac_of(int32_t h) {
   return h >= 1 && h <= (int32_t)rp_aacs.size() ? rp_aacs[(size_t)(h - 1)] : nullptr;
 }
 
-// PCM16 of the decoder's channels and rate, made 48 kHz stereo onto `to` (exact match to replay_play.cpp:280).
 static void rp_aac_to48(RpAac *a, const int16_t *s, size_t frames, std::vector<int16_t> &to) {
   int ch = a->channels;
   if (a->rate == 48000) {
@@ -303,7 +297,7 @@ static void rp_aac_to48(RpAac *a, const int16_t *s, size_t frames, std::vector<i
   }
 }
 
-}  // namespace
+}
 
 extern "C" int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channels) {
   int32_t n = asc ? Moonbit_array_length(asc) : 0;
@@ -420,8 +414,6 @@ extern "C" void rp_aac_close(int32_t h) {
   rp_aacs[(size_t)(h - 1)] = nullptr;
 }
 
-// ---- the sound at another speed (WSOLA verbatim from replay_play.cpp) ----
-
 namespace {
 
 struct RpTs {
@@ -450,7 +442,7 @@ static float rp_ts_fit(const RpTs *t, long a, long b) {
   return xy / sqrtf(xx);
 }
 
-}  // namespace
+}
 
 extern "C" int32_t rp_ts_open(double rate) {
   RpTs *t = new RpTs();

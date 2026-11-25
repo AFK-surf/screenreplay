@@ -1,7 +1,3 @@
-// The replay app's media on Windows: a frame of a segment decoded small for the timeline's thumbnails (Media
-// Foundation's source reader on the GPU with D3D11VA + ID3D11VideoProcessor cropping and scaling to BGRA, falling back
-// to software RGB32 when unavailable), and a clip saved as recorded (the segments' samples copied into one MP4 by a
-// sink writer, not encoded again: rp_concat); a saved GIF's first picture (WIC) and length.
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
@@ -56,7 +52,6 @@ template <class T> static void rp_release(T *&p) {
   }
 }
 
-// A BMP (32-bit, top-down) of `w` x `h` from BGRA rows.
 static std::vector<uint8_t> rp_bmp(const std::vector<uint8_t> &bgra, int w, int h) {
   const int header = 14 + 40;
   const int size = header + w * h * 4;
@@ -78,17 +73,12 @@ static std::vector<uint8_t> rp_bmp(const std::vector<uint8_t> &bgra, int w, int 
   return b;
 }
 
-// A frame of the file at `ms` (the first decoded at or after it), at most `max_w` x `max_h` keeping its shape, as a
-// BMP; none when it cannot be decoded.
 static std::vector<uint8_t> rp_gif_pixels(const std::wstring &file, int32_t max_w, int32_t max_h);
 
 static bool rp_is_gif(const std::wstring &file) {
   return file.size() > 4 && _wcsicmp(file.c_str() + file.size() - 4, L".gif") == 0;
 }
 
-// A frame of `file` at `ms` decoded on the GPU (IMFSourceReader with D3D11VA into NV12, so frames before `ms` cost no
-// colour conversion or scaling), then cropped to (cx, cy, cw, ch) and scaled to fit max_w x max_h by ID3D11VideoProcessor
-// into a small staging texture read back as a BMP; empty when the GPU path cannot decode it.
 struct GpuThumb {
     int state = 0;  // 0 uninit, 1 ready, -1 unavailable
     ID3D11Device *dev = nullptr;
@@ -111,8 +101,7 @@ struct GpuThumb {
     ID3D11VideoProcessorOutputView *out_view = nullptr;
     ID3D11Texture2D *staging = nullptr;
     UINT32 vp_in_w = 0, vp_in_h = 0, vp_out_w = 0, vp_out_h = 0;
-    // The file let go of (its reader holds it open: a clip previewed last could not be deleted, nor a segment's
-    // space given back), the frame kept of it with it.
+    // Release reader handle so previewed clips/segments can be deleted on disk.
     void drop_reader() {
       rp_release(reader);
       cached_file.clear();
@@ -122,7 +111,6 @@ struct GpuThumb {
       nv12_file.clear();
       nv12_target = -1;
     }
-    // All of it let go of (the device, its decoder's and its video processor's memory): made again at the next ask.
     void drop() {
       drop_reader();
       rp_release(out_view);
@@ -140,7 +128,6 @@ struct GpuThumb {
     }
 };
 
-// (the thumbnail worker's own: rp_thumb_job's thread alone uses them)
 static thread_local GpuThumb rp_gpu_thumb;
 static thread_local IMFSourceReader *rp_sw_reader = nullptr;
 static thread_local std::wstring rp_sw_file;
@@ -395,14 +382,11 @@ static std::vector<uint8_t> rp_thumb_gpu_pixels(const std::wstring &file, double
   return out;
 }
 
-// A frame of `path` at `ms`, cut to the crop (cx, cy, cw, ch in the picture's pixels; cw 0: the whole of it), scaled
-// down to fit max_w x max_h.
 static std::vector<uint8_t> rp_thumb_pixels(const char *path, double ms, int32_t max_w, int32_t max_h,
                                             int32_t cx = 0, int32_t cy = 0, int32_t cw = 0, int32_t ch = 0) {
   std::vector<uint8_t> none;
   if (!rp_mf_ready()) return none;
   std::wstring file = rp_w(path);
-  // (a GIF saved from a clip: its first picture, which it holds whole)
   if (rp_is_gif(file)) return rp_gif_pixels(file, max_w, max_h);
   std::vector<uint8_t> gpu = rp_thumb_gpu_pixels(file, ms, max_w, max_h, cx, cy, cw, ch);
   if (!gpu.empty()) return gpu;
@@ -471,7 +455,6 @@ static std::vector<uint8_t> rp_thumb_pixels(const char *path, double ms, int32_t
     bool locked2d = SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&surface))) &&
                     SUCCEEDED(surface->Lock2D(&data, &stride));
     if (!locked2d && FAILED(buffer->Lock(&data, nullptr, &len))) break;
-    // (the part kept: the crop, held inside the picture)
     int ox = 0, oy = 0, pw = (int)fw, ph = (int)fh;
     if (cw > 0 && ch > 0) {
       ox = cx < 0 ? 0 : (cx >= (int)fw ? (int)fw - 1 : cx);
@@ -523,13 +506,8 @@ extern "C" moonbit_bytes_t rp_thumb(moonbit_bytes_t path, double ms, int32_t max
   return rp_copy_bmp(rp_thumb_pixels((const char *)path, ms, max_w, max_h));
 }
 
-// Only one decode runs at a time. The worker owns ordinary C++ data; MoonBit
-// allocations and image registration stay on the UI thread. One byte means
-// pending (0) or unavailable (1); a completed result is a BMP.
-//
-// What the worker holds is let go of as it rests: the file it read (its reader holds it open, so a clip previewed
-// last could not be deleted) after 2 s with nothing asked, its device and all it made on it after 30 s, and at once
-// when the window is put away (rp_thumb_release). Made again at the next ask (some tens of ms, once).
+// Single worker owns C++ buffers; MoonBit allocations stay on the UI thread.
+// 1-byte return means pending (0) or unavailable (1); larger returns are a 32-bit BMP.
 struct RpThumbJob {
   std::mutex mutex;
   std::condition_variable changed;
@@ -554,8 +532,7 @@ static void rp_thumb_drop_readers() {
 
 static void rp_thumb_worker() {
   RpThumbJob *job = rp_thumb_jobs;
-  // (what it holds: 0 nothing, 1 a file, 2 a device too)
-  int holds = 0;
+  int holds = 0;  // 0 none, 1 file, 2 device
   for (;;) {
     std::unique_lock<std::mutex> lock(job->mutex);
     while (!job->busy) {
@@ -598,7 +575,6 @@ static void rp_thumb_worker() {
     }
     lock.lock();
     job->cache.emplace_back(key, std::move(pixels));
-    // Bounded to at most 32 frames (~30 MB at 640 x 360).
     if (job->cache.size() > 32) job->cache.pop_front();
     job->busy = false;
   }
@@ -636,8 +612,6 @@ static moonbit_bytes_t rp_thumb_job(const char *path, const char *identity, doub
   return moonbit_make_bytes(1, 0);
 }
 
-// The window put away: the frames made let go of (up to ~30 MB), and the worker's file, device and decoder as soon as
-// it rests (at once where it rests now).
 extern "C" void rp_thumb_release(void) {
   RpThumbJob *job = rp_thumb_jobs;
   std::lock_guard<std::mutex> guard(job->mutex);
@@ -650,26 +624,20 @@ extern "C" void rp_thumb_release(void) {
 }
 
 extern "C" moonbit_bytes_t rp_clip_thumb(moonbit_bytes_t path, moonbit_bytes_t identity, double ms) {
-  // (640 x 360 at most: a card of the saved clips is some 300 to 700 pixels wide; made at 320 it was drawn blurred,
-  // seen in the Store's screenshots, 2026-11-18)
   return rp_thumb_job((const char *)path, (const char *)identity, ms, 640, 360, 0, 0, 0, 0);
 }
 
-// The save dialog's preview of a crop (a region, a window picked): the frame at `ms` cut to it, made as
-// rp_clip_thumb's are (the same worker, one at a time; its answers the same), up to 480 x 270.
 extern "C" moonbit_bytes_t rp_crop_thumb(moonbit_bytes_t path, moonbit_bytes_t identity, double ms, int32_t cx, int32_t cy,
                                          int32_t cw, int32_t ch) {
   return rp_thumb_job((const char *)path, (const char *)identity, ms, 480, 270, cx, cy, cw, ch);
 }
 
-// One segment of a clip's plan: its file, where its first kept moment lands in the clip, and the stretch kept (all
-// 100 ns; the times kept are the file's own).
+// All timestamps in 100 ns units.
 struct ClipPart {
   std::wstring path;
   LONGLONG offset, trim, end;
 };
 
-// The first video and audio streams of a reader (-1 none).
 static void rp_streams(IMFSourceReader *reader, int *video, int *audio) {
   *video = *audio = -1;
   for (DWORD i = 0; i < 8; i++) {
@@ -683,18 +651,10 @@ static void rp_streams(IMFSourceReader *reader, int *video, int *audio) {
   }
 }
 
-// Where a joined clip's tracks begin and what it shows, on the clip's times (100 ns): the first picture and the first
-// sound written (-1 none), and the moments asked for, from and to.
 struct ClipSpan {
   LONGLONG video = -1, audio = -1, from = 0, to = 0;
 };
 
-// The parts joined into `out` without encoding again: each file's samples read as they are (the source reader, no
-// decoder) and written in turn to one sink writer, their times moved to the clip's. The file starts on the keyframe at
-// or before the moment asked for (found by seeking there and reading the first frame; the file then read again from
-// that frame's time, its sound with it), so its first frame is whole; `span` says where, for the edit list that has it
-// shown from the moment itself (rp_edit_list). S_OK, or the HRESULT that stopped it.
-// How far the clip being joined is (0..1000) and whether it is to stop (rp_concat_start, rp_concat_cancel).
 static std::atomic<int> rp_join_permille{0};
 static std::atomic<bool> rp_join_stop{false};
 
@@ -704,8 +664,6 @@ static HRESULT rp_join(const std::vector<ClipPart> &parts, const std::wstring &o
   bool has_audio_out = false;
   bool shifted = false;
   LONGLONG shift = 0;
-  // (where the last part read ends on the clip's times, and where its file's 0 lands on the plan's: a later part's
-  // offset is where its trim lands, so its file's 0 is that less its trim)
   LONGLONG last_end = 0, zero = 0;
   HRESULT hr = S_OK;
   for (size_t p = 0; p < parts.size() && SUCCEEDED(hr); p++) {
@@ -764,14 +722,12 @@ static HRESULT rp_join(const std::vector<ClipPart> &parts, const std::wstring &o
       at.hVal.QuadPart = start;
       reader->SetCurrentPosition(GUID_NULL, at);
     }
-    // (the clip's times from the first part read: its keyframe is 0, the moment asked for after it)
     if (!shifted) {
       shift = zero + start;
       shifted = true;
       span->from = zero + part.trim - shift;
     } else if (part.trim > 0 && zero + start - shift < last_end) {
-      // (a part cut in from the middle of its file, what was skipped before it left out: it starts on the keyframe
-      // before its moment, so it is put on from where the last ended, its few frames of lead-in kept, not over it)
+      // Mid-file part starts at preceding keyframe; shift zero forward to avoid overlapping previous part.
       zero += last_end - (zero + start - shift);
     }
     bool video_done = false, audio_done = !take_audio;
@@ -815,7 +771,6 @@ static HRESULT rp_join(const std::vector<ClipPart> &parts, const std::wstring &o
   return hr;
 }
 
-// An MP4's numbers, big-endian.
 static uint64_t rp_be(const uint8_t *p, int n) {
   uint64_t v = 0;
   for (int i = 0; i < n; i++) v = (v << 8) | p[i];
@@ -831,8 +786,6 @@ static void rp_push_be(std::vector<uint8_t> &b, int n, uint64_t v) {
   rp_put_be(b.data() + b.size() - n, n, v);
 }
 
-// A box's place in `b` from `at`: its kind, where its content starts and where it ends; false where none fits before
-// `end`.
 static bool rp_box(const uint8_t *b, size_t at, size_t end, uint32_t *kind, size_t *content, size_t *box_end) {
   if (at + 8 > end) return false;
   uint64_t size = rp_be(b + at, 4);
@@ -855,7 +808,6 @@ static constexpr uint32_t rp_fourcc(const char *s) {
   return ((uint32_t)(uint8_t)s[0] << 24) | ((uint32_t)(uint8_t)s[1] << 16) | ((uint32_t)(uint8_t)s[2] << 8) | (uint8_t)s[3];
 }
 
-// The content of the first box `kind` among those from `at` to `end` (false: none).
 static bool rp_child(const uint8_t *b, size_t at, size_t end, uint32_t kind, size_t *content, size_t *box_end) {
   uint32_t k;
   size_t c, e;
@@ -870,17 +822,12 @@ static bool rp_child(const uint8_t *b, size_t at, size_t end, uint32_t kind, siz
   return false;
 }
 
-// A box of `kind` around `content`.
 static void rp_push_box(std::vector<uint8_t> &out, uint32_t kind, const uint8_t *content, size_t n) {
   rp_push_be(out, 4, (uint64_t)(n + 8));
   rp_push_be(out, 4, kind);
   out.insert(out.end(), content, content + n);
 }
 
-// A track's `trak` again, with an edit list that shows its media from the clip's moment on (an `edts` after its
-// `tkhd`, any it had replaced; its `tkhd`'s duration the clip's): `first` its first sample's time on the clip's times
-// (100 ns), `movie_scale` the `mvhd`'s. Where the track starts after the moment (its first sound a little later), an
-// empty edit first holds it back to its place. False where it is not read whole (left as it was).
 static bool rp_edit_trak(const uint8_t *b, size_t s, size_t e, LONGLONG first, const ClipSpan &span, uint64_t movie_scale,
                          std::vector<uint8_t> &out) {
   size_t th, the, md, mde, mh, mhe, st, ste;
@@ -892,8 +839,7 @@ static bool rp_edit_trak(const uint8_t *b, size_t s, size_t e, LONGLONG first, c
   const uint64_t scale = rp_be(b + mh + (mdhd1 ? 20 : 12), 4);
   const uint64_t media_dur = rp_be(b + mh + (mdhd1 ? 24 : 16), mdhd1 ? 8 : 4);
   if (scale == 0) return false;
-  // (the first sample's composition time: MF's sink writer puts a track's start in its ctts, the sound's ~13 ms after
-  // the picture's keyframe)
+  // MF SinkWriter encodes initial track offset in ctts (e.g. audio ~13 ms after video keyframe).
   int64_t cts0 = 0;
   size_t mi, mie;
   if (rp_child(b, md, mde, rp_fourcc("minf"), &mi, &mie) && rp_child(b, mi, mie, rp_fourcc("stbl"), &st, &ste)) {
@@ -903,7 +849,7 @@ static bool rp_edit_trak(const uint8_t *b, size_t s, size_t e, LONGLONG first, c
   }
   const LONGLONG length = std::max<LONGLONG>(0, span.to - span.from);
   const LONGLONG lead = span.from - first;
-  // the edits: (duration in the movie's scale, media time in the track's; -1 empty)
+  // (movie-scale duration, track-scale media_time; -1 = empty edit)
   std::vector<std::pair<uint64_t, int64_t>> edits;
   uint64_t shown = (uint64_t)(length * (LONGLONG)movie_scale / 10000000);
   int64_t media_at = cts0;
@@ -914,7 +860,6 @@ static bool rp_edit_trak(const uint8_t *b, size_t s, size_t e, LONGLONG first, c
   } else {
     media_at = cts0 + (int64_t)(lead * (LONGLONG)scale / 10000000);
   }
-  // (not past the media's end: a track that stops short ends there)
   const int64_t media_left = cts0 + (int64_t)media_dur - media_at;
   if (media_left <= 0) return false;
   shown = std::min<uint64_t>(shown, (uint64_t)media_left * movie_scale / scale);
@@ -937,7 +882,7 @@ static bool rp_edit_trak(const uint8_t *b, size_t s, size_t e, LONGLONG first, c
   size_t c, x, at = s;
   while (rp_box(b, at, e, &k, &c, &x)) {
     if (k == rp_fourcc("edts")) {
-      // (MF's own, if it wrote one: this one instead)
+      // drop existing edts
     } else if (k == rp_fourcc("tkhd")) {
       std::vector<uint8_t> tkhd(b + c, b + x);
       const bool v1 = tkhd.size() > 0 && tkhd[0] == 1;
@@ -953,8 +898,6 @@ static bool rp_edit_trak(const uint8_t *b, size_t s, size_t e, LONGLONG first, c
   return true;
 }
 
-// The chunk offsets of every track in `moov` (its content, `b`) past `from` moved by `by` (the media data after a
-// `moov` taken from before it).
 static void rp_move_chunks(uint8_t *b, size_t s, size_t e, uint64_t from, int64_t by) {
   uint32_t k;
   size_t c, x;
@@ -988,13 +931,7 @@ static bool rp_write_at(HANDLE f, uint64_t at, const void *from, DWORD n) {
   return SetFilePointerEx(f, p, nullptr, FILE_BEGIN) && WriteFile(f, from, n, &put, nullptr) && put == n;
 }
 
-// The joined clip at `path` shown from the moment asked for to its end, not from the keyframe before it (the clip is
-// cut on that keyframe, so nothing is encoded again; the frames before the moment are there for the decoder only): an
-// edit list in each track that starts its media at that moment (its picture's and its sound's each from their own
-// first sample, so the two keep together), the movie's and the tracks' durations the clip's length. The `moov` is put
-// back at the file's end, where the sink writer writes it (moved there, the media's chunk offsets with it, were it
-// before). S_OK; S_FALSE where the file is not as expected (left as written, its lead-in shown); E_FAIL where writing
-// it stopped part way (the clip is not to be kept).
+// Patches moov with edit lists (moving moov to EOF if needed); S_FALSE leaves file intact, E_FAIL means partial write.
 static HRESULT rp_edit_list(const std::wstring &path, const ClipSpan &span) {
   HANDLE f = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (f == INVALID_HANDLE_VALUE) return S_FALSE;
@@ -1003,7 +940,6 @@ static HRESULT rp_edit_list(const std::wstring &path, const ClipSpan &span) {
     LARGE_INTEGER size{};
     if (!GetFileSizeEx(f, &size)) break;
     const uint64_t total = (uint64_t)size.QuadPart;
-    // the top boxes by their heads alone: where the moov is
     uint64_t at = 0, moov_at = 0, moov_end = 0;
     bool found = false;
     while (at + 8 <= total) {
@@ -1064,10 +1000,8 @@ static HRESULT rp_edit_list(const std::wstring &path, const ClipSpan &span) {
     if (!edited) break;
     std::vector<uint8_t> out;
     rp_push_box(out, rp_fourcc("moov"), inner.data(), inner.size());
-    // (from here the file is being written: a stop is the clip's failure)
     hr = E_FAIL;
     if (moov_end != total) {
-      // (a moov before the media: the media after it moved up by its size, the moov written after it)
       rp_move_chunks(out.data(), 8, out.size(), moov_end, -(int64_t)(moov_end - moov_at));
       std::vector<uint8_t> buf(1 << 20);
       uint64_t from = moov_end, to = moov_at;
@@ -1089,8 +1023,7 @@ static HRESULT rp_edit_list(const std::wstring &path, const ClipSpan &span) {
   return hr;
 }
 
-// The clip `plan` describes saved to `output`:the plan a line a segment, `path\toffsetMs\ttrimStartMs\tendMs` (the
-// replay window's clip_plan). 0 when it was written; -1001 an empty plan; else the HRESULT that stopped it.
+// Plan lines: path\toffsetMs\ttrimStartMs\tendMs. Returns 0 ok, -1001 empty plan, or HRESULT.
 static int32_t rp_concat_run(const char *plan, const char *output) {
   if (!rp_mf_ready()) return -1000;
   std::vector<ClipPart> parts;
@@ -1116,8 +1049,6 @@ extern "C" int32_t rp_concat(moonbit_bytes_t plan, moonbit_bytes_t output) {
   return rp_concat_run((const char *)plan, (const char *)output);
 }
 
-// The clip joined as recorded in the background (a few minutes of 4K is some hundreds of MB written: on the window's
-// thread it stood still, white, till it was done). 0 when one is being joined already.
 static std::atomic<int> rp_concat_phase{0};  // 0 none, 1 joining, 2 done
 static std::atomic<int> rp_concat_code{0};
 
@@ -1141,13 +1072,10 @@ extern "C" int32_t rp_concat_start(moonbit_bytes_t plan, moonbit_bytes_t output)
   return 1;
 }
 
-// 1 joining, 2 done (its code: rp_concat_take), 0 none.
 extern "C" int32_t rp_concat_state(void) { return rp_concat_phase.load(); }
 
-// How far the join is, 0..1.
 extern "C" double rp_concat_progress(void) { return rp_join_permille.load() / 1000.0; }
 
-// The finished join's code (0 joined; E_ABORT cancelled), the next one then free to start.
 extern "C" int32_t rp_concat_take(void) {
   int32_t code = rp_concat_code.load();
   rp_concat_phase = 0;
@@ -1156,7 +1084,6 @@ extern "C" int32_t rp_concat_take(void) {
 
 extern "C" void rp_concat_cancel(void) { rp_join_stop = true; }
 
-// A GIF's first frame by WIC, at most `max_w` x `max_h` keeping its shape, as a BMP; none when it cannot be read.
 static std::vector<uint8_t> rp_gif_pixels(const std::wstring &file, int32_t max_w, int32_t max_h) {
   std::vector<uint8_t> none;
   IWICImagingFactory *wic = nullptr;
@@ -1193,18 +1120,13 @@ static std::vector<uint8_t> rp_gif_pixels(const std::wstring &file, int32_t max_
   return out.empty() ? none : out;
 }
 
-// How long a GIF plays, in ms: its frames' delays added up (read from its blocks, its pictures skipped); -1 when it
-// is not one.
 static double rp_gif_duration(const std::wstring &file) {
   HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                          FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
   if (f == INVALID_HANDLE_VALUE) return -1;
-  // (read through in 1 MB pieces, never the whole file at once: a 4K GIF of some minutes is hundreds of MB, and the
-  // whole of it was read into memory for its length)
   std::vector<uint8_t> buf(1 << 20);
   size_t have = 0, at = 0;
   bool end = false;
-  // byte `i` ahead of where it reads (false: the file ends first)
   auto peek = [&](size_t i, uint8_t &out) -> bool {
     while (at + i >= have && !end) {
       if (at > 0) {
@@ -1221,7 +1143,6 @@ static double rp_gif_duration(const std::wstring &file) {
     out = buf[at + i];
     return true;
   };
-  // `n` bytes passed over (false: the file ends first)
   auto skip_n = [&](size_t n) -> bool {
     uint8_t b;
     while (n > 0) {
@@ -1232,7 +1153,6 @@ static double rp_gif_duration(const std::wstring &file) {
     }
     return true;
   };
-  // sub-blocks passed over, the terminator with them
   auto skip_blocks = [&]() -> bool {
     uint8_t len;
     for (;;) {
@@ -1274,9 +1194,6 @@ static double rp_gif_duration(const std::wstring &file) {
   return cs * 10.0;
 }
 
-// A video file's length (ms) as its movie header says (moov's mvhd: its duration over its timescale), read from the
-// boxes' heads alone; -1 where it cannot be (then asked of Media Foundation). The library asks it of each saved clip as
-// its card is made, on the window's thread: a source reader made for each took tens of ms a clip.
 static double rp_mp4_header_duration(const std::wstring &file) {
   HANDLE f = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -1297,7 +1214,6 @@ static double rp_mp4_header_duration(const std::wstring &file) {
   GetFileSizeEx(f, &size);
   const uint64_t end = (uint64_t)size.QuadPart;
   double ms = -1;
-  // the top level's boxes, then moov's, to its mvhd
   uint64_t at = 0, stop = end;
   bool in_moov = false;
   for (int guard = 0; guard < 4096 && at + 8 <= stop; guard++) {
@@ -1340,7 +1256,6 @@ static double rp_mp4_header_duration(const std::wstring &file) {
   return ms;
 }
 
-// How long a video file plays, in ms (its presentation's duration); -1 when it cannot be read.
 extern "C" double rp_duration(moonbit_bytes_t path) {
   if (rp_is_gif(rp_w((const char *)path))) return rp_gif_duration(rp_w((const char *)path));
   const double header = rp_mp4_header_duration(rp_w((const char *)path));
@@ -1359,9 +1274,7 @@ extern "C" double rp_duration(moonbit_bytes_t path) {
   return ms;
 }
 
-// ---- a frame copied to the clipboard (the picture's menu: 复制当前帧) ----
-
-// The picture's own size and colour (its native type: the decoder's may be taller, HEVC's 2160 rows coded as 2176).
+// Query native media type for display size (coded height may be padded, e.g. HEVC 2160 -> 2176).
 static void rp_native_picture(IMFSourceReader *reader, UINT32 &w, UINT32 &h, int &bt601, int &full) {
   IMFMediaType *nat = nullptr;
   w = h = 0;
@@ -1385,7 +1298,6 @@ static void rp_native_picture(IMFSourceReader *reader, UINT32 &w, UINT32 &h, int
 
 static inline uint8_t rp_clamp8(double v) { return v <= 0 ? 0 : v >= 255 ? 255 : (uint8_t)(v + 0.5); }
 
-// NV12 rows (`pitch` apart, the chroma pairs' rows after `rows` luma rows) as top-down BGRA of w x h.
 static void rp_nv12_to_bgra(const uint8_t *data, size_t pitch, size_t rows, int w, int h, int bt601, int full,
                             std::vector<uint8_t> &bgra) {
   const double ky = full ? 1.0 : 255.0 / 219.0, kc = full ? 1.0 : 255.0 / 224.0, y0 = full ? 0.0 : 16.0;
@@ -1407,11 +1319,7 @@ static void rp_nv12_to_bgra(const uint8_t *data, size_t pitch, size_t rows, int 
   }
 }
 
-// rp_frame_at on the GPU: the frames from the key frame on decoded by the GPU's decoder into its own memory (no colour
-// conversion of any but the one kept: the CPU path converted every one of them, 1-4 s for a 4K frame two seconds after
-// its key frame), the last one not after `ms` copied aside, read back once and converted. False when the GPU cannot.
-// (made at the first copy and kept: making a device and its manager each time cost tens of ms of each copy; one copy
-// runs at a time, rp_frame_copying; let go of as the window is put away, rp_frame_release)
+// Reused D3D11 device for frame copy (serialized by rp_frame_copying; released on rp_frame_release).
 static ID3D11Device *rp_copy_dev = nullptr;
 static ID3D11DeviceContext *rp_copy_ctx = nullptr;
 static IMFDXGIDeviceManager *rp_copy_mgr = nullptr;
@@ -1477,7 +1385,6 @@ static bool rp_frame_at_gpu(const std::wstring &file, double ms, std::vector<uin
       if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
       if (!sample) continue;
       if (ts > target + 10000 && have) break;
-      // (this one kept: copied aside on the GPU, the decoder's picture given back)
       IMFMediaBuffer *buffer = nullptr;
       IMFDXGIBuffer *dxgi = nullptr;
       ID3D11Texture2D *src = nullptr;
@@ -1534,7 +1441,6 @@ static bool rp_frame_at_gpu(const std::wstring &file, double ms, std::vector<uin
   rp_release(want);
   rp_release(reader);
   rp_release(attrs);
-  // (a device lost, a driver updated: made anew at the next copy)
   if (!ok && dev && FAILED(dev->GetDeviceRemovedReason())) {
     rp_release(mgr);
     rp_release(ctx);
@@ -1543,8 +1449,6 @@ static bool rp_frame_at_gpu(const std::wstring &file, double ms, std::vector<uin
   return ok;
 }
 
-// The frame shown at `ms` into `file` (the last one at or before it), whole, as top-down BGRA rows; false when it
-// cannot be decoded.
 static bool rp_frame_at(const std::wstring &file, double ms, std::vector<uint8_t> &bgra, int &w, int &h) {
   IMFAttributes *attrs = nullptr;
   IMFSourceReader *reader = nullptr;
@@ -1567,7 +1471,7 @@ static bool rp_frame_at(const std::wstring &file, double ms, std::vector<uint8_t
     if (FAILED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) break;
     UINT32 fw = 0, fh = 0;
     MFGetAttributeSize(got, MF_MT_FRAME_SIZE, &fw, &fh);
-    // (the picture shown, where the coded frame is taller: HEVC's 2160 rows coded as 2176)
+    // Use display aperture when coded height is padded (e.g. HEVC 2160 -> 2176).
     MFVideoArea area;
     if (SUCCEEDED(got->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 *)&area, sizeof area, nullptr)) &&
         area.Area.cx > 0 && area.Area.cy > 0 && (UINT32)area.Area.cx <= fw && (UINT32)area.Area.cy <= fh) {
@@ -1591,8 +1495,6 @@ static bool rp_frame_at(const std::wstring &file, double ms, std::vector<uint8_t
     at.vt = VT_I8;
     at.hVal.QuadPart = target;
     if (FAILED(reader->SetCurrentPosition(GUID_NULL, at))) break;
-    // (from the key frame before it on: the last one not after it, as the player shows it; a millisecond's slack for
-    // the time asked being the frame's own, rounded)
     for (int reads = 0; reads < 2000; reads++) {
       DWORD flags = 0;
       LONGLONG ts = 0;
@@ -1609,7 +1511,7 @@ static bool rp_frame_at(const std::wstring &file, double ms, std::vector<uint8_t
       if (ts > target + 10000) break;
     }
     if (!best) break;
-    // (the converter's storage may be wider than the picture: its type after decoding says)
+    // Re-query output type after decode for aligned storage stride.
     if (FAILED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) break;
     UINT32 sw = fw, sh = fh;
     MFGetAttributeSize(got, MF_MT_FRAME_SIZE, &sw, &sh);
@@ -1649,7 +1551,6 @@ static bool rp_frame_at(const std::wstring &file, double ms, std::vector<uint8_t
   return ok;
 }
 
-// Top-down BGRA rows as a PNG file's bytes (none when it could not be encoded).
 static std::vector<uint8_t> rp_png(const std::vector<uint8_t> &bgra, int w, int h) {
   std::vector<uint8_t> out;
   IWICImagingFactory *wic = nullptr;
@@ -1664,10 +1565,8 @@ static std::vector<uint8_t> rp_png(const std::vector<uint8_t> &bgra, int w, int 
     if (FAILED(encoder->CreateNewFrame(&frame, nullptr))) break;
     if (FAILED(frame->Initialize(nullptr))) break;
     if (FAILED(frame->SetSize((UINT)w, (UINT)h))) break;
-    // (no alpha in it: a screen has none)
     WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGR;
     if (FAILED(frame->SetPixelFormat(&format))) break;
-    // (the encoder's own format may differ, 24-bit: WriteSource converts)
     IWICBitmap *bitmap = nullptr;
     if (FAILED(wic->CreateBitmapFromMemory((UINT)w, (UINT)h, GUID_WICPixelFormat32bppBGR, (UINT)w * 4, (UINT)bgra.size(),
                                            (BYTE *)bgra.data(), &bitmap))) break;
@@ -1705,7 +1604,6 @@ static HGLOBAL rp_global(const void *bytes, size_t n) {
   return g;
 }
 
-// Now in ms, finer than GetTickCount64's 16 (the copy's times said in the trace).
 static double rp_ms() {
   static LARGE_INTEGER f = {};
   if (!f.QuadPart) QueryPerformanceFrequency(&f);
@@ -1714,13 +1612,11 @@ static double rp_ms() {
   return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
 }
 
-// The clipboard's owner while a copied frame is on it: a window of its own on a thread of its own, so the PNG is made
-// only when a program pasting asks for it (WM_RENDERFORMAT), not before the copy is said done (a 4K PNG takes some
-// 200 ms, as long as the decode); the DIB, a copy of the rows, is put at once.
+// Dedicated clipboard owner thread/window for delayed PNG rendering (WM_RENDERFORMAT).
 struct RpClip {
   HWND hwnd = nullptr;
   UINT png = 0;
-  std::vector<uint8_t> bgra;  // the frame on the clipboard, till another program's copy takes its place
+  std::vector<uint8_t> bgra;
   int w = 0, h = 0;
 };
 static RpClip rp_clip;
@@ -1738,7 +1634,6 @@ static HGLOBAL rp_png_global(const RpClip &c) {
 static LRESULT CALLBACK rp_clip_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   switch (msg) {
     case WM_APP + 1: {
-      // (put: the DIB now, the PNG promised; the frame kept here, on this thread, for when it is asked)
       RpPut *put = (RpPut *)lp;
       HGLOBAL dib_mem = rp_global(put->dib.data(), put->dib.size());
       bool open = false;
@@ -1766,7 +1661,6 @@ static LRESULT CALLBACK rp_clip_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
       }
       return 0;
     case WM_RENDERALLFORMATS:
-      // (the program quitting while its frame is still on the clipboard: the PNG made now, kept there)
       if (OpenClipboard(hwnd)) {
         if (GetClipboardOwner() == hwnd && !rp_clip.bgra.empty()) {
           HGLOBAL g = rp_png_global(rp_clip);
@@ -1776,7 +1670,6 @@ static LRESULT CALLBACK rp_clip_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
       }
       return 0;
     case WM_DESTROYCLIPBOARD:
-      // (emptied: another copy takes its place, or this one's next)
       rp_clip.bgra.clear();
       rp_clip.bgra.shrink_to_fit();
       return 0;
@@ -1789,8 +1682,7 @@ static HWND rp_clip_window() {
   static HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   std::call_once(once, []() {
     std::thread([]() {
-      // (COM on this thread: the PNG promised is made here when a program pastes (WM_RENDERFORMAT), by WIC, which
-      // without it could not be made (CoCreateInstance: CO_E_NOTINITIALIZED), so only the DIB was ever pasted)
+      // STA COM required on this thread so WIC can encode PNG inside WM_RENDERFORMAT.
       HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
       WNDCLASSW wc = {};
       wc.lpfnWndProc = rp_clip_proc;
@@ -1809,13 +1701,9 @@ static HWND rp_clip_window() {
   return rp_clip.hwnd;
 }
 
-// The picture put on the clipboard twice over: as a DIB (CF_DIB: what Paint, Word and most programs take), and as a PNG
-// (the registered "PNG" format: what browsers and chats take), made only when asked for.
-// REPLAY_TEST_COPY_FRAME=<file>: the PNG written there instead, the clipboard left alone (the test windows: never the
-// clipboard of the person at this computer).
 static bool rp_put_picture(std::vector<uint8_t> &bgra, int w, int h) {
   double began = rp_ms();
-  // (the DIB: its rows from the bottom up, as every reader of CF_DIB takes them)
+  // CF_DIB requires bottom-up rows.
   BITMAPINFOHEADER info = {};
   info.biSize = sizeof info;
   info.biWidth = w;
@@ -1830,7 +1718,6 @@ static bool rp_put_picture(std::vector<uint8_t> &bgra, int w, int h) {
     memcpy(&dib[sizeof info + (size_t)(h - 1 - y) * w * 4], &bgra[(size_t)y * w * 4], (size_t)w * 4);
   const char *test = getenv("REPLAY_TEST_COPY_FRAME");
   if (test && *test) {
-    // (what the clipboard would be given made all the same, its time said; the PNG written in its place)
     const char *trace = getenv("REPLAY_TRACE");
     if (trace && strcmp(trace, "1") == 0) {
       printf("REPLAY_COPY_DIB %.1f ms\n", rp_ms() - began);
@@ -1850,10 +1737,9 @@ static bool rp_put_picture(std::vector<uint8_t> &bgra, int w, int h) {
   return SendMessageW(owner, WM_APP + 1, 0, (LPARAM)&put) == 1;
 }
 
-// 0 nothing asked, 1 being made, 2 copied, 3 could not be.
+// 0 idle, 1 busy, 2 copied, 3 failed
 static std::atomic<int> rp_frame_copying{0};
 
-// mbui's (win_stream.cpp): the frame a stream shows, read back off the GPU, its rows handed over on a thread of its own
 extern "C" {
 typedef void (*mb_stream_grabbed_fn)(void *arg, const unsigned char *rows, int w, int h, int pitch, double ts);
 int mb_stream_grab(int id, mb_stream_grabbed_fn done, void *arg);
@@ -1868,7 +1754,6 @@ static void rp_frame_grabbed(void *, const unsigned char *rows, int w, int h, in
     rp_frame_copying = 3;
     return;
   }
-  // (the rows taken and the GPU's texture given back at once; the clipboard's part on a thread of this file's)
   auto bgra = std::make_shared<std::vector<uint8_t>>((size_t)w * h * 4);
   for (int y = 0; y < h; y++) {
     uint8_t *o = &(*bgra)[(size_t)y * w * 4];
@@ -1892,8 +1777,6 @@ static void rp_frame_put(std::vector<uint8_t> &bgra, int w, int h, double read) 
   rp_frame_copying = ok ? 2 : 3;
 }
 
-// The frame the player's stream shows now copied to the clipboard as it is (read off the GPU where it is drawn from:
-// no decode); 0 where it shows none or one is being copied (then rp_frame_copy).
 extern "C" int32_t rp_frame_copy_shown(int32_t stream) {
   if (rp_frame_copying.exchange(1) == 1) return 0;
   rp_grab_began = rp_ms();
@@ -1902,8 +1785,6 @@ extern "C" int32_t rp_frame_copy_shown(int32_t stream) {
   return 0;
 }
 
-// The frame at `ms` into the segment `path` copied to the clipboard, in the background (a 4K frame decodes from the
-// key frame before it); 0 when one is still being copied.
 extern "C" int32_t rp_frame_copy(moonbit_bytes_t path, double ms) {
   if (rp_frame_copying.exchange(1) == 1) return 0;
   std::string file((const char *)path);
@@ -1931,7 +1812,6 @@ extern "C" int32_t rp_frame_copy(moonbit_bytes_t path, double ms) {
   return 1;
 }
 
-// The copy's device let go of (the window put away): made again at the next copy. Not while one is being made.
 extern "C" void rp_frame_release(void) {
   int idle = 0;
   if (!rp_frame_copying.compare_exchange_strong(idle, 1)) return;
@@ -1941,7 +1821,6 @@ extern "C" void rp_frame_release(void) {
   rp_frame_copying = 0;
 }
 
-// How the last copy went (rp_frame_copying), a finished one told once (then 0).
 extern "C" int32_t rp_frame_copy_state(void) {
   int s = rp_frame_copying.load();
   if (s >= 2) rp_frame_copying.compare_exchange_strong(s, 0);

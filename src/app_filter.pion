@@ -5,25 +5,6 @@ import "signals"
 import "ui"
 import "view"
 
-// The apps in front over the buffer, counted, and a filter of them (the user, 2026-11-15: 「给过去的这段时间加上统计，
-// 快速过滤或者只看某个或者某些个app的录制片段」; the mock they took, 「照这个做（整个缓冲、不压缩）」): a key in the
-// dock's row by the zoom opens a list over it of each app's time in front over the whole buffer, longest first; ticking
-// apps filters. While a filter is on, the band dims the stretches of the apps not ticked (the timeline is not cut
-// short), playing skips them, and the keys' and buttons' jumps of 15 s land in the ticked apps' stretches. A press on
-// the band goes where it is pressed, whatever the filter. Clips are what is framed, as before.
-
-/// The apps ticked (by the names they are shown by: app_name); none: no filter.
-
-
-/// The list is up.
-
-
-/// The key it stands over.
-
-
-/// The apps under the share shown on rows of their own, shown too (the 「其它」 row pressed).
-
-
 fn filter_on() -> Bool {
   !app_filter.get().is_empty()}
 
@@ -37,8 +18,6 @@ fn toggle_app(app : String) -> Unit {
     set_filter(next)
   }}
 
-/// The apps ticked set: the playhead brought into a ticked stretch where it is not in one (the next, else the last
-/// before), and the view about it along the timeline's new axis (axis.mbt).
 fn set_filter(apps : Array[String]) -> Unit {
   app_filter.set(apps)
   let mut p = pos_now()
@@ -60,17 +39,6 @@ fn set_filter(apps : Array[String]) -> Unit {
   view_from.set(ax_d(p, len) - len / 2.0)
   keep_view()}
 
-/// Each app's time in front over the buffer (ms, only where something was recorded), longest first: by the name it
-/// is shown by (two processes of one name, as an app and its helper, one row), with the process whose icon it shows
-/// (the one in front longest); and all of it.
-
-
-/// The ticked apps' stretches (ms into the buffer), in order, those either side of a gap under 1.5 s taken as one.
-
-
-/// Where `at` (ms into the buffer) is to be under the filter going `dir` (1 on, -1 back): itself where it is in a
-/// ticked app's stretch (or there is no filter); else the start of the next such stretch on (1), the last second of the
-/// one before (-1); None where there is none that way.
 fn kept_at(at : Double, dir : Int) -> Option[Double] {
   if app_filter.untracked().is_empty() {
     return Option::Some(at)
@@ -84,7 +52,7 @@ fn kept_at(at : Double, dir : Int) -> Option[Double] {
   if dir > 0 {
     for k in ks {
       if k.0 > at {
-        // (a hair into it: the clock's ms and a sample's meet a hair apart)
+        // Nudge +1 ms past boundary to avoid clock/sample rounding landing outside the stretch.
         return Option::Some(k.0 + 1.0)
       }
     }
@@ -99,8 +67,6 @@ fn kept_at(at : Double, dir : Int) -> Option[Double] {
     found
   }}
 
-/// A jump of `by` ms from the playhead (J, L, the buttons either side of play): under a filter, to where kept_at says
-/// that way, staying put where there is no ticked stretch that way.
 fn jump_by(by : Double) -> Unit {
   let at = pos_now() + by
   match kept_at(at, if by >= 0.0 { 1 } else { -1 }) {
@@ -108,8 +74,6 @@ fn jump_by(by : Double) -> Unit {
     Option::None => ()
   }}
 
-/// While it plays under a filter (the replay's deck's `stops`): at a stretch of an app not ticked, on to the next
-/// ticked one, or stopped where there is none. True where it went elsewhere or stopped.
 fn filter_skip(p : Double) -> Bool {
   if app_filter.untracked().is_empty() || clipping.untracked() {
     return false
@@ -126,8 +90,6 @@ fn filter_skip(p : Double) -> Bool {
     }
   }}
 
-/// The band's stretches of the apps not ticked dimmed (the window's ground at 75% and a faint hatching), as one picture
-/// `w` wide for the view from `from` `len` long; None with no filter.
 fn filter_dim_picture(w : Double, from : Double, len : Double, f : Array[String]) -> Option[pixels::Vector] {
   if f.is_empty() || w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return Option::None
@@ -155,7 +117,6 @@ fn filter_dim_picture(w : Double, from : Double, len : Double, f : Array[String]
     ],
   })}
 
-/// A time in front in words: under a second 「不到 1 秒」, under a minute seconds, else minutes, past an hour hours and minutes.
 fn front_words(ms : Double) -> String {
   if ms < 1000.0 {
     t("不到 1 秒")
@@ -175,8 +136,6 @@ fn front_words(ms : Double) -> String {
     }
   }}
 
-/// The key in the dock's row (by the zoom): 「应用」 with a funnel; with a filter on, the apps ticked (two named, else
-/// how many) on s3, and an × that lets the filter go.
 fn apps_key(parent : view::View) -> Unit {
   let k = pressable(parent, fn() { t("按应用统计和过滤") }, fn() {
     apps_more.set(false)
@@ -212,8 +171,6 @@ fn apps_key(parent : view::View) -> Unit {
       |> ignore
     }, at_once=true)
     |> ignore
-    // with a filter on, the ticked apps' icons in place of the funnel (the user, 2026-11-15: 「加上app图标」), as many
-    // as are named, three where it says how many
     b.show(fn() { filter_on() }, fn(x) {
       x.box(fn(ic) {
         ic.row(view::Live::Is(true)).gap(view::Live::Is(3.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
@@ -281,7 +238,6 @@ fn apps_key(parent : view::View) -> Unit {
   })
   apps_anchor.v = Some(k.id())}
 
-/// A tick box, 16 square, radius 4: ticked the accent with a check, else a 1.5 wide edge of s4.
 fn tick_box(parent : view::View, on : () -> Bool) -> Unit {
   parent.box(fn(c) {
     c
@@ -305,7 +261,6 @@ fn tick_box(parent : view::View, on : () -> Bool) -> Unit {
   })
   |> ignore}
 
-/// Processes that are the OS's own shell, or this app: never a row of their own (on the 「其它」 row).
 fn shell_process(process : String, name : String) -> Bool {
   let p = str_to_ascii_lower(process)
   let n = str_to_ascii_lower(name)
@@ -322,10 +277,6 @@ fn shell_process(process : String, name : String) -> Bool {
   ].contains(n) ||
   name.starts_with("Microsoft® Windows®")}
 
-/// The rows shown: the apps in front enough of the buffer (at least 1 minute or 5% of a shorter buffer, and 1% of the
-/// time; Windows' shell and this app never), eight at most, ticked ones always; if none qualify (e.g. a very short
-/// buffer), the top non-shell apps (or top rows if only shell apps exist) are still shown so the list never collapses
-/// to only an 「其他」 row. The rest sit on one 「其他」 row, or all of them once it was pressed.
 fn apps_rows() -> (Array[(String, Double, String)], Int, Double) {
   let (rows, total) = app_stats.get()
   let f = app_filter.get()
@@ -365,9 +316,6 @@ fn apps_rows() -> (Array[(String, Double, String)], Int, Double) {
   }
   (shown, rest, rest_ms)}
 
-/// One app's row, 34 high: its tick, icon and name; its time in front (muted) and share (subtle, in a column of its
-/// own) at its end (a bar of the share behind the row was tried: grey blocks behind the ticks); s2 under the pointer.
-/// Pressed it is ticked or not; under the pointer 「只看它」 in place of its time, which ticks it alone.
 fn app_row(parent : view::View, name : String, process : String, ms_get : () -> Double) -> Unit {
   pressable(parent, fn() { name }, fn() { toggle_app(name) }, fn(b) {
     b
@@ -423,7 +371,6 @@ fn app_row(parent : view::View, name : String, process : String, ms_get : () -> 
   })
   |> ignore}
 
-/// A share in whole percents, under one 「<1%」.
 fn share_words(share : Double) -> String {
   if share < 0.01 {
     "<1%"
@@ -431,8 +378,6 @@ fn share_words(share : Double) -> String {
     (share * 100.0).round().to_int().to_string() + "%"
   }}
 
-/// The list over the key: s1, a hairline, radius 10, a shadow, 384 wide; its head (「前台应用」 and the buffer's
-/// reach), the rows, its foot (what the filter does, 「清除」). Pressed outside it, it goes; Escape too.
 fn apps_layer(root : view::View) -> Unit {
   root.box(fn(o) {
     o.over(view::Live::Is(true)).over_all(view::Live::Is(true)) |> ignore
@@ -462,7 +407,6 @@ fn apps_layer(root : view::View) -> Unit {
           Some(a) => panel.beside(a, side=view::Side::Top, along=view::Along::End, offset=6.0) |> ignore
           None => ()
         }
-        // the head
         panel.box(fn(h) {
           h.row(view::Live::Is(true)).padding(view::Live::Is((10.0, 2.0, 10.0, 8.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           h.box(fn(l) {
@@ -476,7 +420,6 @@ fn apps_layer(root : view::View) -> Unit {
           |> ignore
         })
         |> ignore
-        // the rows (scrollable when expanded past ~10 apps so it never overflows a 720 pt window)
         panel.box(fn(sc) {
           sc.max_height(view::Live::Is(Some(400.0))) |> ignore
           sc.scrolls(view::Scroll::new(), slop=ui::touch_slop(), bar=ui::tree_scroll_bar(), fn(list) {
@@ -518,7 +461,7 @@ fn apps_layer(root : view::View) -> Unit {
                 })
                 |> ignore
                 words(b, fn() { front_words(apps_rows().2) }, 12.0, ui_subtle) |> ignore
-                // (the share column's room, so its time stands with the rows' times)
+                // Aligns duration column with app_row's 34 pt share column.
                 b.box(fn(sp) { sp.width(view::Live::Is(Some(30.0))) |> ignore }) |> ignore
               })
               |> ignore
@@ -529,7 +472,6 @@ fn apps_layer(root : view::View) -> Unit {
         })
         |> ignore
         rule(panel, hair)
-        // the foot
         panel.box(fn(f) {
           f.row(view::Live::Is(true)).padding(view::Live::Is((10.0, 8.0, 6.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           f.box(fn(l) {

@@ -4,15 +4,7 @@ using Vortice.MediaFoundation;
 
 namespace Replay.Recording;
 
-/// <summary>
-/// The GPU's HEVC or H.264 encoder (its hardware MFT, driven asynchronously), one for the whole recording: each segment's
-/// sink writer only stores what it encodes (no encoder of its own). An encoder made and let go of each segment costs the
-/// process handles that never come back (NVIDIA's MFT keeps a named section and mutex, and the sink writer that hosts
-/// it some events, per instance), so it is made once.
-/// <para>Frames go in on one timeline (each segment's own times shifted by where it starts); what comes out goes to the
-/// segment its time belongs to (<see cref="SegmentWriter.WriteEncoded"/>). No B-frames: the frames come out in the order
-/// they went in.</para>
-/// </summary>
+// Single async hardware MFT shared across all segments: recreating an MFT per segment leaks named sections/mutexes on NVIDIA drivers. No B-frames so output order matches input order.
 internal sealed unsafe class VideoEncoder : IDisposable
 {
     private const int MF_E_NOTACCEPTING = unchecked((int)0xC00D36B5);
@@ -63,7 +55,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         pump = new Thread(Pump) { IsBackground = true, Name = "recorder encoder", Priority = ThreadPriority.AboveNormal };
     }
 
-    /// <summary>The GPU's encoder for <paramref name="settings"/>, started (ready for frames).</summary>
     public static VideoEncoder Create(Gpu gpu, EncodeSettings settings)
     {
         Gpu.StartMediaFoundation();
@@ -120,7 +111,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         throw new NoEncoderException((settings.Hevc ? "no HEVC" : "no H.264") + " hardware encoder could be made" + (last is null ? "" : ": " + last.Message), last?.HResult ?? unchecked((int)0xC00D5212), candidates.Count == 0);
     }
 
-    /// <summary>The hardware encoders for the codec: those of the device's own adapter, else all of them.</summary>
     private static List<IMFActivate?> Candidates(Gpu gpu, bool hevc)
     {
         var info = stackalloc Guid[2] { Native.MediaType_Video, hevc ? Native.VideoFormat_HEVC : Native.VideoFormat_H264 };
@@ -166,10 +156,7 @@ internal sealed unsafe class VideoEncoder : IDisposable
 
     private static void Configure(IMFTransform mft, EncodeSettings settings)
     {
-        // peak-constrained VBR: the bitrate asked for on average, up to twice it for a moment (a page scrolled, a window
-        // opened), its buffer a second of the mean; no keyframe by count (the frames come as the screen changes, not at a
-        // rate: the recorder asks for one every 2 s of time, and at each segment's start); no B-frames (each frame
-        // decodable from those before it, which is what joining segments without encoding again relies on)
+        // Peak-constrained VBR, no auto-GOP (explicit keyframes), no B-frames (required for lossless segment joining).
         if (QueryCodecApi(mft) is var api && api != IntPtr.Zero)
         {
             try
@@ -180,10 +167,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
                 SetUInt(api, Native.AVEncCommonBufferSize, (uint)settings.Bitrate);
                 SetUInt(api, Native.AVEncMPVGOPSize, (uint)(settings.FrameRate * 600));
                 SetUInt(api, Native.AVEncMPVDefaultBPictureCount, 0);
-                // (no frame finer than QP 22: what a still or simple picture does not need is not spent on it, a test
-                // window's page of text 21 % smaller and a moving bar 45 %, the text looking the same; a hard picture,
-                // already coarser than that, is written as before. An encoder that does not take it goes on without.
-                // Quality mode was not taken: nothing holds it, a hard picture came to 16 times the rate asked for)
                 SetUInt(api, Native.AVEncVideoMinQP, 22);
             }
             finally
@@ -215,7 +198,7 @@ internal sealed unsafe class VideoEncoder : IDisposable
     private static IntPtr QueryCodecApi(IMFTransform mft) =>
         Marshal.QueryInterface(mft.NativePointer, in Native.IID_ICodecAPI, out var api) < 0 ? IntPtr.Zero : api;
 
-    /// <summary>ICodecAPI::SetValue (9) with a VARIANT VT_UI4.</summary>
+    // ICodecAPI::SetValue (9) with VARIANT VT_UI4.
     private static int SetUInt(IntPtr api, Guid name, uint v)
     {
         var value = stackalloc byte[24];
@@ -225,7 +208,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         return ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, void*, int>)(*(IntPtr**)api)[9])(api, &name, value);
     }
 
-    /// <summary>The encoded picture's type, for a segment's sink writer (a new reference).</summary>
     public IMFMediaType OutputType()
     {
         lock (segments)
@@ -236,8 +218,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
     }
 
-    /// <summary>Where a segment starting at <paramref name="startUtc"/> starts on the encoder's timeline; the segment
-    /// given what comes out from there on.</summary>
     internal long Attach(SegmentWriter segment, DateTimeOffset startUtc)
     {
         lock (segments)
@@ -260,13 +240,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
     }
 
-    /// <summary>The encoder asks for a frame within <paramref name="wait"/> (or has already): one given now goes in
-    /// without waiting. Not so, it is still busy with those it has (it falls behind: a GPU too slow for the size and
-    /// rate, or its video engine shared with a video being played), and the clock leaves this tick's frame out rather
-    /// than stall. (Some encoders ask for the next frame only once the one before is out, a few ms after it went in:
-    /// without the wait a GPU that keeps up would lose a frame now and then, 8 of 493 at 4K60 on an RTX 5080; waiting
-    /// half a frame still lost 1 or 2 of 150 every 10 s on the same GPU recording a real desktop, so the clock waits a
-    /// whole frame: an encoder that cannot do one in that cannot keep the rate.)</summary>
     public bool ReadyWithin(TimeSpan wait)
     {
         if (!needInput.Wait(wait))
@@ -274,29 +247,23 @@ internal sealed unsafe class VideoEncoder : IDisposable
             return false;
         }
 
-        // (only looked at: the request is Encode's to take)
+        // Peek only: restore semaphore count so Encode consumes the input request.
         needInput.Release();
         return true;
     }
 
-    /// <summary>Tests only (REPLAY_TEST_SLOW_ENCODER=ms): each frame the encoder asks for asked that much later, as a
-    /// GPU too slow to keep up would.</summary>
     private static readonly int slowFor = int.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_SLOW_ENCODER"), out var ms) ? ms : 0;
 
-    /// <summary>Tests only (REPLAY_TEST_SLOW_KEY=ms): the frame asked for after a keyframe asked that much later, as a
-    /// 4K keyframe now and then takes the encoder longer than a frame's time.</summary>
     private static readonly int slowKey = int.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_SLOW_KEY"), out var km) ? km : 0;
 
     private volatile bool keyIn;
 
-    /// <summary>A frame at <paramref name="time"/> (on the encoder's timeline) encoded; <paramref name="key"/>: as a
-    /// keyframe. Waits while the encoder has as many frames as it takes.</summary>
     public void Encode(IMFSample sample, long time, long duration, bool key)
     {
         lock (inputGate)
         {
             ThrowIfFaulted();
-            // (strictly after the frame before: a segment's first frame is where the one before it ended)
+            // Enforce strictly monotonic timestamps across segment boundaries.
             time = Math.Max(time, lastInput == long.MinValue ? time : lastInput + 1);
             sample.SampleTime = time;
             sample.SampleDuration = duration;
@@ -320,7 +287,7 @@ internal sealed unsafe class VideoEncoder : IDisposable
                 var hr = ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, uint, int>)(*(IntPtr**)mft.NativePointer)[24])(mft.NativePointer, 0, sample.NativePointer, 0);
                 if (hr == MF_E_NOTACCEPTING && tries < 8)
                 {
-                    // (a request left over from before a drain)
+                    // Stale METransformNeedInput left over from before a drain.
                     continue;
                 }
 
@@ -331,7 +298,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
     }
 
-    /// <summary>Everything given so far brought out of the encoder (it goes on taking frames after).</summary>
     public void Drain()
     {
         lock (inputGate)
@@ -344,7 +310,7 @@ internal sealed unsafe class VideoEncoder : IDisposable
             drained.Reset();
             mft.ProcessMessage(TMessageType.MessageCommandDrain, 0);
             drained.Wait(TimeSpan.FromSeconds(3));
-            // (a drained encoder asks for frames again only once told a stream starts)
+            // After drain, an async MFT will not request input again until MessageNotifyStartOfStream.
             mft.ProcessMessage(TMessageType.MessageNotifyStartOfStream, 0);
         }
     }
@@ -358,7 +324,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
     }
 
-    /// <summary>The encoder's events: a frame asked for, one made, a drain done.</summary>
     private void Pump()
     {
         try
@@ -424,7 +389,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
         finally
         {
-            // (whoever waits for it let go)
             needInput.Release(64);
             drained.Set();
             lock (segments)
@@ -463,7 +427,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
 
             if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
             {
-                // (the encoder's output type changed: taken as it is now)
                 using var type = mft.GetOutputAvailableType(0, 0);
                 mft.SetOutputType(0, type, 0);
                 lock (segments)
@@ -496,7 +459,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         return sample;
     }
 
-    /// <summary>A frame that came out given to the segment its time belongs to: the newest that starts at or before it.</summary>
     private void Route(IMFSample sample)
     {
         var time = sample.SampleTime;
@@ -520,8 +482,7 @@ internal sealed unsafe class VideoEncoder : IDisposable
         }
 
         sample.SampleTime = time - start;
-        // (its decode time, where it has one, by IMFAttributes::GetUINT64 (8) asked straight: Vortice's throws where there
-        // is none, an exception thrown and caught for every frame, 60 to 120 a second, on encoders that set none)
+        // Query DTS directly via IMFAttributes::GetUINT64 (8) to avoid Vortice throwing/catching on every frame when absent.
         var key = SampleExtension_DecodeTimestamp;
         ulong dts;
         var got = ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, ulong*, int>)(*(IntPtr**)sample.NativePointer)[8])(sample.NativePointer, &key, &dts);
@@ -554,7 +515,6 @@ internal sealed unsafe class VideoEncoder : IDisposable
         {
         }
 
-        // (the event queue shut down: the pump's wait ends)
         if (Marshal.QueryInterface(mft.NativePointer, in IID_IMFShutdown, out var shutdown) >= 0)
         {
             ((delegate* unmanaged[Stdcall]<IntPtr, int>)(*(IntPtr**)shutdown)[3])(shutdown);
@@ -571,8 +531,7 @@ internal sealed unsafe class VideoEncoder : IDisposable
 
         if (!pump.Join(TimeSpan.FromSeconds(2)))
         {
-            // (the pump still in the encoder (a driver that does not answer): what it uses left as it is, never let go
-            // under it; a leak, not a crash)
+            // Pump thread hung in driver: leak COM refs rather than releasing under it and crashing.
             return;
         }
 
@@ -581,12 +540,10 @@ internal sealed unsafe class VideoEncoder : IDisposable
         outputType.Dispose();
         mft.Dispose();
         activate.Dispose();
-        // (needInput and drained left to the GC: the pump, should it not have ended, may still signal them)
+        // Leave needInput/drained to GC in case a hung pump still signals them.
     }
 }
 
-/// <summary>No encoder for the codec could be made; <see cref="None"/>: the computer has no hardware encoder for it at
-/// all (not one that failed to start).</summary>
 public sealed class NoEncoderException(string message, int hresult, bool none) : COMException(message, hresult)
 {
     public bool None { get; } = none;

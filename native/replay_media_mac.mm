@@ -1,5 +1,3 @@
-// Thumbnails, clip duration, fast lossless MP4 segment concatenation, and frame copy on macOS
-// (matching app/replay_mf.cpp's exact C ABI and state transitions).
 #import "replay_mac_common.h"
 #import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -78,7 +76,6 @@ static std::vector<uint8_t> gif_first_frame_bmp(const std::string &path, int max
   }
 }
 
-// Cached full-resolution decoded frame so dragging a crop box at the same (file, ms) crops in <2 ms without re-decoding.
 struct CachedDecodedFrame {
   std::mutex mu;
   std::string file;
@@ -244,8 +241,6 @@ static moonbit_bytes_t rp_thumb_job(const std::string &path, const std::string &
   return moonbit_make_bytes(1, 0);
 }
 
-// ---- Lossless segment concatenation ----
-
 struct ConcatPart {
   std::string path;
   double offset_ms = 0.0;
@@ -282,7 +277,7 @@ static std::vector<ConcatPart> parse_concat_plan(const std::string &plan) {
 
 static std::atomic<int> g_concat_phase{0};     // 0 none, 1 joining, 2 done
 static std::atomic<int> g_concat_code{0};      // 0 ok, -2147467260 cancelled (E_ABORT), <0 err
-static std::atomic<int> g_join_permille{0};    // 0..1000
+static std::atomic<int> g_join_permille{0};
 static std::atomic<bool> g_join_stop{false};
 
 static constexpr int32_t kConcatCancelled = (int32_t)0x80004004u;  // E_ABORT (-2147467260)
@@ -386,8 +381,6 @@ static int32_t run_passthrough_concat(const std::string &plan_str, const std::st
   }
 }
 
-// ---- Frame copy (clipboard or REPLAY_TEST_COPY_FRAME) ----
-
 static std::atomic<int> g_frame_copying{0};  // 0 idle, 1 busy, 2 copied, 3 failed
 
 static bool put_png_frame(const uint8_t *bgra, int w, int h, int stride) {
@@ -410,7 +403,7 @@ static bool put_png_frame(const uint8_t *bgra, int w, int h, int stride) {
   return ok == YES;
 }
 
-}  // namespace
+}
 
 extern "C" {
 typedef void (*mb_stream_grabbed_fn)(void *arg, const unsigned char *rows, int w, int h, int pitch, double ts);

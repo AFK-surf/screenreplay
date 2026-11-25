@@ -2,15 +2,6 @@ import "mbt_compat"
 import "ui"
 import "view"
 
-// The picture looked at closer (the user, 2026-11-19: 「回放窗口可以加一个zoomin/out功能」, 「放大后感觉需要有个reset按钮」):
-// Ctrl+wheel (or a touchpad's pinch) over the picture grows it about the pointer, up to 8 times; grown, a drag pans it
-// and a press still plays or pauses; a pill in its corner says how large and, pressed, fits it again, as `0` does. Only
-// how it is looked at: a clip saved is the whole frame, as ever. Clip mode fits it again and takes no zoom (what is
-// picked or drawn there is in the whole picture's terms).
-
-/// How the picture is looked at: grown `z` times (1: fitted whole), drawn off its place by (`dx`, `dy`) points of
-/// the picture's box (0 to that box's size × (1 - z): never past an edge).
-
 #derive(Eq)
 struct PicZoom {
   z : Double
@@ -18,15 +9,9 @@ struct PicZoom {
   dy : Double
 }
 
-
-/// The most it grows.
-
-
-/// Whether it is grown now.
 fn pic_zoomed() -> Bool {
   pic_zoom.get().z > 1.001}
 
-/// `v` kept within its box `w` × `h`: no edge of the picture inside it.
 fn pic_kept(v : PicZoom, w : Double, h : Double) -> PicZoom {
   let z = clamp(v.z, 1.0, pic_zoom_most)
   if z <= 1.001 {
@@ -34,24 +19,19 @@ fn pic_kept(v : PicZoom, w : Double, h : Double) -> PicZoom {
   }
   PicZoom::{ z: z, dx: clamp(v.dx, w * (1.0 - z), 0.0), dy: clamp(v.dy, h * (1.0 - z), 0.0) }}
 
-/// Grown by `k` about (`x`, `y`) of its box `w` × `h`: what is under that point stays under it.
 fn pic_zoom_about(k : Double, x : Double, y : Double, w : Double, h : Double) -> Unit {
   if w <= 0.0 || h <= 0.0 || clipping.untracked() {
     return
   }
   let v = pic_zoom.untracked()
   let z = clamp(v.z * k, 1.0, pic_zoom_most)
-  // (the point of the picture under the pointer, in the fitted picture's terms, kept there)
   let ux = (x - v.dx) / v.z
   let uy = (y - v.dy) / v.z
   pic_zoom.set(pic_kept(PicZoom::{ z: z, dx: x - z * ux, dy: y - z * uy }, w, h))}
 
-/// Fitted whole again.
 fn pic_fit() -> Unit {
   pic_zoom.set(pic_fitted)}
 
-/// The wheel over the picture: with Ctrl, or a touchpad's pinch, it grows or shrinks it about the pointer, a notch
-/// (100) about a fifth; else it is not the picture's (false: on to what holds it).
 fn pic_wheel(e : view::Wheel) -> Bool {
   if (e.mods & (ui::wheel_mod_ctrl | ui::wheel_mod_cmd | ui::wheel_mod_pinch)) == 0 || e.dy == 0.0 ||
     clipping.untracked() {
@@ -60,7 +40,6 @@ fn pic_wheel(e : view::Wheel) -> Bool {
   pic_zoom_about(mbt_compat::math_exp(-e.dy * 0.002), e.x, e.y, e.w, e.h)
   true}
 
-/// Where a drag on the grown picture began (where the picture was then) and whether it went past a press.
 struct PicDrag {
   mut from : PicZoom
   mut moved : Bool
@@ -68,8 +47,6 @@ struct PicDrag {
   mut wy : Double
 }
 
-
-/// A drag on the grown picture: past 4 points it pans it; let go where it went down, it is a press (plays or pauses).
 fn pic_drag_by(d : view::Drag, w : Double, h : Double) -> Unit {
   match d.kind {
     Down => {
@@ -96,8 +73,6 @@ fn pic_drag_by(d : view::Drag, w : Double, h : Double) -> Unit {
     Off => ()
   }}
 
-/// The stream's node `s` in the picture's box: drawn grown and moved as the zoom says, cut to the box (its holder
-/// clips); grown, it takes the drags that pan it, the presses it lets go of still playing or pausing.
 fn pic_zoomed_node(s : view::View) -> Unit {
   s
   .scale(view::Live::By(fn() { pic_zoom.get().z }), about=view::Pivot::At(0.0, 0.0))
@@ -109,13 +84,11 @@ fn pic_zoomed_node(s : view::View) -> Unit {
   .cursor(view::Live::By(fn() { if pic_zoomed() { Some(view::Cursor::Grab) } else { None } }))
   .on_drag(fn(d) { pic_drag_by(d, d.w, d.h) })
   |> ignore
-  // (clip mode: fitted whole, as it begins)
   s.reacts(fn() { clipping.get() }, fn(on) { if on { pic_fit() } }) |> ignore}
 
-/// The pill in the picture's bottom right corner while it is grown (clear of top-left pause badge and top-right saved card): how large (200%) and 适应窗口; pressed, fitted again.
 fn pic_zoom_pill(pic : view::View) -> Unit {
   pic.box(fn(o) {
-    // (the layer itself takes no finger: a press beside the pill is the picture's)
+    // Pass hits beside the pill through to the picture while keeping the pill pressable.
     o
     .over(view::Live::Is(true))
     .lines_up(view::Live::Is(Some(view::Along::End)))

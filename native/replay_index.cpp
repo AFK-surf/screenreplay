@@ -1,11 +1,3 @@
-// The scrub index: for every segment of the buffer, small JPEGs of it. The recorder makes them as it records, one each
-// half second, beside the segment (<segment>.thumbs: Thumbnailer.cs); for a segment without (recorded before it did,
-// or where the GPU could not), each second's key frame is decoded once in the background here, newest segments first,
-// the ones the window looks at before the rest, and kept on disk in the folder given (Thumbs\<segment>.thumbs) so the
-// window opens with every preview ready. Either is read from its file as it is asked for, never all kept in memory.
-// The timeline's filmstrip and the hover preview read only this, so moving over the timeline never waits on a decoder.
-//
-// Threads: three workers decode; the UI thread only asks (rp_idx_*), under one lock, and copies bytes out.
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -43,11 +35,11 @@ namespace {
 
 const int kThumbW = 384;
 const int kThumbH = 216;
-const LONGLONG kStep = 10000000;  // a thumbnail a second (100 ns units)
+const LONGLONG kStep = 10000000;  // 1 s (100 ns units)
 
 struct Thumb {
   int64_t ms;
-  std::vector<uint8_t> jpeg;  // empty: in its segment's file (Seg::file), `len` bytes at `off`
+  std::vector<uint8_t> jpeg;  // empty when stored in Seg::file at [off, off + len)
   int64_t off = 0;
   uint32_t len = 0;
 };
@@ -58,23 +50,20 @@ struct Seg {
   double dur = 0;
   int state = 0;  // 0 waiting, 1 being made, 2 ready, -1 could not be read
   int64_t prefer = 0;
-  int dropped = 0;  // let go while being made: let go as it is done
-  int plain = 0;  // made again with the decoder not in its thumbnail mode (make_thumbs)
+  int dropped = 0;
+  int plain = 0;  // retry without MF thumbnail mode after decoder hang
   std::vector<Thumb> thumbs;
-  std::wstring file;  // where its thumbnails are read from ("": in memory, a clip's)
+  std::wstring file;
 };
 
-// (made once and never let go of: the workers are detached and may still wait on them as the process ends, after the
-// globals' destructors have run)
+// Heap-allocated so detached workers never touch destroyed globals at process exit.
 std::mutex &mu = *new std::mutex;
 std::condition_variable &work = *new std::condition_variable;
-std::map<std::string, Seg> &segs = *new std::map<std::string, Seg>;  // by the segment's path (UTF-8), so newest last
+std::map<std::string, Seg> &segs = *new std::map<std::string, Seg>;
 std::wstring &cache_dir = *new std::wstring;
-// How many segments wait or are being made (rp_idx_pending, asked by the window often): counted again under `mu` as
-// each changes, read without it.
 std::atomic<int> pending_n{0};
 
-// (under mu)
+// Caller must hold mu.
 void recount() {
   int n = 0;
   for (auto &kv : segs)
@@ -82,9 +71,7 @@ void recount() {
   pending_n.store(n);
 }
 
-// The thumbnails' files read last, kept open (a hover's and a filmstrip's pictures read one by one: each opened and
-// closed before). Opened sharing delete, so the recorder's housekeeping can still remove one; one written anew or let
-// go of is closed first (forget_open).
+// Keep recent .thumbs files open with FILE_SHARE_DELETE; call forget_open before replacing or deleting.
 struct OpenThumbs {
   std::mutex mu;
   struct Entry {
@@ -107,7 +94,6 @@ void forget_open(const std::wstring &file) {
   }
 }
 
-// `len` bytes of `file` at `off` (false: not read).
 bool read_thumb(const std::wstring &file, int64_t off, uint32_t len, std::vector<uint8_t> &bytes) {
   std::lock_guard<std::mutex> lock(open_thumbs.mu);
   OpenThumbs::Entry *at = nullptr;
@@ -144,9 +130,7 @@ bool read_thumb(const std::wstring &file, int64_t off, uint32_t len, std::vector
 int64_t prefer_clock = 0;
 bool started = false;
 std::atomic<int> made{0};
-// Devices left behind by a decoder that never answered (GpuIndexer::abandon): each holds its decoder's memory for the
-// process's life, so after a few the GPU is no longer used for the index (its pictures made by the CPU's decoder, as
-// REPLAY_INDEX_SOFTWARE does), not one more device left behind every stuck segment of a window resident for days.
+// Leaked D3D11 devices from hung decoders; fall back to CPU indexing once kAbandonedMost is reached.
 std::atomic<int> abandoned{0};
 const int kAbandonedMost = 3;
 
@@ -171,10 +155,7 @@ std::wstring stem_of(const std::wstring &path) {
   return dot == std::wstring::npos ? name : name.substr(0, dot);
 }
 
-// ---- a thumbnails' file: "RPT1" (made here, of key frames) or "RPT2" (the recorder's, each half second), count, then
-// each: ms (int64), length (uint32), its JPEG ----
-
-// Where each of `file`'s thumbnails is in it (their bytes left there).
+// Binary cache format: "RPT1"/"RPT2" magic, uint32 count, then (int64 ms, uint32 len, jpeg[len]) per entry.
 bool load_thumbs(const std::wstring &file, std::vector<Thumb> &out) {
   FILE *f = _wfopen(file.c_str(), L"rb");
   if (!f) return false;
@@ -222,9 +203,7 @@ void save_cache(const std::wstring &stem, std::vector<Thumb> &thumbs, std::wstri
   }
   bool ok = ferror(f) == 0;
   fclose(f);
-  // (one kept open of the file it replaces closed first: its pictures' places are of the new one)
   forget_open(file);
-  // (kept, its thumbnails are read from it from now on: their bytes let go here)
   if (ok && MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) {
     for (size_t k = 0; k < thumbs.size(); k++) {
       thumbs[k].off = offs[k];
@@ -237,9 +216,6 @@ void save_cache(const std::wstring &stem, std::vector<Thumb> &thumbs, std::wstri
   }
 }
 
-// ---- making them ----
-
-// A JPEG of `w` x `h` BGR rows (24 bits).
 std::vector<uint8_t> encode_jpeg(IWICImagingFactory *wic, const std::vector<uint8_t> &bgr, int w, int h) {
   std::vector<uint8_t> out;
   IStream *stream = nullptr;
@@ -281,9 +257,7 @@ std::vector<uint8_t> encode_jpeg(IWICImagingFactory *wic, const std::vector<uint
   return out;
 }
 
-// The picture (the decoder's own NV12: `fw` x `fh` shown of its luma rows, `pitch` apart, then its rows of chroma pairs
-// from row `rows` on) made `w` x `h` BGR by averaging the pixels each covers, BT.709's video range: no video processor
-// turning every 4K frame into RGB first, which held a pool of 33 MB frames of its own.
+// BT.709 video-range NV12 -> BGR box downscale.
 std::vector<uint8_t> shrink_nv12(const BYTE *data, LONG pitch, int rows, int fw, int fh, int w, int h) {
   std::vector<uint8_t> out((size_t)w * h * 3);
   const BYTE *uv = data + (ptrdiff_t)pitch * rows;
@@ -316,9 +290,7 @@ std::vector<uint8_t> shrink_nv12(const BYTE *data, LONG pitch, int rows, int fw,
   return out;
 }
 
-// (the decoders' room: three of them at once up to 1440p, a 4K one alone. A software HEVC decoder of a 4K picture
-// holds some hundreds of MB and threads of its own; three at once took the window to 2.9 GB while a 4K buffer was
-// indexed)
+// Concurrency budget: up to 3 decoders <=1440p, or 1 at 4K (software 4K HEVC decoders use hundreds of MB each).
 std::mutex room_mu;
 std::condition_variable room_cv;
 int room_free = 3;
@@ -339,9 +311,7 @@ struct Room {
   }
 };
 
-// The reader's decoder told it decodes key frames for thumbnails (only those are asked for: it keeps no reference
-// pictures for the frames between) on two threads of its own, where it takes the telling (the software HEVC and
-// H.264 decoders do; one that does not is left as it is).
+// Hint MF decoder for keyframe-only thumbnail mode (2 threads, no reference frames) where supported.
 void thumbnail_mode(IMFSourceReader *reader) {
   IMFSourceReaderEx *ex = nullptr;
   if (FAILED(reader->QueryInterface(IID_PPV_ARGS(&ex)))) return;
@@ -367,9 +337,6 @@ void thumbnail_mode(IMFSourceReader *reader) {
   ex->Release();
 }
 
-// A worker's Direct3D device and video processor for GPU decoding and downscaling: its 4K NV12 pictures stay in the
-// GPU's memory, scaled to w x h (384 x 216) there by ID3D11VideoProcessor so only the small thumbnail is mapped back;
-// kept across consecutive segments in a batch and released once the queue is empty.
 struct GpuIndexer {
   ID3D11Device *dev = nullptr;
   ID3D11DeviceContext *ctx = nullptr;
@@ -386,7 +353,6 @@ struct GpuIndexer {
   ID3D11Texture2D *staging = nullptr;
   UINT32 vp_in_w = 0, vp_in_h = 0, vp_out_w = 0, vp_out_h = 0;
 
-  // Whether it holds a device now.
   bool holds() const { return manager != nullptr || dev != nullptr; }
 
   bool ensure() {
@@ -563,8 +529,7 @@ struct GpuIndexer {
     release(dev);
   }
 
-  // (a decoder on this device never answered: everything left as it is, never let go, since letting go would wait
-  // on it; the next segment makes a device of its own)
+  // Intentionally leak COM refs: releasing a device with a hung decoder blocks indefinitely.
   void abandon() {
     abandoned++;
     dev = nullptr;
@@ -585,9 +550,7 @@ struct GpuIndexer {
   ~GpuIndexer() { drop(); }
 };
 
-// The reader's samples handed over as they come (the reader made asynchronous), so a read can be given up on: the
-// HEVC decoder sometimes never answers one (seen on the user's 4K buffer, 2026-11-16: a ReadSample waited an hour, the
-// two other workers waiting for its room behind it, and no segment after it got a preview).
+// Async reader callback so hung MF HEVC ReadSample calls can time out instead of blocking forever.
 struct Reads : IMFSourceReaderCallback {
   LONG refs = 1;
   HANDLE ready = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -631,8 +594,6 @@ struct Reads : IMFSourceReaderCallback {
   STDMETHODIMP OnFlush(DWORD) override { return S_OK; }
   STDMETHODIMP OnEvent(DWORD, IMFMediaEvent *) override { return S_OK; }
 
-  // The next sample of the video stream, waiting `ms` at most: false when it did not come in time (the reader then
-  // left as it is: a read is still out).
   bool read(IMFSourceReader *reader, DWORD ms, HRESULT &status, DWORD &f, LONGLONG &t, IMFSample *&s) {
     ResetEvent(ready);
     status = reader->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, nullptr, nullptr, nullptr);
@@ -651,19 +612,17 @@ struct Reads : IMFSourceReaderCallback {
   std::mutex mu_;
 };
 
-// (a key frame of a 4K segment decodes in some tens of ms; a read not answered in this long never is)
 const DWORD kReadPatience = 8000;
 
 enum Made { kMadeNone = 0, kMadeOk = 1, kMadeStuck = 2 };
 
-// `plain`: the decoder not told to make thumbnails (tried after a read in that mode was never answered).
 Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &path, double dur_ms, bool plain,
                  std::vector<Thumb> &out) {
   IMFAttributes *attrs = nullptr;
   IMFSourceReader *reader = nullptr;
   IMFMediaType *want = nullptr, *got = nullptr;
   Reads *reads = new Reads();
-  std::unique_ptr<Room> room;  // (given back once the reader, and its decoder, are let go)
+  std::unique_ptr<Room> room;
   bool ok = false;
   bool stuck = false;
   do {
@@ -684,7 +643,7 @@ Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &p
     if (FAILED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) break;
     UINT32 fw = 0, fh = 0;
     MFGetAttributeSize(got, MF_MT_FRAME_SIZE, &fw, &fh);
-    // (the picture shown, where the coded frame is taller: HEVC's 2160 rows coded as 2176)
+    // Use display aperture when coded height is padded (e.g. HEVC 2160 -> 2176).
     MFVideoArea area;
     if (SUCCEEDED(got->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE, (UINT8 *)&area, sizeof area, nullptr)) &&
         area.Area.cx > 0 && area.Area.cy > 0 && (UINT32)area.Area.cx <= fw && (UINT32)area.Area.cy <= fh) {
@@ -706,14 +665,12 @@ Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &p
     LONGLONG end = (LONGLONG)(dur_ms * 10000.0);
     std::vector<uint8_t> bgr;
     for (LONGLONG at = 0; at < end || at == 0; at += kStep) {
-      // (a key frame at most a second before the last one taken is the same picture: no need to seek again)
       if (last >= 0 && at <= last) continue;
       PROPVARIANT pos;
       PropVariantInit(&pos);
       pos.vt = VT_I8;
       pos.hVal.QuadPart = at;
-      // (the reader takes a new position only once the last read's callback has returned, a moment after it said
-      // its sample was there)
+      // Async IMFSourceReader returns MF_E_INVALIDREQUEST until the previous callback unwinds.
       HRESULT moved = reader->SetCurrentPosition(GUID_NULL, pos);
       for (int wait = 0; moved == MF_E_INVALIDREQUEST && wait < 250; wait++) {
         Sleep(2);
@@ -757,7 +714,7 @@ Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &p
         last = ts;
         continue;
       }
-      // (its storage may be wider than the picture: the type after the first decode says)
+      // Re-query output type after first decode for aligned storage stride.
       UINT32 sw = fw, sh = fh;
       LONG stride = 0;
       if (SUCCEEDED(reader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) {
@@ -774,7 +731,7 @@ Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &p
         bool locked2d = SUCCEEDED(buffer->QueryInterface(IID_PPV_ARGS(&surface))) && SUCCEEDED(surface->Lock2D(&data, &pitch));
         if (!locked2d && SUCCEEDED(buffer->Lock(&data, nullptr, &len))) {
           if (pitch == 0) pitch = (LONG)sw;
-          // (a bottom-up buffer: its first row last)
+          // bottom-up buffer
           if (pitch < 0) data += (size_t)(sh - 1) * (size_t)(-pitch);
         }
         if (data) {
@@ -797,8 +754,7 @@ Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &p
   release(got);
   release(want);
   if (stuck) {
-    // (a read still out: letting the reader go would wait on the decoder that never answered, so it is left, its
-    // decoder's memory with it; the room given back all the same, or every segment after waits on it)
+    // Leak hung reader so Release() does not block on the stalled decoder; still release Room.
     reader = nullptr;
     out.clear();
   }
@@ -810,7 +766,6 @@ Made make_thumbs(IWICImagingFactory *wic, GpuIndexer *gpu, const std::wstring &p
 }
 
 void worker() {
-  // (in the background of whatever else the computer is doing: a game, the recorder)
   SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
   CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   MFStartup(MF_VERSION, MFSTARTUP_LITE);
@@ -826,7 +781,6 @@ void worker() {
     {
       std::unique_lock<std::mutex> lock(mu);
       for (;;) {
-        // the one asked for last, else the newest
         Seg *best = nullptr;
         const std::string *best_key = nullptr;
         for (auto it = segs.rbegin(); it != segs.rend(); ++it) {
@@ -846,8 +800,7 @@ void worker() {
           plain = best->plain != 0;
           break;
         }
-        // (nothing waiting: let go of the GPU device so no decoder memory stays held while idle; outside the lock,
-        // which the window's thread takes for every picture it asks for)
+        // Release GPU device outside mu when idle.
         if (gpu.holds()) {
           lock.unlock();
           gpu.drop();
@@ -859,7 +812,6 @@ void worker() {
     }
     std::vector<Thumb> thumbs;
     std::wstring file;
-    // (the recorder's, beside the segment; else this folder's, made here before)
     std::wstring beside = path.size() > 4 ? path.substr(0, path.size() - 4) + L".thumbs" : L"";
     bool cached = !stem.empty() && !beside.empty() && load_thumbs(beside, thumbs);
     if (cached) {
@@ -875,7 +827,6 @@ void worker() {
     GpuIndexer *use_gpu = !cached && !software && abandoned.load() < kAbandonedMost && gpu.ensure() ? &gpu : nullptr;
     Made made_as = cached ? kMadeOk : wic ? make_thumbs(wic, use_gpu, path, dur, plain, thumbs) : kMadeNone;
     bool ok = made_as == kMadeOk;
-    // (stuck: its decoder may still hold the device)
     if (made_as == kMadeStuck && use_gpu) gpu.abandon();
     const char *trace = getenv("REPLAY_TRACE");
     if (trace && strcmp(trace, "1") == 0) {
@@ -883,8 +834,6 @@ void worker() {
              plain ? " (plain)" : "", made_as == kMadeStuck ? " STUCK" : "");
       fflush(stdout);
     }
-    // (a read never answered: once more with the decoder not in its thumbnail mode, which it is far less often stuck
-    // in; stuck again, no previews for it)
     if (made_as == kMadeStuck && !plain) {
       std::lock_guard<std::mutex> lock(mu);
       auto it = segs.find(key);
@@ -909,7 +858,6 @@ void worker() {
       }
       recount();
     }
-    // (deleted outside the lock)
     if (!gone.empty()) {
       forget_open(gone);
       DeleteFileW(gone.c_str());
@@ -924,8 +872,6 @@ void start() {
   for (int i = 0; i < 3; i++) std::thread(worker).detach();
 }
 
-// The last thumbnail at or before `ms` (+1), else the first: found by halving (they are in time's order), not by a walk
-// over the segment's up to 60.
 const Thumb *nearest(const Seg &s, double ms) {
   if (s.thumbs.empty()) return nullptr;
   size_t lo = 0, hi = s.thumbs.size();
@@ -937,15 +883,13 @@ const Thumb *nearest(const Seg &s, double ms) {
   return lo == 0 ? &s.thumbs[0] : &s.thumbs[lo - 1];
 }
 
-}  // namespace
+}
 
-// Where the made thumbnails are kept (a folder; made when first written).
 extern "C" void rp_idx_dir(moonbit_bytes_t dir) {
   std::lock_guard<std::mutex> lock(mu);
   cache_dir = wide((const char *)dir);
 }
 
-// A segment of `dur` ms to make thumbnails of (nothing when it is known).
 extern "C" void rp_idx_add(moonbit_bytes_t path, double dur) {
   std::lock_guard<std::mutex> lock(mu);
   std::string key((const char *)path);
@@ -960,8 +904,6 @@ extern "C" void rp_idx_add(moonbit_bytes_t path, double dur) {
   work.notify_all();
 }
 
-// A saved clip of `dur` ms being played (the hover preview over its bar): made before what waits, kept in memory
-// alone (no stem: nothing written beside the buffer's), let go by rp_idx_drop as its player closes.
 extern "C" void rp_idx_add_clip(moonbit_bytes_t path, double dur) {
   std::lock_guard<std::mutex> lock(mu);
   std::string key((const char *)path);
@@ -976,14 +918,12 @@ extern "C" void rp_idx_add_clip(moonbit_bytes_t path, double dur) {
   work.notify_all();
 }
 
-// A segment gone from the buffer: its thumbnails let go, its file on disk removed.
 extern "C" void rp_idx_drop(moonbit_bytes_t path) {
   std::wstring gone, read_from;
   {
     std::lock_guard<std::mutex> lock(mu);
     auto it = segs.find(std::string((const char *)path));
     if (it == segs.end()) return;
-    // (one being made: let go as it is done, its thumbnails never shown)
     if (it->second.state == 1) {
       it->second.dropped = 1;
       return;
@@ -993,7 +933,6 @@ extern "C" void rp_idx_drop(moonbit_bytes_t path) {
     segs.erase(it);
     recount();
   }
-  // (its file closed and deleted outside the lock, which the workers and every picture asked for take)
   if (!read_from.empty()) forget_open(read_from);
   if (!gone.empty()) {
     forget_open(gone);
@@ -1001,15 +940,13 @@ extern "C" void rp_idx_drop(moonbit_bytes_t path) {
   }
 }
 
-// The window looks at this segment now: made before the others still waiting.
 extern "C" void rp_idx_prefer(moonbit_bytes_t path) {
   std::lock_guard<std::mutex> lock(mu);
   auto it = segs.find(std::string((const char *)path));
   if (it != segs.end() && it->second.state == 0) it->second.prefer = ++prefer_clock;
 }
 
-// The time (ms into the segment) of the thumbnail shown for `ms`: the last at or before it; -1 none yet, -2 the
-// segment could not be read.
+// Returns thumbnail timestamp (ms), -1 if pending, -2 if unreadable.
 extern "C" double rp_idx_at(moonbit_bytes_t path, double ms) {
   std::lock_guard<std::mutex> lock(mu);
   auto it = segs.find(std::string((const char *)path));
@@ -1019,7 +956,6 @@ extern "C" double rp_idx_at(moonbit_bytes_t path, double ms) {
   return t ? (double)t->ms : -1;
 }
 
-// That thumbnail's JPEG (empty: none).
 extern "C" moonbit_bytes_t rp_idx_jpeg(moonbit_bytes_t path, double ms) {
   std::vector<uint8_t> bytes;
   std::wstring file;
@@ -1037,15 +973,12 @@ extern "C" moonbit_bytes_t rp_idx_jpeg(moonbit_bytes_t path, double ms) {
       len = t->len;
     }
   }
-  // (read from its file outside the lock: some tens of KB, the system's cache's; the file kept open for the next)
   if (len) read_thumb(file, off, len, bytes);
   moonbit_bytes_t out = moonbit_make_bytes((int32_t)bytes.size(), 0);
   if (!bytes.empty()) memcpy(out, bytes.data(), bytes.size());
   return out;
 }
 
-// How many segments are still waiting or being made.
 extern "C" int32_t rp_idx_pending(void) { return pending_n.load(); }
 
-// How many segments have been made (or read from disk) since the start: a frame asks again when it grew.
 extern "C" int32_t rp_idx_made(void) { return made.load(); }

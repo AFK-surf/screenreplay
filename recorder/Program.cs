@@ -7,10 +7,6 @@ using Windows.Graphics.Capture;
 
 namespace Replay.Recorder;
 
-// The replay app's background half: records the main display into rolling segments (recording/: ScreenRecorder),
-// notes what the replay window draws beside them (the app in front, markers),
-// pauses itself while the session is locked or a full-screen game is in front, and opens the
-// replay window from its tray icon or a hotkey.
 internal static class Program
 {
     [STAThread]
@@ -57,7 +53,6 @@ internal static class Program
         {
             try { WriteAtomic(Path.Combine(paths.Root, "open.request"), "open"); } catch (Exception) { }
         }
-        // (one per buffer: a test run with its own REPLAY_ROOT never stands in the way of the real one)
         using var single = new Mutex(true, mutexName, out var first);
         if (!first)
         {
@@ -68,8 +63,7 @@ internal static class Program
         // previous instance (e.g. an older version's --quit race during update), never to us.
         TryTakeRequest(Path.Combine(paths.Root, "quit.request"));
 
-        // DPI_AWARENESS_CONTEXT_SYSTEM_AWARE: as WinForms' ApplicationConfiguration set it (a test window's bounds, the
-        // tray icon's size and the app icons' are at the system's DPI, not scaled by Windows)
+        // DPI_AWARENESS_CONTEXT_SYSTEM_AWARE (-2)
         SetProcessDpiAwarenessContext(-2);
         using var app = new RecorderApp(paths, wasUpdated: args.Contains("--updated"));
         app.Run();
@@ -165,8 +159,7 @@ internal sealed record RecorderPaths(string Root, string Buffer, string ReplayEx
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Replay");
         var exe = Environment.GetEnvironmentVariable("REPLAY_WINDOW_EXE") is { Length: > 0 } e
             ? e
-            // (not "replay.exe": NVIDIA's driver has a game of that name, and treated the window as that game, its
-            // G-SYNC pacing the whole screen to the window's frames: the pointer stuttered outside it)
+            // Do not name "replay.exe": NVIDIA driver matches a game profile and enables G-SYNC pacing on the viewer.
             : Path.Combine(AppContext.BaseDirectory, "ScreenReplayViewer.exe");
         Directory.CreateDirectory(root);
         return new RecorderPaths(root, Path.Combine(root, "Buffer"), exe);
@@ -180,23 +173,15 @@ internal sealed class RecorderApp : IDisposable
     private const int HotkeySaveLast = 3;
 
     private RecorderPaths paths;
-    // (where the segments go: the settings' bufferDir where it can be written, else the folder's own Buffer; the folders
-    // written before it, read by the replay window and kept to their window's end, then forgotten: buffers.json)
     private string bufferTrouble = "";
 
-    /// <summary>Whether the disk's free space was under KeepFree at the last housekeeping: the oldest recordings
-    /// deleted before their time to keep it (state.json's diskTight, said in amber by the window).</summary>
     private bool diskTight;
 
-    /// <summary>Where NVIDIA's Fast Sync is on (NvidiaSync.Where, read at start and every 5 minutes off the window's
-    /// thread; state.json's fastSync, said by the window with how to turn it off).</summary>
     private volatile string fastSync = "";
     private DateTimeOffset lastFastSync = DateTimeOffset.MinValue;
     private readonly List<string> oldBuffers = new();
     private readonly MessageWindow window;
 
-    /// <summary>How busy the mouse, the keyboard and game controllers are, counted only while recording (each segment's
-    /// .input).</summary>
     private readonly RawInput input;
     private readonly XInputPads controllers;
     private readonly Tray tray;
@@ -219,7 +204,6 @@ internal sealed class RecorderApp : IDisposable
     private DateTimeOffset? pausedUntil;
     private string lastApp = "";
 
-    /// <summary>The window in front (and its process) whose app was found noted already (NoteForegroundApp).</summary>
     private IntPtr frontNoted;
     private uint frontNotedPid;
 
@@ -237,7 +221,7 @@ internal sealed class RecorderApp : IDisposable
         {
         }
         Log($"app started: v{Updater.AppVersion}{buildTag}, os={Environment.OSVersion.Version}, packaged={Packaged.Is}, pid={Environment.ProcessId}");
-        // (first: the thread's SynchronizationContext is the window's from here, which the awaits below resume on)
+        // Must construct MessageWindow first to install its SynchronizationContext before any awaits.
         window = new MessageWindow(Log);
         window.CloseAsked += async () => await ExitAsync();
         input = new RawInput(window, Log);
@@ -262,8 +246,6 @@ internal sealed class RecorderApp : IDisposable
         };
         pause15Item = Item("暂停 15 分钟", "Pause for 15 minutes", () => PauseFor(TimeSpan.FromMinutes(15)));
         pause60Item = Item("暂停 1 小时", "Pause for 1 hour", () => PauseFor(TimeSpan.FromHours(1)));
-        // (background recording turned off or on here as in the settings: settings.json's "enabled", which the replay
-        // window's switch and its chip write too)
         turnOffItem = Item("关闭后台录制", "Turn off background recording", () => SetEnabled(false));
         turnOnItem = Item("开启后台录制", "Turn on background recording", () => SetEnabled(true));
         turnOnItem.Visible = false;
@@ -278,12 +260,9 @@ internal sealed class RecorderApp : IDisposable
         {
             Icon = TrayIcon("tray-off.ico"),
             Text = "ScreenReplay",
-            // (a test recording its own window: no icon beside the person's own ScreenReplay's, which it would pass for)
             Visible = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")),
         };
 
-        // (the right button's panel and save note cards are hosted as in-process secondary windows inside the single
-        // resident ScreenReplayViewer.exe, avoiding 2 extra idle viewer processes and ~75 MB VRAM / ~250 MB RAM)
         panel = new TrayPanel(paths.ReplayExe, paths.Root, window.Handle, FindReplay, Log);
         notes = new NoteCard(paths.ReplayExe, paths.Root, FindReplay, Log);
         updater = new Updater(
@@ -321,7 +300,6 @@ internal sealed class RecorderApp : IDisposable
         }) { Active = false };
         window.SessionChanged += OnSessionChanged;
         window.PowerChanged += OnPowerChanged;
-        // (the tray's panel started anew 3 s after the last of a run of such changes, once they have settled)
         void RenewPanelSoon(string why)
         {
             if (renewTimer != 0)
@@ -370,14 +348,10 @@ internal sealed class RecorderApp : IDisposable
             }
         };
         watch = window.Every(2000, async () => await CheckAsync());
-        // (what the replay window asks (a pause, its settings changed) taken at once, not at the next 2 s look: its
-        // chip waited up to that and the state's next write before it changed)
         var ui = SynchronizationContext.Current;
         asks = new FileSystemWatcher(paths.Root) { NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite, EnableRaisingEvents = true };
         FileSystemEventHandler asked = (_, e) =>
         {
-            // (every ask the window or a test writes taken at once: open, save and flush too, which waited for the next
-            // 2 s look before)
             if (e.Name is "pause.request" or "settings.json" or "viewer.json" or "purge.request" or "quit.request" or "update.request" or
                 "open.request" or "save.request" or "flush.request" or "capture-diag.request")
             {
@@ -388,9 +362,6 @@ internal sealed class RecorderApp : IDisposable
         asks.Changed += asked;
         asks.Renamed += (s, e) => asked(s, e);
         _ = CheckAsync();
-        // (the replay window ready in the background, so that opening it is only showing it: unless one of this
-        // program's runs already (a recorder started again while its window stayed), found by its program file, not by
-        // its name alone (another buffer's test windows, the tray's panel and the note card have that name too))
         if (!exiting && FindReplay() is null)
         {
             Program.TryTakeRequest(Path.Combine(paths.Root, "export.busy"));
@@ -400,10 +371,8 @@ internal sealed class RecorderApp : IDisposable
 
     private readonly FileSystemWatcher asks;
 
-    /// <summary>The timer that renews the resident viewer 3 s after the displays changed: stopped as the recorder quits.</summary>
     private nuint renewTimer;
 
-    /// <summary>The replay window this recorder started (the resident one), while it runs.</summary>
     private Process? replay;
     private volatile bool renewingReplay;
     private volatile bool openAfterRenew;
@@ -411,7 +380,6 @@ internal sealed class RecorderApp : IDisposable
     private DateTimeOffset? replayHiddenSince;
     private DateTimeOffset replayStartedAt = DateTimeOffset.MinValue;
 
-    /// <summary>The session's state changed (WM_WTSSESSION_CHANGE's code, as SystemEvents.SessionSwitch's reason was).</summary>
     private void OnSessionChanged(int code)
     {
         // WTS_SESSION_LOCK 7, WTS_CONSOLE_DISCONNECT 2, WTS_REMOTE_DISCONNECT 4
@@ -432,9 +400,6 @@ internal sealed class RecorderApp : IDisposable
 
     private bool asleep;
 
-    /// <summary>The computer going to sleep: the segment being written closed now (the moments before sleep kept, and
-    /// no segment left half written if it never wakes); waking, recording again, the time asleep a gap on the
-    /// timeline like any other not recorded.</summary>
     private void OnPowerChanged(int code)
     {
         if (code == 4)
@@ -460,7 +425,6 @@ internal sealed class RecorderApp : IDisposable
         _ = CheckAsync();
     }
 
-    /// <summary>The tray menu's items with their words in both languages, renamed when the language changes.</summary>
     private readonly List<(TrayMenuItem Item, string Zh, string En)> labelled = [];
 
     private TrayMenuItem Item(string zh, string en, Action onClick, string keys = "")
@@ -487,7 +451,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>Why recording should not run now (a status code, see L.Status), or null when it should.</summary>
     private string? HoldReason()
     {
         if (locked || asleep)
@@ -501,7 +464,6 @@ internal sealed class RecorderApp : IDisposable
             return "paused";
         }
 
-        // (only when the settings ask for it: by default a game or a full-screen video is recorded like anything else)
         if (settings.PauseInFullscreen && FullScreen.GameInFront())
         {
             return "fullscreen";
@@ -512,8 +474,6 @@ internal sealed class RecorderApp : IDisposable
 
     private bool checking;
 
-    /// <summary>Asked again while a look was under way: one more look as it ends (an ask then was dropped before, and
-    /// waited for the next 2 s look).</summary>
     private bool checkAgain;
 
     private async Task CheckAsync()
@@ -559,8 +519,6 @@ internal sealed class RecorderApp : IDisposable
             OpenReplay();
         }
         NoteForegroundApp();
-        // (the replay window's recording chip asks for a pause, or for it to go on: pause.request, its minutes or
-        // "resume", as the tray's items do)
         var pauseRequest = Path.Combine(paths.Root, "pause.request");
         if (Program.TryConsumeRequest(pauseRequest, out var asked))
         {
@@ -578,10 +536,6 @@ internal sealed class RecorderApp : IDisposable
             pausedUntil = null;
         }
 
-        // (the replay window's 删除全部录像, purge.request: the segment being written closed, then every segment in
-        // the buffer's folders, the one now and those before, with what goes with them (their sidecars, the thumbnails,
-        // the apps', windows' and markers' records) deleted; the clips saved, the settings and the logs kept; recording
-        // starts again below as ever)
         var purgeRequest = Path.Combine(paths.Root, "purge.request");
         if (Program.TryTakeRequest(purgeRequest))
         {
@@ -601,9 +555,6 @@ internal sealed class RecorderApp : IDisposable
         {
             RegisterHotkeys();
         }
-        // (the buffer's folder changed, or the one asked for can no longer be written (a drive taken out): the
-        // recorder made again writing into the one now; what the one before holds stays where it is, read from there
-        // and expiring there)
         var (bufferDir, trouble) = ResolveBuffer(wanted.BufferDir);
         bufferTrouble = trouble;
         if (!string.Equals(Path.GetFullPath(bufferDir), Path.GetFullPath(paths.Buffer), StringComparison.OrdinalIgnoreCase))
@@ -636,16 +587,13 @@ internal sealed class RecorderApp : IDisposable
         if (recorder is not null && (wanted.Window != settings.Window || wanted.SystemAudio != settings.SystemAudio || wanted.Microphone != settings.Microphone ||
             wanted.Codec != settings.Codec || wanted.MaxHeight != settings.MaxHeight || wanted.FrameRate != settings.FrameRate || wanted.Quality != settings.Quality))
         {
-            // a new window: the recorder made again with it (its segments stay; the next prune keeps the new window)
             await StopRecorderAsync();
             await recorder.DisposeAsync();
             recorder = null;
             pendingDisplay = null;
         }
 
-        // (primary monitor switched or changed resolution — e.g. laptop 2560x1600 handing off to external 3840x2160
-        // after boot/MUX switch, 2026-11-21: wait until the new target stays steady for 2 s while the screen is on,
-        // then restart the recorder on the new primary monitor and resolution instead of staying stuck on the old one)
+        // Wait 2 s after primary monitor switch or resolution change (e.g. MUX handoff) before restarting capture.
         if (recorder is { IsRunning: true, Target: { IsWindow: false } curTarget } && Replay.Recording.DisplayMemory.ScreenIsOn)
         {
             var primaryNow = CaptureTarget.PrimaryMonitor();
@@ -685,7 +633,6 @@ internal sealed class RecorderApp : IDisposable
         CheckReplayIdle();
         Relabel();
         statusArg = "";
-        // (not said yes to on the first-run sheet: as turned off, nothing captured, no sound, no segment written)
         var hold = settings.Enabled && settings.Consented ? HoldReason() : "disabled";
         if (hold is null && DiskFree() is >= 0 and < (1L << 30))
         {
@@ -710,7 +657,6 @@ internal sealed class RecorderApp : IDisposable
 
         if (recorder?.IsRunning == true || starting)
         {
-            // (the replay window, or a test, asks for the last moments saved as the hotkey does)
             var saveRequest = Path.Combine(paths.Root, "save.request");
             if (Program.TryTakeRequest(saveRequest))
             {
@@ -731,7 +677,6 @@ internal sealed class RecorderApp : IDisposable
 
         if (noEncoderAt is { } at && DateTimeOffset.UtcNow - at < TimeSpan.FromMinutes(1))
         {
-            // (no hardware encoder: not tried again every few seconds, only once a minute (a driver installed))
             SetStatus("noEncoder");
             return;
         }
@@ -753,8 +698,6 @@ internal sealed class RecorderApp : IDisposable
         }
         catch (Exception ex)
         {
-            // (neither HEVC nor H.264 has a hardware encoder on this computer: said as that, not as a failure to look
-            // into; there is no software encoder to fall back on)
             noEncoderAt = ex is NoEncoderException ? DateTimeOffset.UtcNow : null;
             SetStatus(noEncoderAt is null ? "startFailed" : "noEncoder");
             Log("start failed: " + ex);
@@ -765,10 +708,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>
-    /// REPLAY_TEST_WINDOW=&lt;hex hwnd&gt;: that window recorded instead of the main display (development and
-    /// tests only, so nothing of a person's screen is recorded).
-    /// </summary>
     private static CaptureTarget? TestTarget()
     {
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")))
@@ -776,13 +715,10 @@ internal sealed class RecorderApp : IDisposable
             return null;
         }
 
-        // (a window that is gone, a handle of 0 or none that reads: nothing recorded rather than the screen)
         var hwnd = TestHandle("REPLAY_TEST_WINDOW");
         return (hwnd != IntPtr.Zero ? CaptureTarget.ForWindow(hwnd) : null) ?? new CaptureTarget(IntPtr.Zero, new IntPtr(-1), 0, 0, 0);
     }
 
-    /// <summary>A window's handle given in hex by the environment variable <paramref name="name"/> (zero: none, or
-    /// none that reads as one: -1).</summary>
     private static IntPtr TestHandle(string name)
     {
         var value = Environment.GetEnvironmentVariable(name);
@@ -799,7 +735,6 @@ internal sealed class RecorderApp : IDisposable
 
     private bool? autostartApplied;
 
-    /// <summary>Starts with Windows or not, as the settings say (not while recording a test window).</summary>
     private void ApplyAutostart(bool on)
     {
         if (autostartApplied == on || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_TEST_WINDOW")))
@@ -810,8 +745,6 @@ internal sealed class RecorderApp : IDisposable
         autostartApplied = on;
         if (Packaged.Is)
         {
-            // (installed from the Store: the package's startup task, which the person can also turn off in Task
-            // Manager or Settings › Apps › Startup; a Run key written from a package would not be seen by Windows)
             _ = Packaged.SetStartupAsync(on, Log);
             return;
         }
@@ -836,9 +769,6 @@ internal sealed class RecorderApp : IDisposable
 
     private DateTimeOffset lastHousekeeping = DateTimeOffset.MinValue;
 
-    /// <summary>The disk's free bytes where the buffer is (-1 not known).</summary>
-    /// <summary>The folder segments go to for `wanted` (the settings' bufferDir; "" the folder's own Buffer), and why it
-    /// is not that one where it could not be made or written ("bufferUnavailable"; "" none).</summary>
     private (string Dir, string Trouble) ResolveBuffer(string wanted)
     {
         var fallback = Path.Combine(paths.Root, "Buffer");
@@ -847,7 +777,6 @@ internal sealed class RecorderApp : IDisposable
             return (fallback, "");
         }
 
-        // (written into already and still there: not tried again every check)
         if (string.Equals(Path.GetFullPath(wanted), Path.GetFullPath(paths.Buffer), StringComparison.OrdinalIgnoreCase) && Directory.Exists(wanted))
         {
             return (wanted, "");
@@ -867,7 +796,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>buffers.json: the folder written now and those written before it, for the replay window.</summary>
     private void WriteBuffers()
     {
         try
@@ -895,7 +823,6 @@ internal sealed class RecorderApp : IDisposable
                     }
                 }
             }
-            // (written last into another folder than this run starts with: that one is an old one now)
             if (doc.RootElement.TryGetProperty("current", out var cur) && cur.GetString() is { Length: > 0 } was &&
                 !string.Equals(was, paths.Buffer, StringComparison.OrdinalIgnoreCase) && !oldBuffers.Contains(was, StringComparer.OrdinalIgnoreCase))
             {
@@ -919,14 +846,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>
-    /// Every 30 s: what has expired removed even while recording is held (paused, locked: the recorder prunes only as
-    /// it closes a segment), the oldest segments removed while the buffer takes more than the limit or the disk has
-    /// less than 3 GB free, the scrub index's files of segments gone removed, the side files kept to the window.
-    /// A file another program holds is passed over, not the end of the round.
-    /// </summary>
-    /// <summary>Every recording deleted (the replay window's 删除全部录像): each segment in the buffer's folders, now and
-    /// before, with its sidecars; the thumbnails; the apps', markers' and windows' records of them.</summary>
     private void Purge()
     {
         var count = 0;
@@ -954,8 +873,6 @@ internal sealed class RecorderApp : IDisposable
                 TryDelete(file);
             }
         }
-        // (the apps' names kept: one may be a window's title, where the program gave none; looked for again as each
-        // app comes in front; their icons stay)
         var icons = Path.Combine(paths.Root, "AppIcons");
         if (Directory.Exists(icons))
         {
@@ -998,7 +915,6 @@ internal sealed class RecorderApp : IDisposable
         var store = recorder?.Store ?? new SegmentStore(paths.Buffer);
         DateTimeOffset? earliestKept = null;
 
-        // (the folders written before: what passed the window taken away, the folder forgotten once nothing is left)
         if (oldBuffers.Count > 0)
         {
             var oldStores = new List<(string Dir, SegmentStore Store)>();
@@ -1096,11 +1012,8 @@ internal sealed class RecorderApp : IDisposable
             var sizes = segments.Select(s => s.Bytes).ToList();
             var total = sizes.Sum();
             var free = DiskFree();
-            // (kept by time alone, the user 2026-11-14: no limit of the space it takes; only where the disk's free
-            // space comes under 10 GB are the oldest deleted before their time, and that said)
             const long KeepFree = 10L << 30;
             diskTight = free >= 0 && free < KeepFree;
-            // the newest is kept whatever it takes
             for (var i = 0; i < segments.Count - 1; i++)
             {
                 var low = free >= 0 && free < KeepFree;
@@ -1123,7 +1036,6 @@ internal sealed class RecorderApp : IDisposable
                 }
             }
 
-            // the scrub index's files of segments no longer there
             var stems = segments.Select(s => Path.GetFileNameWithoutExtension(s.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var thumbs = Path.Combine(paths.Root, "Thumbs");
             if (Directory.Exists(thumbs))
@@ -1194,8 +1106,6 @@ internal sealed class RecorderApp : IDisposable
 
     private (DateTime Written, long Length, bool FoldGaps)? viewerFoldCache;
 
-    /// <summary>Whether viewer.json's "fold_gaps" ("Skip time not recorded") is on; defaults to true when absent so
-    /// unrecorded gaps never expire older recordings.</summary>
     private bool ReadFoldGaps()
     {
         var path = Path.Combine(paths.Root, "viewer.json");
@@ -1243,8 +1153,6 @@ internal sealed class RecorderApp : IDisposable
 
     private readonly Dictionary<string, DateTimeOffset> lastTrim = [];
 
-    /// <summary>A side file's lines older than <paramref name="cutoffTime"/> dropped (the newest older one kept: what
-    /// was in force at the buffer's start), when it has grown past 256 KB, at most every 10 minutes.</summary>
     private void TrimLines(string path, DateTimeOffset cutoffTime)
     {
         try
@@ -1286,7 +1194,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>When starting last failed for want of a hardware encoder (null: it did not).</summary>
     private DateTimeOffset? noEncoderAt;
 
     private int hevcFaults;
@@ -1294,8 +1201,6 @@ internal sealed class RecorderApp : IDisposable
     private bool noHevcThisRun;
     private string recorderCodec = "";
 
-    /// <summary>The codec recorded with, and why not the one asked for ("" it is): no HEVC decoder on this computer
-    /// (previews and re-encoded saves would fail), or HEVC failing as it recorded.</summary>
     private (string Codec, string Why) EffectiveCodec() => EffectiveCodecOf(settings);
 
     private string EffectiveCodecFor(RecorderSettings s) => EffectiveCodecOf(s).Codec;
@@ -1322,7 +1227,6 @@ internal sealed class RecorderApp : IDisposable
         var options = new RecorderOptions(paths.Buffer, settings.Window, settings.FrameRate, settings.MaxHeight, codec, settings.Quality)
         {
             SegmentLength = TimeSpan.FromSeconds(30),
-            // (a test window's recording takes only that window's own sound, whatever the settings say of the microphone)
             SystemAudio = settings.SystemAudio,
             Microphone = settings.Microphone && !target.IsWindow,
             Activity = input.Activity,
@@ -1333,8 +1237,6 @@ internal sealed class RecorderApp : IDisposable
         created.Faulted += (_, ex) =>
         {
             Log("faulted: " + ex);
-            // HEVC failing while it records (not only as it starts): after twice in 10 minutes, H.264 for this run
-            // (a capture stall restart is not an encoder fault, so keep HEVC)
             if (created.ActualCodec == "HEVC" && ex is not CaptureStalledException)
             {
                 hevcFaults = DateTimeOffset.UtcNow - lastHevcFault < TimeSpan.FromMinutes(10) ? hevcFaults + 1 : 1;
@@ -1361,21 +1263,15 @@ internal sealed class RecorderApp : IDisposable
         borderlessAsked = true;
         try
         {
-            // (packaged, Windows may ask the person the first time; how long that took and what they said logged)
             var asked = DateTimeOffset.UtcNow;
             var status = await GraphicsCaptureAccess.RequestAccessAsync(GraphicsCaptureAccessKind.Borderless);
             Log($"borderless capture: {status} ({(DateTimeOffset.UtcNow - asked).TotalSeconds:0.0} s)");
         }
         catch (Exception)
         {
-            // Older Windows or an unpackaged process the system does not ask for: the border stays.
         }
     }
 
-    /// <summary>
-    /// The replay window asks (flush.request) for the segment being written to be closed, so what it shows reaches
-    /// up to now.
-    /// </summary>
     private async Task FlushIfAskedAsync()
     {
         var request = Path.Combine(paths.Root, "flush.request");
@@ -1386,8 +1282,7 @@ internal sealed class RecorderApp : IDisposable
 
         if (!Replay.Recording.DisplayMemory.ScreenIsOn)
         {
-            // (the window left open with the screen off asks every few seconds and nobody sees it: 2026-11-21 a
-            // night of 8 s segments, 420 an hour, each starting on a 4K keyframe; 30 s ones while the screen is off)
+            // Skip viewer-driven flushes while the screen is off to avoid chopping 30 s segments into short keyframe-heavy segments.
             return;
         }
 
@@ -1401,11 +1296,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>
-    /// A diagnosis asked for by hand (capture-diag.request in the root): frames traced from then, and 20 s later what was
-    /// traced written to capture-diag.txt (times, the capture's surfaces, the textures encoded into; nothing of the
-    /// picture).
-    /// </summary>
     private DateTimeOffset? traceUntil;
 
     private void TraceIfAsked()
@@ -1446,7 +1336,6 @@ internal sealed class RecorderApp : IDisposable
 
     private readonly Dictionary<string, IntPtr> trayIcons = [];
 
-    /// <summary>One of the tray's icons beside the program, at the tray's size (the system's when it is missing).</summary>
     private IntPtr TrayIcon(string name)
     {
         if (!trayIcons.TryGetValue(name, out var icon))
@@ -1458,18 +1347,11 @@ internal sealed class RecorderApp : IDisposable
         return icon;
     }
 
-    /// <summary>What the last status code's blank is filled with (the time a pause ends).</summary>
     private string statusArg = "";
 
-    /// <summary>
-    /// How recording stands, as a code (L.Status): its words in the tray, the code and its blank in state.json for the
-    /// replay window to say in its own language.
-    /// </summary>
     private void SetStatus(string code)
     {
-        // the red dot while it records, grey while held (paused, locked, a full-screen app), a ring when it is off
         var recording = recorder?.IsRunning == true;
-        // (the input counted while recording alone: held or off, Windows is not asked for it)
         input.Listening = recording;
         controllers.Listening = recording;
         var off =!(settings.Enabled && settings.Consented) || code is "startFailed" or "noDisplay" or "noEncoder";
@@ -1502,8 +1384,7 @@ internal sealed class RecorderApp : IDisposable
                 $"\"bitrate\":{bitrate},\"diskFree\":{free},\"screenWidth\":{recorder?.Target?.Width ?? 0},\"screenHeight\":{recorder?.Target?.Height ?? 0}," +
                 $"\"bufferDir\":{Json(paths.Buffer)},\"bufferTrouble\":{Json(bufferTrouble)},\"diskTight\":{(diskTight ? "true" : "false")},\"fastSync\":{Json(fastSync)}," +
                 $"\"sharedGpu\":{(Replay.Recording.Graphics.Shared ? "true" : "false")},\"framesEncoded\":{pace.Encoded},\"framesSkipped\":{pace.Skipped}}}";
-            // (written only where what it says changed, or 5 s after it was last written: its "at" is the window's sign that
-            // the recorder runs, taken as gone past 10 s. Before, it was written every 2 s whatever it said.)
+            // Rewrite on change or every 5 s; viewer treats state.json older than 10 s as recorder offline.
             var now = DateTimeOffset.UtcNow;
             var said = head + body;
             if (said == stateSaid && now - stateWritten < TimeSpan.FromSeconds(5))
@@ -1524,13 +1405,9 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>What state.json said when last written (but its time), and when.</summary>
     private string stateSaid = "";
     private DateTimeOffset stateWritten = DateTimeOffset.MinValue;
 
-    /// <summary>`text` written to `path` whole: into a file beside it, then moved over it, so a reader never reads it half
-    /// written (the replay window reads state.json and settings.json at any moment). Where the move cannot be made (the
-    /// file held by a reader that shares no deleting), written in place, as before.</summary>
     internal static void WriteWhole(string path, string text)
     {
         var part = path + ".part";
@@ -1546,11 +1423,8 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>Background recording on or off: settings.json's "enabled" written, the rest of it kept as it is.</summary>
     private bool hotkeysOn;
 
-    /// <summary>Ctrl+Alt+R, M and S taken for the window, once the person has said yes on the first-run sheet (not
-    /// before: nothing of ScreenReplay answers to keys till then).</summary>
     private void RegisterHotkeys()
     {
         if (hotkeysOn)
@@ -1570,8 +1444,6 @@ internal sealed class RecorderApp : IDisposable
 
     private void SetEnabled(bool on)
     {
-        // (turned on from the tray before the first-run sheet was answered: the window, where the sheet is, not
-        // recording; only the sheet's 开始录制 starts it)
         if (on && !settings.Consented)
         {
             OpenReplay();
@@ -1614,10 +1486,6 @@ internal sealed class RecorderApp : IDisposable
 
     private bool savingLast;
 
-    /// <summary>
-    /// The last moments (the settings' seconds) saved as a clip at once, the replay window not opened: the segment
-    /// being written closed first, so the clip reaches up to now.
-    /// </summary>
     private async Task SaveLastAsync()
     {
         if (savingLast || recorder is null)
@@ -1626,13 +1494,11 @@ internal sealed class RecorderApp : IDisposable
         }
 
         savingLast = true;
-        // (the card at once, saying the clip is being saved; the clip filled in as it is made)
         notes.Saving();
         try
         {
             if (recorder.IsRunning)
             {
-                // (10 s at most: a recorder that does not answer leaves the key working, what was closed is saved)
                 try
                 {
                     await recorder.FlushAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
@@ -1649,7 +1515,6 @@ internal sealed class RecorderApp : IDisposable
             var start = segments.Count > 0 ? segments[^1].EndUtc - TimeSpan.FromSeconds(settings.LastSeconds) : DateTimeOffset.UtcNow;
             var stem = Path.Combine(dir, $"{L.T("回放", "Replay")} {start.ToLocalTime():yyyy-MM-dd HH-mm-ss}");
             var output = stem + ".mp4";
-            // (never over a clip saved before)
             for (var n = 2; File.Exists(output) || File.Exists(output + ".partial.mp4"); n++)
             {
                 output = $"{stem} ({n}).mp4";
@@ -1685,14 +1550,12 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>A marker at this moment, for the replay window's timeline.</summary>
     private void Mark()
     {
         Append(paths.Markers, $"{{\"at\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"kind\":\"mark\"}}");
         Tell(1500, L.T("已在时间轴上标记此刻", "Marked this moment on the timeline"), warning: false);
     }
 
-    /// <summary>One line told as the app's own card by the tray (NoteCard), the icon's balloon where it cannot be.</summary>
     private void Tell(int balloonMs, string text, bool warning)
     {
         if (!notes.Text(text, warning))
@@ -1701,15 +1564,8 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>The app in front, noted when it changes: the timeline's chapters (its process name only).</summary>
     private void NoteForegroundApp()
     {
-        // (the process, its program and its window's title read from one window, at one time: read one by one, the
-        // window in front could change between them, and an app was kept under another's name (youdid.wtf as
-        // 「PixPin」, PixPin as 「主窗口」, the user, 2026-11-14))
-        // (the window in front the same one as when its app was last found noted already: not read again. Each read
-        // opened the process, read its program's version block and walked its parents, every 2 s. Not where it is a
-        // window kept out of capture (ScreenReplay's own): the app under it may change while it stays in front)
         var front = ForegroundApp.Front();
         var frontPid = ForegroundApp.PidOf(front);
         if (front != IntPtr.Zero && front == frontNoted && frontPid == frontNotedPid && !ForegroundApp.Unseen(front))
@@ -1720,10 +1576,8 @@ internal sealed class RecorderApp : IDisposable
         frontNotedPid = frontPid;
 
         var (name, exe, title, helper) = ForegroundApp.Now();
-        // (nothing noted before the first-run sheet is said yes to, nor while recording is turned off)
         if (name.Length == 0 || name == lastApp || locked || !(settings.Enabled && settings.Consented))
         {
-            // (its app noted already: this window need not be looked at again; held (locked, off): looked at again)
             frontNoted = name.Length > 0 && name == lastApp ? front : IntPtr.Zero;
             return;
         }
@@ -1733,8 +1587,6 @@ internal sealed class RecorderApp : IDisposable
         lastApp = name;
         Append(paths.Apps, $"{{\"at\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},\"app\":{Json(name)}}}");
         KeepAppIcon(name, exe, title);
-        // (what was noted under the helper's own name before (「Steam Client WebHelper」, 「WeChatAppEx」) shown as the
-        // app it is a helper of from now on: its name and icon those of that app)
         if (helper.Length > 0 && !string.Equals(helper, name, StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -1757,18 +1609,9 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>
-    /// The app's icon (AppIcons\&lt;process&gt;.png, 32 px) and its name as Windows gives it in the system's language
-    /// (the program's FileDescription, AppIcons\&lt;process&gt;.txt), each kept once, for the replay window's timeline.
-    /// </summary>
-    /// <summary>Whether `text` reads as a window's title of a page or a document ("a page - an app", "a file — an
-    /// app", "a | b"): not an app's name.</summary>
     private static bool TitleLike(string text) =>
         text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ");
 
-    /// <summary>The program's own name, as its FileDescription or else its ProductName writes it; empty where both are
-    /// missing or are only its file's name (lower case or with "_": a game's sinking_star; Weixin's "Weixin", its file's
-    /// name too, is its name).</summary>
     private static string OwnName(string exe, string name)
     {
         var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(exe);
@@ -1782,9 +1625,6 @@ internal sealed class RecorderApp : IDisposable
         return bare(description) ? "" : description!;
     }
 
-    /// <summary>The processes whose kept name was held to the program's own this run (a name a window's title gave it
-    /// where the program has one of its own: Weixin kept as its photo viewer's 「Photos and Videos」, a build of
-    /// 2026-11-13).</summary>
     private readonly HashSet<string> namesChecked = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> iconsChecked = new(StringComparer.OrdinalIgnoreCase);
 
@@ -1795,11 +1635,7 @@ internal sealed class RecorderApp : IDisposable
             var dir = Path.Combine(paths.Root, "AppIcons");
             var file = Path.Combine(dir, name.ToLowerInvariant() + ".png");
             var named = Path.Combine(dir, name.ToLowerInvariant() + ".txt");
-            // (looked for again: a name kept as only the file's, or one a window's title gave it that holds a page's or a
-            // document's name (a browser's tab, kept by a build of 2026-11-13: 「动态首页-哔哩哔哩 — Zen Browser」))
             var kept = File.Exists(named) ? File.ReadAllText(named).Trim() : "";
-            // (and one kept a day: taken afresh, so a name a window's title gave it once (still.fail's, while it showed
-            // bazaarplusplus-zero-report.html) does not stay for good)
             var stale = File.Exists(named) && (kept == name || TitleLike(kept) ||
                 DateTime.UtcNow - File.GetLastWriteTimeUtc(named) > TimeSpan.FromDays(1));
             if (!stale && File.Exists(named) && exe.Length > 0 && namesChecked.Add(name))
@@ -1810,7 +1646,6 @@ internal sealed class RecorderApp : IDisposable
             var iconStale = !File.Exists(file);
             if (!iconStale && exe.Length > 0 && iconsChecked.Add(name))
             {
-                // Refresh cached icon once per run if the application binary was updated since caching.
                 iconStale = File.GetLastWriteTimeUtc(exe) > File.GetLastWriteTimeUtc(file);
             }
             if (!iconStale && File.Exists(named) && !stale)
@@ -1826,9 +1661,6 @@ internal sealed class RecorderApp : IDisposable
             Directory.CreateDirectory(dir);
             if (!File.Exists(named) || stale)
             {
-                // (its FileDescription, else its ProductName, as written: Zen's "Zen" is its name, though its file is
-                // zen.exe; only where both are missing or are its file's very name (a game's sinking_star, whose window
-                // is 沉星之序) its window's title, where that is short and names no page or document; else the file's)
                 var description = OwnName(exe, name);
                 if (description.Length == 0)
                 {
@@ -1851,7 +1683,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>Where saved clips go (REPLAY_OUT in development).</summary>
     private static string ClipsFolder()
         => Environment.GetEnvironmentVariable("REPLAY_OUT") is { Length: > 0 } custom
             ? custom
@@ -1871,10 +1702,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>The replay window's process (of this recorder's program file) and its top window titled ScreenReplay,
-    /// shown or hidden; null where none runs. The one this recorder started first, else one found by its program file
-    /// (a window kept from a recorder before this one); never the tray's panel nor the note card, which are the same
-    /// program (a warm note card was taken for the window and brought to the front, its card empty).</summary>
     private (int Pid, IntPtr Window)? FindReplay()
     {
         try
@@ -1904,7 +1731,6 @@ internal sealed class RecorderApp : IDisposable
                         continue;
                     }
 
-                    // (the resident window is hidden while closed: its handle found among the process's windows)
                     var hwnd = process.MainWindowHandle != IntPtr.Zero ? process.MainWindowHandle : ForegroundApp.TopWindowOf(process.Id);
                     if (hwnd != IntPtr.Zero)
                     {
@@ -1939,9 +1765,7 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>Replaces a hidden resident replay window with a freshly primed one so long-lived GPU decoder,
-    /// swap-chain, and heap allocations (which cannot be safely released in-process on current NVIDIA drivers)
-    /// are reclaimed while keeping instant-open responsiveness.</summary>
+    // Replaces a hidden resident viewer to reclaim long-lived GPU decoder/swap-chain allocations that NVIDIA drivers cannot safely release in-process.
     private void RenewReplayIfHidden(string why)
     {
         if (exiting || renewingReplay || IsExportBusy() ||
@@ -2122,10 +1946,6 @@ internal sealed class RecorderApp : IDisposable
         StartReplay(hidden: false);
     }
 
-    /// <summary>
-    /// The replay window's program started, resident (the user's ask, 2026-11-13: 「做成常驻，瞬开」): kept from then on,
-    /// closed only hidden, shown at once by OpenReplay; `hidden`: started as the recorder starts, not shown.
-    /// </summary>
     private void StartReplay(bool hidden)
     {
         var info = new ProcessStartInfo(paths.ReplayExe) { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory };
@@ -2145,8 +1965,6 @@ internal sealed class RecorderApp : IDisposable
                 Log("replay window: not bound to the recorder's life");
             }
 
-            // (kept as this recorder's window unless its own still runs: one started while that one has no window yet
-            // hands itself to it and ends)
             if (replay is { HasExited: false })
             {
                 started?.Dispose();
@@ -2165,8 +1983,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>What was chosen in the tray's panel, by its number (app/tray_panel.mbt's tray_do), done as the menu's
-    /// item would be.</summary>
     private void Chosen(int command)
     {
         switch (command)
@@ -2196,7 +2012,6 @@ internal sealed class RecorderApp : IDisposable
 
         exiting = true;
         window.Stop(watch);
-        // (nothing started again behind it while it stops the recorder below: the renew timer, the folder's news)
         if (renewTimer != 0)
         {
             window.Stop(renewTimer);
@@ -2204,7 +2019,6 @@ internal sealed class RecorderApp : IDisposable
         }
 
         asks.EnableRaisingEvents = false;
-        // (the resident replay window goes with it)
         foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(paths.ReplayExe)))
         {
             using (process)
@@ -2234,13 +2048,11 @@ internal sealed class RecorderApp : IDisposable
         window.Quit();
     }
 
-    /// <summary>The thread's messages handled (the tray, the hotkeys, the timers, what the awaits resume) until Quit.</summary>
     public void Run() => window.Run();
 
     public void Dispose()
     {
         window.SessionChanged -= OnSessionChanged;
-        // (also where the loop ended without ExitAsync: what it started and holds let go of all the same)
         exiting = true;
         panel.Dispose();
         notes.Dispose();
@@ -2286,11 +2098,8 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>The last trouble with the recording's sound (a diagnostics code), "" while there is none.</summary>
     private string audioTrouble = "";
 
-    /// <summary>What the recorder reports written to recorder.log (from its threads); the sound's troubles kept for
-    /// state.json.</summary>
     private void OnRecorderEvent(RecorderEvent e)
     {
         Log($"{e.Level} {e.Code}: {e.Message}");
@@ -2298,7 +2107,6 @@ internal sealed class RecorderApp : IDisposable
         {
             audioTrouble = e.Code;
         }
-        // (the source that was in trouble open again: the warning in Settings gone, not kept till the app restarts)
         else if (e.Code.StartsWith("audio.", StringComparison.Ordinal) && e.Code.EndsWith("Back", StringComparison.Ordinal)
             && audioTrouble.StartsWith(e.Code[..^"Back".Length], StringComparison.Ordinal))
         {
@@ -2313,8 +2121,6 @@ internal sealed class RecorderApp : IDisposable
     {
         try
         {
-            // (the recorder's threads report here too; begun again past 2 MB, the one before kept as recorder.old.log,
-            // as tray.log is kept small: it grew without end before)
             lock (logGate)
             {
                 var file = Path.Combine(paths.Root, "recorder.log");
@@ -2331,8 +2137,6 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    /// <summary>The main display's refresh rate (Hz; 0 unknown): a frame rate over it records the same picture twice
-    /// (the replay window's Settings says so).</summary>
     private static int DisplayHz()
     {
         var mode = new DevMode { dmSize = (ushort)Marshal.SizeOf<DevMode>() };
@@ -2375,7 +2179,6 @@ internal sealed class RecorderApp : IDisposable
     }
 }
 
-/// <summary>What the replay window's settings say (settings.json); the defaults where it says nothing.</summary>
 internal sealed record RecorderSettings(
     bool Enabled,
     TimeSpan Window,
@@ -2393,19 +2196,13 @@ internal sealed record RecorderSettings(
     bool Consented = false,
     bool AutoUpdate = true)
 {
-    /// <summary>The version of the first-run sheet's words a "consent" must be of to count (the replay window's
-    /// consent_version): raised when what it says changes in substance, so it is asked again.</summary>
     public const int ConsentVersion = 1;
 
-    // (nothing recorded and nothing started with Windows till the person says so on the first-run sheet: the
-    // reviewer's 98th, the user 2026-11-14)
     public static RecorderSettings Default { get; } = new(false, TimeSpan.FromHours(2), 20L << 30, false, true, false, false);
 
     private static (string Path, DateTime Written, long Length, RecorderSettings Read)? cached;
 
-    /// <summary>As Read, the file read and parsed again only where its time or length changed since (asked every 2 s).
-    /// Retries transient read/parse races when the file exists and never clobbers a valid cached setting with Default
-    /// (which would turn recording and autostart off).</summary>
+    // Retries transient read/parse races and never clobbers valid cached settings with Default.
     public static RecorderSettings ReadCached(string path)
     {
         DateTime written;
@@ -2499,10 +2296,6 @@ internal sealed record RecorderSettings(
     }
 }
 
-/// <summary>
-/// The recorder's words in the window's language (viewer.json's "language": system, zh or en; following Windows, Chinese
-/// when its display language is): the tray's menu and tips, the notes it shows, the clips' names.
-/// </summary>
 internal static class L
 {
     public static string Root { get; set; } = "";
@@ -2550,7 +2343,6 @@ internal static class L
 
     public static string T(string zh, string en) => English ? en : zh;
 
-    /// <summary>A status code's words (the replay window has the same table: app/strings.mbt).</summary>
     public static string Status(string code, string arg = "") => code switch
     {
         "recording" => T("后台录制中", "Recording in the background"),
@@ -2565,7 +2357,6 @@ internal static class L
         _ => T("启动中…", "Starting…"),
     };
 
-    /// <summary>Where clips go: Videos\回放 (kept when it is there), Videos\Replay for an English one new.</summary>
     public static string ClipsFolder()
     {
         var videos = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Videos");
@@ -2576,8 +2367,7 @@ internal static class L
 
 internal static class FullScreen
 {
-    // QUERY_USER_NOTIFICATION_STATE: QUNS_BUSY = 2 (an app full screen: a borderless game, as Phantom Blade Zero
-    // was on 2026-11-07, a film, a slide show), QUNS_RUNNING_D3D_FULL_SCREEN = 3 (exclusive full screen).
+    // QUNS_BUSY = 2 (borderless fullscreen), QUNS_RUNNING_D3D_FULL_SCREEN = 3 (exclusive fullscreen).
     [DllImport("shell32.dll")]
     private static extern int SHQueryUserNotificationState(out int state);
 
@@ -2599,10 +2389,8 @@ internal static class ForegroundApp
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, int cmd);
 
-    /// <summary>The window in front (zero: none).</summary>
     public static IntPtr Front() => GetForegroundWindow();
 
-    /// <summary>The process a window is of (0: none).</summary>
     public static uint PidOf(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero)
@@ -2634,8 +2422,6 @@ internal static class ForegroundApp
         }
     }
 
-    /// <summary>The app in front, from one window: its process's name, its program file ("" where it cannot be read)
-    /// and the window's title; Process, the process's own name where the app is another's (a helper's window).</summary>
     public static (string Name, string Exe, string Title, string Process) Now()
     {
         var hwnd = Shown(GetForegroundWindow());
@@ -2659,11 +2445,6 @@ internal static class ForegroundApp
             {
             }
 
-            // (a helper's window that the taskbar shows as another program's: Steam's are steamwebhelper.exe's, and
-            // say steam.exe as what relaunches them; named and pictured by that one, as the taskbar does, not
-            // 「Steam Client WebHelper」, the user, 2026-11-15). Only a program in a folder over the helper's own (Steam\
-            // over Steam\bin\cef\...): one beside it says an app of its own (Chrome's installed sites relaunch by
-            // chrome_proxy.exe, beside chrome.exe), not whose helper it is.
             var name = process.ProcessName;
             var relaunch = RelaunchExe(hwnd);
             var relaunchDir = relaunch.Length > 0 ? System.IO.Path.GetDirectoryName(relaunch) ?? "" : "";
@@ -2673,9 +2454,6 @@ internal static class ForegroundApp
                 return (System.IO.Path.GetFileNameWithoutExtension(relaunch), relaunch, text.ToString(), name);
             }
 
-            // (a helper with no name of its own (its description its file's name) that a program of its maker started:
-            // Weixin's 公众号 and mini programs are WeChatAppEx.exe's, started by Weixin.exe, the user, 2026-11-15; its
-            // maker's first word, Tencent LLC's and Tencent's alike: never a game a launcher of another's started)
             if (exe.Length > 0 && HelperOf(process, exe) is { } owner)
             {
                 return (owner.Name, owner.Exe, text.ToString(), name);
@@ -2702,9 +2480,6 @@ internal static class ForegroundApp
     [DllImport("ntdll.dll")]
     private static extern int NtQueryInformationProcess(IntPtr process, int infoClass, ref ProcessBasicInformation info, int size, out int returned);
 
-    /// <summary>The program whose helper `process` is (its name and program file), or null: a process whose
-    /// description is only its file's name, started by a program of the same maker (the first word of their
-    /// CompanyName) under another name, the first such up its parents.</summary>
     private static (string Name, string Exe)? HelperOf(Process process, string exe)
     {
         try
@@ -2733,11 +2508,11 @@ internal static class ForegroundApp
                 }
 
                 var parent = Process.GetProcessById((int)pbi.InheritedFromUniqueProcessId);
-                // (a parent's id reused by a later process: one started after its child is none of its)
+                // Guard against PID reuse: a parent started after its child is not its real parent.
                 var parentExe = parent.StartTime <= current.StartTime ? parent.MainModule?.FileName ?? "" : "";
                 if (parentExe.Length > 0 && string.Equals(parent.ProcessName, process.ProcessName, StringComparison.OrdinalIgnoreCase))
                 {
-                    // (each one gone up from let go of: only the caller's own is the caller's to let go)
+                    // Only dispose intermediate parent Process handles; caller owns the initial process.
                     if (!ReferenceEquals(current, process))
                     {
                         current.Dispose();
@@ -2786,15 +2561,9 @@ internal static class ForegroundApp
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
 
-    /// <summary>Whether a window is kept out of screen capture (WDA_EXCLUDEFROMCAPTURE: the replay window's own, its
-    /// switch on), so that what is recorded where it is is what is under it.</summary>
+    // WDA_EXCLUDEFROMCAPTURE (0x10)
     public static bool Unseen(IntPtr hwnd) => GetWindowDisplayAffinity(hwnd, out var a) && (a & 0x10) != 0;
 
-    /// <summary>The window the recording shows for `hwnd`: itself, or where it is kept out of capture, the first window
-    /// under it a person would call an app (shown, not minimized, not cloaked, not itself kept out, not an owner-less
-    /// tool window, not the desktop or the taskbar); zero where none is (the desktop under it). The user, 2026-11-15:
-    /// with ScreenReplay kept out of what is recorded, the app in front is what the picture shows, not ScreenReplay.
-    /// </summary>
     public static IntPtr Shown(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero || !Unseen(hwnd))
@@ -2820,7 +2589,7 @@ internal static class ForegroundApp
                 continue;
             }
 
-            // (a layered window the pointer goes through: an overlay)
+            // WS_EX_LAYERED | WS_EX_TRANSPARENT click-through overlay
             if ((ex & 0x80020) == 0x80020)
             {
                 continue;
@@ -2871,8 +2640,6 @@ internal static class ForegroundApp
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PropVariant value);
 
-    /// <summary>The program a window says relaunches it (System.AppUserModel.RelaunchCommand: the taskbar's own
-    /// name and icon for it), where that is a program file there is; "" where it says none.</summary>
     private static string RelaunchExe(IntPtr hwnd)
     {
         try
@@ -2895,7 +2662,6 @@ internal static class ForegroundApp
                 var command = value.Type == 31 ? Marshal.PtrToStringUni(value.Value) ?? "" : "";
                 PropVariantClear(ref value);
                 command = command.Trim();
-                // (its program: quoted, or up to its ".exe")
                 string file;
                 if (command.StartsWith('"'))
                 {
@@ -2920,7 +2686,6 @@ internal static class ForegroundApp
         }
     }
 
-    /// <summary>The title of the window in front ("" none).</summary>
     public static string Title()
     {
         var hwnd = GetForegroundWindow();
@@ -2934,7 +2699,6 @@ internal static class ForegroundApp
         return text.ToString();
     }
 
-    /// <summary>The program file of the app in front ("" when it cannot be read: another user's, elevated).</summary>
     public static string Path()
     {
         var hwnd = GetForegroundWindow();
@@ -2966,7 +2730,6 @@ internal static class ForegroundApp
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
 
-    /// <summary>The top window of process `pid` titled ScreenReplay, shown or not (none: zero).</summary>
     public static IntPtr TopWindowOf(int pid)
     {
         var found = IntPtr.Zero;

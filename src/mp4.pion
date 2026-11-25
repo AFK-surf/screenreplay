@@ -1,13 +1,6 @@
 import "mbt_compat"
 import "ui"
 
-// A segment's tracks read out of its MP4 (the player's own decoding, native_player.mbt: the reviewer's 53rd and
-// 57th, step 1): for each track its codec, timescale, the picture's size and decoder record (hvcC / avcC / av1C), and every
-// sample's times, place in the file, size and whether it is a key frame. Only what a finished segment holds: one
-// `moov` with its sample tables (the recorder's MF sink writer and ffmpeg both write it so); a segment still being
-// written has none yet and reads as no tracks. Times are as ffmpeg's mov demuxer gives them (its edit list applied:
-// the AAC encoder's priming starts before 0), so `REPLAY_DEMUX` can be held line for line to `ffprobe -show_packets`.
-
 pub struct Mp4Sample {
   pts : Int64
   dts : Int64
@@ -39,7 +32,6 @@ fn be32(b : Bytes, i : Int) -> Int64 {
   (b[i + 2].to_int().to_int64() << 8) |
   b[i + 3].to_int().to_int64()}
 
-/// A signed 32-bit field (ctts v1, elst's media time).
 fn be32s(b : Bytes, i : Int) -> Int64 {
   let v = be32(b, i)
   if v >= 0x80000000L {
@@ -58,7 +50,6 @@ fn four(b : Bytes, i : Int) -> String {
   }
   s.to_string()}
 
-/// The boxes from `start` to `end`: each its kind and its content's start and end.
 fn mp4_boxes(b : Bytes, start : Int, end : Int) -> Array[(String, Int, Int)] {
   let out = []
   let mut i = start
@@ -80,7 +71,6 @@ fn mp4_boxes(b : Bytes, start : Int, end : Int) -> Array[(String, Int, Int)] {
   }
   out}
 
-/// The first box of a path down from `start`..`end`.
 fn mp4_find(b : Bytes, start : Int, end : Int, path : Array[String]) -> Option[(Int, Int)] {
   for box in mp4_boxes(b, start, end) {
     let (kind, s, e) = box
@@ -96,7 +86,6 @@ fn mp4_find(b : Bytes, start : Int, end : Int, path : Array[String]) -> Option[(
   }
   Option::None}
 
-/// The `moov` of the file at `path`, found among its top boxes by their heads alone (the media data is not read).
 fn mp4_moov(path : String) -> Option[Bytes] {
   let p = cstr(path)
   let total = rp_size(p)
@@ -126,7 +115,6 @@ fn mp4_moov(path : String) -> Option[Bytes] {
   }
   Option::None}
 
-/// The tracks of the segment at `path`; none where it has no `moov` (being written) or it is not read whole.
 fn mp4_tracks(path : String) -> Array[Mp4Track] {
   let b = match mp4_moov(path) {
     Option::Some(b) => b
@@ -149,8 +137,6 @@ fn mp4_tracks(path : String) -> Array[Mp4Track] {
   }
   out}
 
-/// The picture's codec of the file at `path` as its sample entry names it ("avc1", "hvc1", "av01", …), its sample
-/// tables not read; "" where it has no `moov` yet (being written) or no picture.
 fn mp4_video_codec(path : String) -> String {
   guard mp4_moov(path) is Some(b) else { return "" }
   for box in mp4_boxes(b, 0, b.length()) {
@@ -165,7 +151,6 @@ fn mp4_video_codec(path : String) -> String {
   }
   ""}
 
-/// A codec's name as the dialog says it: "avc1" H.264, "hvc1" H.265, …; "" for one it does not know.
 fn codec_name(entry : String) -> String {
   if entry.starts_with("avc") {
     "H.264"
@@ -186,7 +171,6 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
     Option::None => ""
   }
   guard mp4_find(b, s, e, ["mdia", "minf", "stbl"]) is Option::Some((ts, te)) else { return Option::None }
-  // the sample entry: its codec, and for a picture its size and decoder record
   guard mp4_find(b, ts, te, ["stsd"]) is Option::Some((ds, de)) else { return Option::None }
   let entry = ds + 8
   guard entry + 8 <= de else { return Option::None }
@@ -211,8 +195,7 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
   if kind == "vide" && entry + 8 + 78 <= entry_end {
     width = be16(b, entry + 8 + 24)
     height = be16(b, entry + 8 + 26)
-    // (an AV1's av1C: its AV1CodecConfigurationRecord whole, which mbui's stream takes as it is; its size shown is the
-    // entry's, there being no SPS to crop it)
+    // Pass av1C verbatim; AV1 has no SPS crop so shown size equals sample entry size.
     let rec = if codec.starts_with("hv") || codec.starts_with("he") {
       "hvcC"
     } else if codec == "av01" {
@@ -225,12 +208,10 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
       Option::None => ()
     }
   }
-  // sizes
   guard mp4_find(b, ts, te, ["stsz"]) is Option::Some((zs, _)) else { return Option::None }
   let fixed = be32(b, zs + 4).to_int()
   let count = be32(b, zs + 8).to_int()
   let size_of = fn(i : Int) { if fixed != 0 { fixed } else { be32(b, zs + 12 + i * 4).to_int() } }
-  // decode times
   let dts = Array::make(count, 0L)
   match mp4_find(b, ts, te, ["stts"]) {
     Option::Some((ss, _)) => {
@@ -251,7 +232,6 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
     }
     Option::None => return Option::None
   }
-  // composition offsets
   let pts = dts.copy()
   match mp4_find(b, ts, te, ["ctts"]) {
     Option::Some((cs, _)) => {
@@ -271,7 +251,7 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
     }
     Option::None => ()
   }
-  // key frames: all, where there is no stss
+  // Per MP4 spec, absent stss means all samples are keyframes.
   let key = Array::make(count, true)
   match mp4_find(b, ts, te, ["stss"]) {
     Option::Some((ks, _)) => {
@@ -286,7 +266,6 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
     }
     Option::None => ()
   }
-  // places: chunks' offsets, and how many samples each chunk holds
   let chunks : Array[Double] = []
   match mp4_find(b, ts, te, ["stco"]) {
     Option::Some((cs, _)) =>
@@ -325,8 +304,7 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
       }
     }
   }
-  // the edit list, as ffmpeg's mov demuxer applies it: an empty edit first delays the track, the next edit's media
-  // time is where it starts (AAC's priming before 0)
+  // Apply edit list (empty edit media=-1 delays track; positive media skips priming like AAC).
   let mut shift = 0L
   match mp4_find(b, s, e, ["edts", "elst"]) {
     Option::Some((es, _)) => {
@@ -359,14 +337,13 @@ fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] 
   }
   Option::Some(Mp4Track::{ kind: kind, codec: codec, timescale: timescale, width: width, height: height, shown_w: shown_w, shown_h: shown_h, config: config, channels: channels, rate: rate, samples: samples })}
 
-/// An esds' descriptors from `s` to `e`: its DecoderSpecificInfo (tag 5, inside the DecoderConfigDescriptor, tag 4,
-/// inside the ES_Descriptor, tag 3), the AAC's AudioSpecificConfig; empty where there is none.
+// Extract DecoderSpecificInfo (tag 5) from ES_Descriptor (tag 3) -> DecoderConfigDescriptor (tag 4).
 fn esds_config(b : Bytes, s : Int, e : Int) -> Bytes {
   let mut i = s
   while i + 2 <= e {
     let tag = b[i].to_int()
     i = i + 1
-    // (its length: 7 bits a byte, the top bit saying another follows)
+    // 7-bit varint length (MSB = continuation).
     let mut len = 0
     let mut more = true
     let mut n = 0
@@ -379,7 +356,6 @@ fn esds_config(b : Bytes, s : Int, e : Int) -> Bytes {
     }
     match tag {
       3 => {
-        // ES_ID, its flags, and what they say follows; then the descriptors it holds
         if i + 3 > e {
           return "".to_bytes()
         }
@@ -395,8 +371,7 @@ fn esds_config(b : Bytes, s : Int, e : Int) -> Bytes {
           i = i + 2
         }
       }
-      // the object type, the stream's, its buffer and rates: 13 bytes, then the descriptors it holds
-      // the object type, the stream's, its buffer and rates: 13 bytes, then the descriptors it holds
+      // Skip 13-byte DecoderConfigDescriptor header.
       4 => i = i + 13
       5 => return if i + len <= e { bytes_slice(b, i, i + len) } else { "".to_bytes() }
       _ => i = i + len
@@ -404,8 +379,6 @@ fn esds_config(b : Bytes, s : Int, e : Int) -> Bytes {
   }
   "".to_bytes()}
 
-/// REPLAY_DEMUX=<segment> (development): its samples in `ffprobe -show_entries
-/// packet=stream_index,pts,dts,size,pos,flags -of csv=p=0`'s lines (flags: K or _ only) into REPLAY_DEMUX_OUT.
 fn demux_dump() -> Bool {
   let path = ui::env("REPLAY_DEMUX")
   if path == "" {

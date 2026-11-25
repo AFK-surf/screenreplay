@@ -1,20 +1,6 @@
-
-// What the window asks of its player (native_player.mbt's `native`, the replay's deck): seek, scrub, play, stop,
-// speed. The web page that played the buffer in WebView2's <video>s till 2026-11-14 is gone (the user: 「应该没有旧的
-// 播放器了吧」).
-
-/// The segment (index in `segs`) the playhead is in.
-
-
-/// The picture's shape (width for height), as its track's SPS says.
-
-
-/// The segment holding `at` (ms into the buffer), or the next one after a gap; and where in it.
 fn locate(at : Double) -> (Int, Double) {
   let base = t0()
-  // (the last segment starting at or before `at`, found by halving: where pieces overlap by a hair, the next's, and a
-  // step to the next's first frame came back to this one's end, stuck there (the user, 2026-11-15: 「按住右……就不继续
-  // 往右了」))
+  // Upper-bound binary search: pick the later segment on overlap so frame-stepping cannot get stuck at the previous segment's end.
   let mut lo = 0
   let mut hi = segs.length()
   while lo < hi {
@@ -50,7 +36,6 @@ fn go(at : Double, near : Bool) -> Unit {
 fn seek_to(at : Double) -> Unit {
   go(at, false)}
 
-/// The playhead dragged to `at`: the picture follows at the nearest key frames, exactly once the hand rests.
 fn scrub_to(at : Double) -> Unit {
   fine_time.set(false)
   native().scrub(at)}

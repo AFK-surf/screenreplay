@@ -35,8 +35,6 @@ public struct Segment: Sendable, Equatable {
   }
 }
 
-/// Manages completed segments (`Buffer/<yyyyMMdd-HHmmss-fff-id>.mp4` + sidecars `.json`, `.levels`, `.input`, `.thumbs`),
-/// matching `recording/SegmentStore.cs` and `app/buffer.mbt`.
 public final class SegmentStore: @unchecked Sendable {
   public static let sidecars = [".json", ".levels", ".input", ".thumbs"]
   public static let tempExtensions = [".mp4.writing", ".recording"]
@@ -49,7 +47,6 @@ public final class SegmentStore: @unchecked Sendable {
     self.folder = (folder as NSString).standardizingPath
   }
 
-  /// Lists all completed segments in `folder`, oldest first. Active `.mp4.writing` files are ignored.
   public func list() -> [Segment] {
     guard let entries = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
       return []
@@ -117,7 +114,6 @@ public final class SegmentStore: @unchecked Sendable {
     )
   }
 
-  /// Parses `yyyyMMdd-HHmmss-fff` UTC prefix of a segment filename.
   public static func parseStartFromName(_ name: String) -> Date? {
     guard name.count >= 19 else { return nil }
     let prefix = String(name.prefix(19))
@@ -156,7 +152,6 @@ public final class SegmentStore: @unchecked Sendable {
     return iso.date(from: string)
   }
 
-  /// Deletes segments whose `endUtc < before` along with their sidecars. Returns count deleted.
   @discardableResult
   public func prune(before: Date) -> Int {
     var deleted = 0
@@ -169,7 +164,6 @@ public final class SegmentStore: @unchecked Sendable {
     return deleted
   }
 
-  /// Enforces `maxBytes` (when `> 0`) and `keepFreeBytes` (e.g. 10 GiB), always preserving the newest segment.
   public func pruneToLimits(maxBytes: Int64, keepFreeBytes: Int64 = 10 << 30) -> (deleted: Int, diskTight: Bool) {
     let segments = list()
     guard segments.count > 1 else {
@@ -215,7 +209,6 @@ public final class SegmentStore: @unchecked Sendable {
     return true
   }
 
-  /// Removes temporary half-written segment files left behind by a crash.
   public func deleteUnfinished() {
     guard let entries = try? FileManager.default.contentsOfDirectory(atPath: folder) else { return }
     for entry in entries {

@@ -1,15 +1,3 @@
-// The player's reads of its files, and its sound (native_player.mbt).
-//
-// Its reads (rp_play_read): each file kept open for the next read of it, the last few of them, so a frame's bytes
-// cost the read alone; opening the file for every frame took 8 to 18 ms a 4K frame here (the system's scan of a file
-// as it opens), more than a frame's time. Opened shared (the recorder may let a segment go meanwhile: it goes once
-// the handle closes). A file about to be read (the next segment) opened ahead on a thread of its own (rp_play_warm).
-//
-// Its sound: a segment's AAC frames, as its MP4 holds them (mp4.mbt's `soun` track,
-// its AudioSpecificConfig), decoded one at a time by Media Foundation's AAC decoder (an MFT driven here, on the
-// window's thread: a frame of 1024 samples decodes in well under a millisecond) into what an mbui stream plays,
-// 48 kHz stereo PCM16 (@ui.Stream::audio). Mono is played on both sides, more than two channels as their first two,
-// another rate brought to 48 kHz by straight lines between samples.
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -28,8 +16,6 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "wmcodecdspuuid.lib")
 #pragma comment(lib, "ole32.lib")
-
-// ---- reads ----
 
 struct RpKept {
   std::string path;
@@ -50,7 +36,7 @@ static HANDLE rp_play_open(const char *utf8) {
                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
-// (under the lock) `h` kept for `path`, in the place of the one used longest ago; false where one is kept already
+// Caller must hold rp_kept_lock.
 static bool rp_kept_put(const std::string &path, HANDLE h) {
   int slot = 0;
   for (int i = 0; i < 6; i++) {
@@ -68,7 +54,6 @@ static bool rp_kept_put(const std::string &path, HANDLE h) {
   return true;
 }
 
-// `length` bytes of the file at `path` from `offset` (fewer at its end; none where it cannot be read).
 extern "C" moonbit_bytes_t rp_play_read(moonbit_bytes_t path, double offset, int32_t length) {
   if (length <= 0) return moonbit_make_bytes(0, 0);
   moonbit_bytes_t out = moonbit_make_bytes(length, 0);
@@ -104,17 +89,12 @@ extern "C" moonbit_bytes_t rp_play_read(moonbit_bytes_t path, double offset, int
   return trimmed;
 }
 
-// The files warmed in this run (each once till the window is put away: rp_play_release).
 static std::vector<std::string> rp_warmed;
 
-// The files asked to be warmed and not begun yet, newest last; the one thread that warms them (started at the first
-// ask, kept for the process's life: a window may be put away while it reads). Before, each ask started a thread of its
-// own, and a fast run across many segments started dozens at once, each reading its whole file: the disk was busy
-// with all of them while the frames asked for waited behind.
+// Single persistent warmup thread (process-lifetime so hiding the window never blocks on I/O).
 static std::vector<std::string> rp_warm_todo;
 static CONDITION_VARIABLE rp_warm_wake = CONDITION_VARIABLE_INIT;
 static bool rp_warm_started;
-// (raised by each ask and by rp_play_release: a read-through under way gives way to what is asked for now)
 static volatile LONG rp_warm_gen;
 
 static void rp_warm_loop() {
@@ -122,20 +102,15 @@ static void rp_warm_loop() {
   for (;;) {
     AcquireSRWLockExclusive(&rp_kept_lock);
     while (rp_warm_todo.empty()) SleepConditionVariableSRW(&rp_warm_wake, &rp_kept_lock, INFINITE, 0);
-    // (the newest asked first: the oldest asks are for segments played past already)
     std::string p = rp_warm_todo.back();
     rp_warm_todo.pop_back();
     LONG gen = rp_warm_gen;
     ReleaseSRWLockExclusive(&rp_kept_lock);
     HANDLE h = rp_play_open(p.c_str());
     if (h == INVALID_HANDLE_VALUE) continue;
-    // (read through once, so its bytes are in the system's cache when its frames are read; given up where another file
-    // is asked for meanwhile)
     DWORD got = 0;
     while (rp_warm_gen == gen && ReadFile(h, buf.data(), (DWORD)buf.size(), &got, nullptr) && got > 0) {
     }
-    // (the same handle then kept for the reads to come: the file opened once; its position is no matter, every read
-    // says where)
     AcquireSRWLockExclusive(&rp_kept_lock);
     bool kept = rp_kept_put(p, h);
     ReleaseSRWLockExclusive(&rp_kept_lock);
@@ -143,8 +118,6 @@ static void rp_warm_loop() {
   }
 }
 
-// The file at `path` opened off the window's thread, kept for the reads to come, and read through once there so its
-// bytes are in the system's cache when its frames are read (a frame read cold from the disk took 12 to 24 ms here).
 extern "C" void rp_play_warm(moonbit_bytes_t path) {
   std::string p((const char *)path);
   AcquireSRWLockExclusive(&rp_kept_lock);
@@ -154,7 +127,6 @@ extern "C" void rp_play_warm(moonbit_bytes_t path) {
     rp_warmed.push_back(p);
     if (rp_warmed.size() > 64) rp_warmed.erase(rp_warmed.begin());
     rp_warm_todo.push_back(p);
-    // (at most a few waiting: the oldest let go)
     if (rp_warm_todo.size() > 3) rp_warm_todo.erase(rp_warm_todo.begin());
     InterlockedIncrement(&rp_warm_gen);
     if (!rp_warm_started) {
@@ -171,8 +143,7 @@ extern "C" void rp_play_warm(moonbit_bytes_t path) {
   ReleaseSRWLockExclusive(&rp_kept_lock);
 }
 
-// Every file kept open let go of (the window put away, rp_play_release): a segment the recorder has let go of since
-// is gone from the disk only once nothing holds it; what is warmed is warmed again when asked.
+// Release cached handles so recorder-deleted segments (FILE_SHARE_DELETE) can reclaim disk space.
 extern "C" void rp_play_release(void) {
   AcquireSRWLockExclusive(&rp_kept_lock);
   for (auto &k : rp_kept) {
@@ -187,15 +158,11 @@ extern "C" void rp_play_release(void) {
   ReleaseSRWLockExclusive(&rp_kept_lock);
 }
 
-// ---- sound ----
-
 struct RpAac {
   IMFTransform *mft;
   int rate, channels;
-  bool own_samples;  // the decoder hands out its own output samples
+  bool own_samples;
   DWORD out_size;
-  // (another rate than 48 kHz: where between the last input sample and the next the next output one falls, and that
-  // last sample's two sides)
   double phase;
   int16_t last_l, last_r;
   bool have_last;
@@ -210,8 +177,7 @@ static RpAac *rp_aac_of(int32_t h) {
 extern "C" int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channels) {
   int32_t n = (int32_t)Moonbit_array_length(asc);
   if (n <= 0 || rate <= 0 || channels <= 0) return 0;
-  // (COM and Media Foundation started once on the window's thread, kept for its life: started again at each decoder
-  // made, their counts only grew)
+  // Initialize COM/MF once on the UI thread to avoid refcount leaks across decoder lifetimes.
   static int started = 0;
   if (started == 0) {
     HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -265,7 +231,6 @@ extern "C" int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channe
   a->channels = channels;
   a->own_samples = (info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES)) != 0;
   a->out_size = info.cbSize > 0 ? info.cbSize : 1024 * 8 * 2;
-  // (a place one closed left taken again: the table no longer grows by one each decoder made)
   for (size_t i = 0; i < rp_aacs.size(); i++) {
     if (!rp_aacs[i]) {
       rp_aacs[i] = a;
@@ -276,7 +241,6 @@ extern "C" int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channe
   return (int32_t)rp_aacs.size();
 }
 
-// PCM16 of the decoder's channels and rate, made 48 kHz stereo onto `to`.
 static void rp_aac_to48(RpAac *a, const int16_t *s, size_t frames, std::vector<int16_t> &to) {
   int ch = a->channels;
   if (a->rate == 48000) {
@@ -295,7 +259,6 @@ static void rp_aac_to48(RpAac *a, const int16_t *s, size_t frames, std::vector<i
       a->have_last = true;
       continue;
     }
-    // (the output samples between the last input sample and this one)
     while (a->phase < 1.0) {
       double f = a->phase;
       to.push_back((int16_t)(a->last_l + (l - a->last_l) * f));
@@ -308,7 +271,6 @@ static void rp_aac_to48(RpAac *a, const int16_t *s, size_t frames, std::vector<i
   }
 }
 
-// What the decoder has ready, onto `to`; false where it broke.
 static bool rp_aac_drain(RpAac *a, std::vector<int16_t> &to) {
   for (int guard = 0; guard < 64; guard++) {
     MFT_OUTPUT_DATA_BUFFER ob = {};
@@ -352,7 +314,6 @@ static bool rp_aac_drain(RpAac *a, std::vector<int16_t> &to) {
   return true;
 }
 
-// One AAC frame decoded: 48 kHz stereo PCM16 (empty while the decoder holds it back, or where it broke).
 extern "C" moonbit_bytes_t rp_aac_decode(int32_t h, moonbit_bytes_t data) {
   RpAac *a = rp_aac_of(h);
   std::vector<int16_t> pcm;
@@ -383,7 +344,6 @@ extern "C" moonbit_bytes_t rp_aac_decode(int32_t h, moonbit_bytes_t data) {
   return out;
 }
 
-// What the decoder holds let go (a seek): the next frame decodes on its own.
 extern "C" void rp_aac_reset(int32_t h) {
   RpAac *a = rp_aac_of(h);
   if (!a) return;
@@ -392,8 +352,6 @@ extern "C" void rp_aac_reset(int32_t h) {
   a->have_last = false;
 }
 
-// Every sound decoder let go of (the window hidden: rp_resident_proc). Each handle the app holds is then of none (its
-// decodes give nothing and its close does nothing); the app makes a new one as it next sounds (Deck::rest, as it shows).
 extern "C" void rp_aac_release_all(void) {
   for (auto &a : rp_aacs) {
     if (!a) continue;
@@ -415,17 +373,11 @@ extern "C" void rp_aac_close(int32_t h) {
   rp_aacs[h - 1] = nullptr;
 }
 
-// ---- the sound at another speed ----
-//
-// WSOLA (waveform-similarity overlap-add): 32 ms Hann frames laid down every 16 ms of what is heard, each taken from
-// where the speed puts it in what was decoded, moved by up to 10 ms to where it best goes on from the one before (its
-// pitch kept, as a browser's playbackRate keeps it). 48 kHz stereo PCM16 in and out.
-
 struct RpTs {
   double rate;
-  std::vector<float> l, r;  // what is in and not let go of yet
-  double pos;                  // where the next frame is due in it
-  long nat;                    // where the frame before goes on, -1 none yet
+  std::vector<float> l, r;
+  double pos;
+  long nat;
   std::vector<float> acc_l, acc_r, win;
 };
 
@@ -462,8 +414,6 @@ extern "C" void rp_ts_close(int32_t h) {
   rp_tss[h - 1] = nullptr;
 }
 
-// How well what is at `a` goes on from what is at `b` (every 2nd sample, each channel on its own so a wide or
-// out-of-phase stereo is not cancelled out, normalized by its own energy).
 static float rp_ts_fit(const RpTs *t, long a, long b) {
   const float *xl = t->l.data() + a, *yl = t->l.data() + b;
   const float *xr = t->r.data() + a, *yr = t->r.data() + b;
@@ -475,7 +425,6 @@ static float rp_ts_fit(const RpTs *t, long a, long b) {
   return xy / sqrtf(xx);
 }
 
-// The frames `data` from `from` on (bytes; `flush`: and the rest of what is in, played out) make: what is heard next.
 extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t from, int32_t flush) {
   RpTs *t = rp_ts_of(h);
   std::vector<int16_t> out;
@@ -502,7 +451,6 @@ extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t f
       long seg = at;
       if (t->nat >= 0) {
         long lo = at - RP_TS_DL < 0 ? 0 : at - RP_TS_DL, hi = at + RP_TS_DL;
-        // (where it is due unless another fits better: silence, all alike, stays where it is due)
         float best = rp_ts_fit(t, at, t->nat);
         for (long k = lo; k <= hi; k += 4) {
           float f = rp_ts_fit(t, k, t->nat);
@@ -529,7 +477,6 @@ extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t f
       for (int j = RP_TS_W - RP_TS_HS; j < RP_TS_W; j++) t->acc_l[j] = t->acc_r[j] = 0.f;
       t->nat = seg + RP_TS_HS;
       t->pos += RP_TS_HS * t->rate;
-      // (what no frame can come from any more let go of)
       long drop = (long)t->pos - RP_TS_DL;
       if (t->nat < drop) drop = t->nat;
       if (drop > 8192) {
@@ -545,9 +492,7 @@ extern "C" moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t f
   return res;
 }
 
-// The frames in and not heard yet: what was put in ahead of where its sound has come to, less the half frame each
-// frame's middle lies on (frame k's middle, what is heard most of it, is at k*HS + HS out and at k*HS*rate + HS in:
-// out o is in o*rate + HS*(1 - rate)). Negative at its start, below 1x.
+// Buffered input frames ahead of the WSOLA output midpoint (HS * (1 - rate) corrects for Hann window center).
 extern "C" double rp_ts_lag(int32_t h) {
   RpTs *t = rp_ts_of(h);
   if (!t) return 0;

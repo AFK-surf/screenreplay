@@ -1,10 +1,6 @@
 import "mbt_compat"
 
-// The size a picture is shown at, read from the sequence parameter set in a track's decoder record: the coded size
-// less the SPS's cropping (the recorder's 4K is coded 3840x2176, its conformance window taking 16 rows off the
-// foot). What the player's picture is laid out by (`picture_aspect`); nothing else of the SPS is used.
-
-/// Bits of a NAL unit's payload, its emulation prevention bytes (00 00 03) taken out.
+// RBSP bit reader with 00 00 03 emulation-prevention bytes stripped.
 pub struct Bits {
   b : Array[Int]
   mut at : Int
@@ -26,7 +22,6 @@ fn Bits::of(nal : Bytes) -> Bits {
   }
   Bits::{ b: b, at: 0 }}
 
-/// One bit; 0 past the end (a reader that runs off says so by `over`).
 fn Bits::bit(self : Bits) -> Int {
   let i = self.at >> 3
   let v = if i < self.b.length() {
@@ -50,7 +45,6 @@ fn Bits::u(self : Bits, n : Int) -> Int {
 fn Bits::skip(self : Bits, n : Int) -> Unit {
   self.at = self.at + n}
 
-/// Exp-Golomb, unsigned.
 fn Bits::ue(self : Bits) -> Int {
   let mut zeros = 0
   while self.bit() == 0 && zeros < 32 {
@@ -70,7 +64,6 @@ fn Bits::se(self : Bits) -> Int {
     -(k / 2)
   }}
 
-/// The shown size for a sample entry's codec and its record (hvcC, avcC); None where it has no SPS or one not read.
 fn sps_shown(codec : String, config : Bytes) -> Option[(Int, Int)] {
   if codec.starts_with("hv") || codec.starts_with("he") {
     match hvcc_sps(config) {
@@ -86,7 +79,7 @@ fn sps_shown(codec : String, config : Bytes) -> Option[(Int, Int)] {
     Option::None
   }}
 
-/// hvcC's first SPS (NAL type 33).
+// Extract first HEVC SPS (NAL unit type 33) from hvcC.
 fn hvcc_sps(c : Bytes) -> Option[Bytes] {
   guard c.length() >= 23 else { return Option::None }
   let arrays = c[22].to_int()
@@ -108,14 +101,13 @@ fn hvcc_sps(c : Bytes) -> Option[Bytes] {
   }
   Option::None}
 
-/// avcC's first SPS.
 fn avcc_sps(c : Bytes) -> Option[Bytes] {
   guard c.length() >= 8 && (c[5].to_int() & 0x1f) > 0 else { return Option::None }
   let len = be16(c, 6)
   guard 8 + len <= c.length() else { return Option::None }
   Option::Some(bytes_slice(c, 8, 8 + len))}
 
-/// The crop's units: chroma's sampling across and down (4:2:0 2 and 2, 4:2:2 2 and 1, 4:4:4 and none 1 and 1).
+// SubWidthC/SubHeightC for chroma_format_idc (1=4:2:0, 2=4:2:2, 0/3=1x1).
 fn crop_units(chroma : Int) -> (Int, Int) {
   match chroma {
     1 => (2, 2)
@@ -125,11 +117,11 @@ fn crop_units(chroma : Int) -> (Int, Int) {
 
 fn hevc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
   let r = Bits::of(nal)
-  r.skip(16) // the NAL's head
-  r.skip(4) // its VPS
+  r.skip(16) // NAL header
+  r.skip(4) // sps_video_parameter_set_id
   let sub = r.u(3)
   r.skip(1)
-  // profile_tier_level: the general part, then each sub-layer's said present
+  // profile_tier_level
   r.skip(88)
   r.skip(8)
   let profile = Array::make(sub, false)
@@ -149,7 +141,7 @@ fn hevc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
       r.skip(8)
     }
   }
-  r.ue() |> ignore // its id
+  r.ue() |> ignore // sps_seq_parameter_set_id
   let chroma = r.ue()
   if chroma == 3 {
     r.skip(1)
@@ -172,10 +164,10 @@ fn hevc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
 
 fn avc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
   let r = Bits::of(nal)
-  r.skip(8) // the NAL's head
+  r.skip(8) // NAL header
   let profile = r.u(8)
   r.skip(16)
-  r.ue() |> ignore // its id
+  r.ue() |> ignore // seq_parameter_set_id
   let mut chroma = 1
   if [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135].contains(
       profile,
@@ -188,7 +180,7 @@ fn avc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
     r.ue() |> ignore
     r.skip(1)
     if r.bit() == 1 {
-      // scaling matrices: each list said present skipped by its deltas
+      // seq_scaling_matrix
       let lists = if chroma == 3 { 12 } else { 8 }
       for i in 0..<lists {
         if r.bit() == 1 {
@@ -205,7 +197,7 @@ fn avc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
       }
     }
   }
-  r.ue() |> ignore // log2 max frame num
+  r.ue() |> ignore // log2_max_frame_num_minus4
   let poc = r.ue()
   if poc == 0 {
     r.ue() |> ignore
@@ -218,7 +210,7 @@ fn avc_sps_shown(nal : Bytes) -> Option[(Int, Int)] {
       r.se() |> ignore
     }
   }
-  r.ue() |> ignore // reference frames
+  r.ue() |> ignore // max_num_ref_frames
   r.skip(1)
   let w = (r.ue() + 1) * 16
   let maps = r.ue() + 1

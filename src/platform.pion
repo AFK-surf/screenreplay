@@ -1,9 +1,5 @@
 import "mbt_compat"
 
-// Platform helpers shared by Windows (`replay_win.c`) and macOS (`replay_mac`): path joining/basename and platform
-// predicates so `app/` keeps one cross-platform UI tree with zero Windows regressions.
-
-
 fn is_mac() -> Bool {
   rp_is_mac() != 0}
 
@@ -14,7 +10,6 @@ fn path_sep() -> String {
     "\\"
   }}
 
-/// Joins `dir` and `name` with `path_sep()` without doubling trailing or leading slashes.
 fn pjoin(dir : String, name : String) -> String {
   if dir == "" {
     return name
@@ -30,7 +25,6 @@ fn pjoin(dir : String, name : String) -> String {
     base + path_sep() + tail
   }}
 
-/// The file or folder name after the last `/` or `\`.
 fn pbase(path : String) -> String {
   let slash = str_rev_find(path, "/")
   let bslash = str_rev_find(path, "\\")

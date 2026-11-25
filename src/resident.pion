@@ -2,16 +2,6 @@ import "signals"
 import "ui"
 import "view"
 
-// Resident (the user's ask, 2026-11-13: 「做成常驻，瞬开」): started by the recorder with REPLAY_RESIDENT=1, hidden, the
-// window is kept from then on: closed, it is only hidden (replay_win.c's rp_stay_resident), and shown again by the
-// recorder at once. Hidden, it stops and puts away what was open (playing, a dialog, a menu, clip mode, full screen);
-// shown, it is as a window just opened: the folder read again, the recorder asked to close what it writes, the view
-// on the newest, the playhead 30 s before it.
-
-
-/// The window's hides and shows as last seen.
-
-
 fn resident() -> Bool {
   ui::env("REPLAY_RESIDENT") == "1"}
 
@@ -90,8 +80,7 @@ fn check_popup_requests() -> Unit {
     }
   }}
 
-/// The window kept when closed, and watched (the host tells the app nothing of its window shown or hidden by another
-/// program: checked on the frame woken by WM_CLOSE / SWP_SHOWWINDOW via on_frame_take, and every 200 ms as fallback).
+// Host does not push show/hide events; poll rp_window_turns on rp.wake (WM_CLOSE/SWP_SHOWWINDOW) and 200 ms fallback.
 fn stay_resident(root : view::View) -> Unit {
   if !resident() || rp_stay_resident() != 1 {
     return
@@ -125,24 +114,10 @@ fn watch_turns(root : view::View) -> Unit {
   check_turns()
   again(root, 200.0, fn() { watch_turns(root) })}
 
-
-/// Started hidden and not shown yet: the folder not read, no picture decoded, the saved clips not listed till it
-/// first shows (as_opened does it then), so a window kept for later holds no decoder, no index and no files (before,
-/// it read and decoded all of it at once, 200 MB and 100 MB of the GPU's memory, for a window that may not be opened
-/// for hours). The root its first show starts the folder's reading in.
-
-
-/// True while started hidden and before its first real show has loaded the buffer (keeps the primed frame from
-/// flashing "Nothing recorded yet").
-
-
-/// Whether it was started hidden and has not shown since.
 fn hidden_unshown() -> Bool {
   resident() && ui::env("REPLAY_HIDDEN") == "1" && rp_window_shown() == 0}
 
-/// What it holds for playing let go of, kept as it shows: the sound's decoder, the files kept open, the thumbnail
-/// worker's device and file, the copy's device, the tracks read, the pictures made for previews (each made again
-/// when next asked for; the picture's stream stays, so showing it again is at once).
+// Keep the video stream alive for instant re-show; release decoders, open files, and preview caches.
 fn let_go_while_hidden() -> Unit {
   ntrace("put away: what it holds let go of")
   match native_made.v {
@@ -160,12 +135,11 @@ fn let_go_while_hidden() -> Unit {
   sidecars_clear()
   app_names.clear()
   app_names_missed.clear()
-  // (a crop being exported keeps its dialog, and its preview)
+  // Preserve crop preview while an export is still running.
   if export_out.untracked() == "" {
     crop_images.forget_all()
   }}
 
-/// Hidden: playing stopped, what was open put away.
 fn put_away() -> Unit {
   set_playing(false)
   close_menu()
@@ -188,10 +162,8 @@ fn put_away() -> Unit {
   let_go_while_hidden()
   rp_resident_hidden()}
 
-/// Shown: as a window just opened.
 fn as_opened() -> Unit {
-  // (started hidden, shown for the first time: the folder read every 3 s from now; saved clips deferred briefly so
-  // the buffer and first video frame show ahead of scanning the clips folder)
+  // Defer clip-folder scan by 80 ms on first show so the buffer and first frame appear first.
   let mut defer_clips : Option[view::View] = Option::None
   match first_show_waits.v {
     Some(root) => {
@@ -203,7 +175,6 @@ fn as_opened() -> Unit {
     None => ()
   }
   ask_flush()
-  // (the apps' names read again: the recorder may have found a better one meanwhile)
   app_names.clear()
   app_icons_found.clear()
   load()
@@ -223,9 +194,7 @@ fn as_opened() -> Unit {
     Option::None => ()
   }}
 
-
-/// Started hidden where the recorder starts it resident (REPLAY_HIDDEN=1): its window made DWM-cloaked for its first
-/// frame so shaders and the UI shell are already presented when first activated, then hidden cleanly.
+// DWM-cloak the first frame so shaders and UI shell warm up before hiding.
 fn start_hidden() -> Unit {
   if resident() && ui::env("REPLAY_HIDDEN") == "1" {
     rp_start_resident_hidden()

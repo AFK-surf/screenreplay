@@ -3,22 +3,12 @@ import "motion"
 import "signals"
 import "view"
 
-// What is drawn over all of the window: the tips (the library's, in a layer of their own), the moment's menu (a right
-// click on the band or the picture: a marker there, the clip from there or to there), and the note that a clip was
-// saved. A menu up is a modal layer: what is under it takes no press, no pointer, no wheel till it goes.
-
-/// The layer the tips are drawn in, as the window is made.
-
-
-/// A tip saying `label` by `anchor` (over it, or on `side`), the keys of action `shortcut` after it as caps.
 fn tip(anchor : view::View, label : () -> String, shortcut? : String, side? : view::Side) -> Unit {
   let shortcut = match shortcut { Some(__mbt_v) => __mbt_v, None => "" }
   let side = match side { Some(__mbt_v) => __mbt_v, None => view::Side::Top }
 
   sf_tip_node(tips, anchor, label, side=side, shortcut=shortcut) |> ignore}
 
-/// The keys of the actions the tips name (the replay's keymap, key_bindings, and the saved clip's player's), as said
-/// in a tip's caps.
 fn shortcut_words(action : String) -> String {
   let mac = is_mac()
   match action {
@@ -39,28 +29,17 @@ fn shortcut_words(action : String) -> String {
     _ => ""
   }}
 
-/// One entry of a menu: its words, its key's name ("" none), what it does; None a separator.
 pub struct MenuEntry {
   label : String
   key : String
   act : () -> Unit
 }
 
-/// The menu up: where (in the window), its entries; None while none is.
-
-
 fn open_menu(x : Double, y : Double, entries : Array[Option[MenuEntry]]) -> Unit {
   menu_anchor.v = None
   menu_shown.set(Some((x, y, entries)))
   menu_up.set(true)}
 
-/// The node a menu stands under (None: at the point it was asked at).
-
-
-/// The menu over what it opened from (centred on it), not under it (at its end): from the controls' row.
-
-
-/// A menu under `anchor`, its right edge at the anchor's.
 fn open_menu_under(anchor : view::View, entries : Array[Option[MenuEntry]], above? : Bool) -> Unit {
   let above = match above { Some(__mbt_v) => __mbt_v, None => false }
 
@@ -73,8 +52,6 @@ fn close_menu() -> Unit {
   menu_shown.set(None)
   menu_up.set(false)}
 
-/// The menu of a moment (`at`, ms into the buffer) at (`x`, `y`) in the window: a marker there, the clip from there or
-/// to there (`at_playhead`: the playhead's, from the picture).
 fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> Unit {
   if segs.is_empty() {
     return
@@ -117,7 +94,6 @@ fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> 
     }),
   ])}
 
-/// A key's name: a small chip.
 fn kbd(parent : view::View, key : String) -> Unit {
   parent.box(fn(k) {
     k
@@ -134,8 +110,6 @@ fn kbd(parent : view::View, key : String) -> Unit {
   })
   |> ignore}
 
-/// The menu's panel: s2, a hairline, radius 10, 4 in, a shadow; its items 32 high, radius 6, s3 under the pointer, their
-/// keys in chips after them. Pressed outside it, it goes; an item pressed does its work and the menu goes.
 fn menu_layer(root : view::View) -> Unit {
   root.box(fn(o) {
     o.over(view::Live::Is(true)).over_all(view::Live::Is(true)) |> ignore
@@ -144,7 +118,6 @@ fn menu_layer(root : view::View) -> Unit {
       m.on_menu(fn(_) { close_menu() }) |> ignore
       layer_keys(m, ["escape"])
       m.box(fn(panel) {
-        // (it opens over 120 ms from 96%, faded, from where it stands)
         let open = motion::NodeWay::new(0.0)
         open.go_ms(panel, 1.0, if motion_off() { 1.0 } else { 120.0 })
         panel
@@ -174,7 +147,6 @@ fn menu_layer(root : view::View) -> Unit {
           }
           match menu_shown.get() {
             Option::Some((x, y, es)) => {
-              // (kept in the window: above the pointer where it has not the room under it)
               let (ww, wh) = panel.window()
               let mut h = 8.0
               for e in es {
@@ -243,16 +215,11 @@ fn menu_layer(root : view::View) -> Unit {
     }, at_once=true)
   })
   |> ignore
-  // (the tips over all of it, the menu too)
   root.box(fn(t) {
     t.over(view::Live::Is(true)).over_all(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
     tips_layer.v = Some(t)
   })
   |> ignore}
-
-/// A word for a moment (what a press did that shows nowhere else at once: a marker added): its words and icon, and
-/// how many have been said (each its own 1.6 s).
-
 
 fn tell(words : String, icon? : String) -> Unit {
   let icon = match icon { Some(__mbt_v) => __mbt_v, None => "info" }
@@ -270,7 +237,6 @@ fn tell(words : String, icon? : String) -> Unit {
     None => ()
   }}
 
-/// The word said, at the picture's top in its middle: a small capsule fading in over 120 ms and out over 200 ms.
 fn told_layer(parent : view::View) -> Unit {
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Middle))).padding(view::Live::Is((0.0, 16.0, 0.0, 0.0))) |> ignore
@@ -308,13 +274,7 @@ fn told_layer(parent : view::View) -> Unit {
   })
   |> ignore}
 
-
-/// The frame at `at` (ms into the buffer), whole and at the recording's size, put on the clipboard (a picture: pasted
-/// into a chat or a document): made in the background, said when it is there (the user, 2026-11-16
-/// 「给回放加一个右键复制当前帧的功能」).
-/// `shown`: the frame the player shows now, as it is (the playhead's: Ctrl+C, the picture's menu), read off the GPU
-/// where it is drawn from (some tens of ms for 4K), not decoded again from its key frame (the user, 2026-11-17:
-/// 「这个要尽可能快，不要有性能损耗」); decoded where the player shows none.
+// When shown=true, copy directly from the player's GPU surface to avoid re-decoding from a keyframe.
 fn copy_frame(at : Double, shown? : Bool) -> Unit {
   let shown = match shown { Some(__mbt_v) => __mbt_v, None => false }
 

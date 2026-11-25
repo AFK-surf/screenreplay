@@ -1,17 +1,11 @@
 namespace Replay.Recording;
 
-/// <summary>
-/// What happened to the last few thousand frames, kept in memory only, for a diagnosis asked for by hand (the app's
-/// capture-diag.request): each frame the capture handed over (its composition time, the capture's surface), each frame
-/// encoded (the texture and slice the picture was converted into, its time). Nothing of the picture itself.
-/// </summary>
 public static class FrameTrace
 {
     private static readonly string[] lines = new string[4096];
     private static int next;
     private static readonly object gate = new();
 
-    /// <summary>Whether frames are traced (off unless asked: the app turns it on for a diagnosis).</summary>
     public static volatile bool On;
 
     internal static void Note(string line)
@@ -29,7 +23,6 @@ public static class FrameTrace
         }
     }
 
-    /// <summary>The lines noted, oldest first, and the trace emptied.</summary>
     public static string[] Take()
     {
         lock (gate)

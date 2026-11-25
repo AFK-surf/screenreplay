@@ -5,35 +5,12 @@ import "ui"
 import "view"
 import "hostapi"
 
-// The first run's sheet (the reviewer's design, the user's yes, 2026-11-13): before anything is recorded, a sheet over
-// the empty window says what it records, where it is kept and for how long, what can always be done, what it does
-// not do; then how far back to keep and whether to start with Windows (off), and recording starts only from its
-// primary key. Either key writes the consent (settings.json's "consent": its version and when) with the choices, the
-// way the settings are written, so the recorder takes them at once. Shown again where the consent is older than
-// consent_version; where none is but the buffer holds recordings already (a build from before it, recording), written
-// without asking. Escape or the window's close hide the window and write nothing: it shows again next time. Read
-// again from About, the same words alone with 知道了.
-
-/// The consent's version: the sheet shown again where settings.json's is older (what it says changed).
-
-
-/// Read again from About: the words alone, 知道了 its only key (kept as it closes, so it goes as it came).
-
-
-/// How far back is kept, minutes, as chosen in the sheet (the settings' choices: window_choices).
-
-
-/// Whether it starts with Windows, as chosen in the sheet (off till turned on).
-
-
-/// As the folder is first read and as the window is shown again: the sheet up where no consent of this version is.
 fn consent_check() -> Unit {
   load_settings()
   if settings.consent_version >= consent_version {
     return
   }
   if !segs.is_empty() {
-    // (recording already, from before the sheet: taken as given, the sheet not shown)
     settings.consent_version = consent_version
     settings.consent_at = rp_now()
     save_settings()
@@ -44,11 +21,8 @@ fn consent_check() -> Unit {
   consent_reading.set(false)
   consent_open.set(true)}
 
-/// One of the first run's keys: the consent written with the choices, background recording on (`record`) or off.
 fn consent_given(record : Bool) -> Unit {
-  // (integrated graphics, settings never written: the picture brought down to 1440p, a 4K screen's half, as the
-  // first default; its video engine both records and plays video (the user, 2026-11-17 「还有很多没有独立显卡的设备」).
-  // Nothing changes on a screen of 1440p or less, and the settings say it as any other choice)
+  // Default to 1440p cap on fresh installs with integrated GPUs (shared video engine).
   let fresh = read_text(settings_path()) == ""
   load_settings()
   if fresh && settings.max_height == 0 && recording_info().shared_gpu {
@@ -69,12 +43,10 @@ fn consent_given(record : Bool) -> Unit {
     asked_recorder("recording", t("录制中"))
   }}
 
-/// Read again from About.
 fn consent_reread() -> Unit {
   consent_reading.set(true)
   consent_open.set(true)}
 
-/// Words that wrap: `size`, `line` high, `weight`, in `ink`.
 fn wrapped(parent : view::View, text : () -> String, size : Double, line : Double, ink : () -> Int64, weight? : Int) -> Unit {
   let weight = match weight { Some(__mbt_v) => __mbt_v, None => 400 }
 
@@ -83,11 +55,9 @@ fn wrapped(parent : view::View, text : () -> String, size : Double, line : Doubl
   })
   |> ignore}
 
-/// Room `h` high between what a column holds.
 fn room(parent : view::View, h : Double) -> Unit {
   parent.box(fn(r) { r.height(view::Live::Is(Some(h))) |> ignore }) |> ignore}
 
-/// The rows' glyphs, the design's own (on a 16 grid, 1.5 wide lines): the screen, the disk, pause in a ring, a shield.
 fn consent_glyph(name : String) -> pixels::Vector {
   let paths = match name {
     "screen" =>
@@ -105,8 +75,6 @@ fn consent_glyph(name : String) -> pixels::Vector {
   }
   vectors(16.0, 16.0, paths)}
 
-/// A row of the card: its glyph (16, the muted ink, 2 down), its title (13, 500) over what it says (12, 19 a line,
-/// muted); a hairline over all but the first.
 fn consent_row(parent : view::View, first : Bool, glyph_name : String, title : () -> String, body : () -> String) -> Unit {
   if !first {
     rule(parent, hair)
@@ -127,8 +95,6 @@ fn consent_row(parent : view::View, first : Bool, glyph_name : String, title : (
   })
   |> ignore}
 
-/// The sheet's keys, 34 high, radius 8, 16 either side, words 13 at 500: `primary` the accent's ground (the red dot
-/// before its words where `dot`: it starts recording), else bare, its words muted, s3 under the pointer.
 fn consent_button(parent : view::View, label : () -> String, press : () -> Unit, primary? : Bool, dot? : Bool) -> Unit {
   let primary = match primary { Some(__mbt_v) => __mbt_v, None => false }
   let dot = match dot { Some(__mbt_v) => __mbt_v, None => false }
@@ -159,8 +125,6 @@ fn consent_button(parent : view::View, label : () -> String, press : () -> Unit,
   })
   |> ignore}
 
-/// 保留最近's choice: what is chosen (13, 500) and a chevron on s3 (s2 in the light), 32 high, radius 8; pressed, a
-/// menu of the settings' choices under it, the one chosen ticked.
 fn consent_choice(parent : view::View) -> Unit {
   let labels = fn() { [t("30 分钟"), t("1 小时"), t("2 小时"), t("4 小时")] }
   let chosen = fn() { index_of(window_choices, consent_window.get(), 2) }
@@ -191,7 +155,6 @@ fn consent_choice(parent : view::View) -> Unit {
   })
   key.v = Some(k)}
 
-/// An option's line, 32 high: its words (13) on the left, its control on the right.
 fn consent_option(parent : view::View, label : () -> String, control : (view::View) -> Unit) -> Unit {
   parent.box(fn(o) {
     o.row(view::Live::Is(true)).height(view::Live::Is(Some(32.0))).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
@@ -204,7 +167,6 @@ fn consent_option(parent : view::View, label : () -> String, control : (view::Vi
   })
   |> ignore}
 
-/// 隐私政策: 12, subtle (muted under the pointer), a line 3 under it; the site's page opened, as About's is.
 fn privacy_link(parent : view::View) -> Unit {
   pressable(parent, fn() { t("隐私政策") }, fn() {
     rp_launch(cstr(site_url + "/privacy" + (if is_english() { "?lang=en" } else { "" }))) |> ignore
@@ -217,8 +179,6 @@ fn privacy_link(parent : view::View) -> Unit {
   })
   |> ignore}
 
-/// Over the scrim while the first run's sheet is up, where the title bar is: its empty room still moves the window,
-/// its keys still minimize, maximize and close it (closed, hidden: nothing written).
 fn consent_window_keys(layer : view::View) -> Unit {
   layer.box(fn(o) {
     o.over(view::Live::Is(true)) |> ignore
@@ -247,9 +207,6 @@ fn consent_window_keys(layer : view::View) -> Unit {
   })
   |> ignore}
 
-/// The sheet: 560 wide, 28 in (22 under); the app's mark (44) by the title (18, 600) and what it does (13, muted);
-/// 20 under, the four rows in a card of s2 (in the light a near-white with a hairline), radius 10; 16 under, the two
-/// options; 20 under, 隐私政策 and the keys. Read again, no options and 知道了 alone.
 fn consent_sheet(root : view::View) -> Unit {
   sheet(root, fn() { consent_open.get() }, fn() { if consent_reading.untracked() { consent_open.set(false) } }, 560.0, bare=true, can_close=fn() { consent_reading.get() }, over=consent_window_keys, fn(card) {
       card.padding(view::Live::Is((28.0, 28.0, 28.0, 22.0))) |> ignore

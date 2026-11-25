@@ -3,20 +3,11 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// The recorder's hidden window on its main thread, and that thread's message loop: what WinForms' Application.Run and
-/// its NativeWindow gave it before. Its timers (WM_TIMER), the global hotkeys (WM_HOTKEY), the session locked and
-/// unlocked (WM_WTSSESSION_CHANGE), the tray icon's clicks and the taskbar made again after Explorer restarts come to it.
-/// What an await goes on with is posted to it (the thread's SynchronizationContext), so the async code resumes on this
-/// thread as it did under WinForms. A top-level window never shown, not a message-only one: TaskbarCreated is sent
-/// only to top-level windows.
-/// </summary>
+// Top-level hidden window (not HWND_MESSAGE) because TaskbarCreated is only broadcast to top-level windows.
 internal sealed class MessageWindow : IDisposable
 {
     public const uint TrayCallback = WmApp + 2;
 
-    /// <summary>What was chosen in the tray's panel (another process: tray_panel.mbt's rp_tray_tell), its number in
-    /// wParam.</summary>
     public const uint PanelCommand = WmApp + 0x51;
 
     private const uint WmApp = 0x8000;
@@ -72,7 +63,6 @@ internal sealed class MessageWindow : IDisposable
     [DllImport("user32.dll")]
     private static extern bool UnregisterPowerSettingNotification(IntPtr handle);
 
-    /// <summary>The screen's power notification asked for (let go of in Dispose).</summary>
     private IntPtr powerNotify;
 
     /// <summary>GUID_CONSOLE_DISPLAY_STATE: the console's displays off (0), on (1) or dimmed (2).</summary>
@@ -142,38 +132,26 @@ internal sealed class MessageWindow : IDisposable
 
     public IntPtr Handle { get; }
 
-    /// <summary>A hotkey registered here pressed (its id).</summary>
     public event Action<int>? HotkeyPressed;
 
-    /// <summary>The session's state changed (WTS_SESSION_LOCK, WTS_SESSION_UNLOCK, a console or remote connection...).</summary>
     public event Action<int>? SessionChanged;
 
-    /// <summary>The computer going to sleep or waking (WM_POWERBROADCAST's PBT_APMSUSPEND 4, PBT_APMRESUMESUSPEND 7,
-    /// PBT_APMRESUMEAUTOMATIC 18).</summary>
     public event Action<int>? PowerChanged;
 
-    /// <summary>The tray icon's callback (its wParam and lParam, NOTIFYICON_VERSION_4's).</summary>
     public event Action<int>? PanelChose;
 
     public event Action<IntPtr, IntPtr>? TrayMessage;
 
-    /// <summary>Explorer started again (its taskbar made again): the tray icon is to be added again.</summary>
     public event Action? TaskbarCreated;
 
-    /// <summary>Raw Input registered to this window came (WM_INPUT's lParam: <see cref="RawInput"/>).</summary>
     public Action<IntPtr>? Input;
 
-    /// <summary>A device registered with RIDEV_DEVNOTIFY came or went (WM_INPUT_DEVICE_CHANGE's wParam and lParam).</summary>
     public Action<IntPtr, IntPtr>? InputDevice;
 
-    /// <summary>The window asked to close (WM_CLOSE: taskkill without /f, an installer's restart manager).</summary>
     public event Action? CloseAsked;
 
-    /// <summary>The displays' settings changed (WM_DISPLAYCHANGE: a resolution, HDR turned on or off).</summary>
     public event Action? DisplayChanged;
 
-    /// <summary>The console's displays turned off (false) or on (true): GUID_CONSOLE_DISPLAY_STATE, told once at once
-    /// when registered.</summary>
     public event Action<bool>? ScreenPower;
 
     public MessageWindow(Action<string> log)
@@ -189,7 +167,6 @@ internal sealed class MessageWindow : IDisposable
             ClassName = ClassName,
         };
         RegisterClassExW(ref wc);
-        // (WS_POPUP, never shown: no taskbar button, nothing on the screen)
         Handle = CreateWindowExW(0, ClassName, "ScreenReplay", 0x80000000, 0, 0, 0, 0, IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
         if (Handle == IntPtr.Zero)
         {
@@ -200,15 +177,12 @@ internal sealed class MessageWindow : IDisposable
         // (let through when the recorder runs elevated, where messages from a lower process are filtered out)
         ChangeWindowMessageFilterEx(Handle, taskbarCreated, 1, IntPtr.Zero);
         ChangeWindowMessageFilterEx(Handle, PanelCommand, 1, IntPtr.Zero);
-        // NOTIFY_FOR_THIS_SESSION: what SystemEvents.SessionSwitch was told before
         WTSRegisterSessionNotification(Handle, 0);
-        // DEVICE_NOTIFY_WINDOW_HANDLE: as WM_POWERBROADCAST's PBT_POWERSETTINGCHANGE
         powerNotify = RegisterPowerSettingNotification(Handle, ref consoleDisplayState, 0);
         before = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(new Context(this));
     }
 
-    /// <summary>The thread's messages taken and handed on until Quit.</summary>
     public void Run()
     {
         while (GetMessageW(out var msg, IntPtr.Zero, 0, 0) > 0)
@@ -218,10 +192,8 @@ internal sealed class MessageWindow : IDisposable
         }
     }
 
-    /// <summary>The loop ended (on this thread): Run returns.</summary>
     public void Quit() => PostQuitMessage(0);
 
-    /// <summary>`tick` called on this thread every `ms` (WM_TIMER); the timer's id, for Stop.</summary>
     public nuint Every(int ms, Action tick)
     {
         var id = nextTimer++;
@@ -238,7 +210,6 @@ internal sealed class MessageWindow : IDisposable
         }
     }
 
-    /// <summary>A global hotkey (MOD_ALT 1, MOD_CONTROL 2; `key` a virtual-key code), false when another app has it.</summary>
     public bool RegisterHotkey(int id, uint modifiers, uint key)
     {
         // MOD_NOREPEAT: holding the keys does not repeat the action.
@@ -315,7 +286,6 @@ internal sealed class MessageWindow : IDisposable
                     DisplayChanged?.Invoke();
                     break;
                 case WmClose:
-                    // (not destroyed here: the recorder quits as from the tray's 退出, and the window goes with it)
                     CloseAsked?.Invoke();
                     return IntPtr.Zero;
             }
@@ -365,7 +335,6 @@ internal sealed class MessageWindow : IDisposable
         SynchronizationContext.SetSynchronizationContext(before);
     }
 
-    /// <summary>What is posted to the thread (an await's continuation, FileSystemWatcher's news) run by its loop, in order.</summary>
     private sealed class Context(MessageWindow window) : SynchronizationContext
     {
         private readonly int thread = Environment.CurrentManagedThreadId;

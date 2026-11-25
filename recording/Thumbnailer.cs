@@ -9,13 +9,6 @@ using Vortice.WIC;
 
 namespace Replay.Recording;
 
-/// <summary>
-/// The segment's thumbnails made as it is recorded: each half second (of the segment's own time) the SDR BGRA picture
-/// already made for the encoder is shrunk on the GPU by a lightweight shader to at most 384 × 216 BGRA (avoiding an
-/// extra 4K NV12 copy texture and a second 4K ID3D11VideoProcessor) and read back a frame or two later, never waited
-/// for; JPEG'd on a pool thread and kept by its segment's writer, which writes them beside the segment as its
-/// <c>.thumbs</c> (<see cref="SegmentWriter"/>).
-/// </summary>
 internal sealed class Thumbnailer : IDisposable
 {
     public const long StepHns = 5_000_000;
@@ -68,16 +61,13 @@ internal sealed class Thumbnailer : IDisposable
     private ID3D11ShaderResourceView? inputView;
     private readonly IWICImagingFactory wic = new();
 
-    // read-backs under way, oldest first: each its staging texture and whose it is
     private sealed record Pending(ID3D11Texture2D Staging, SegmentWriter Writer, long Ms);
     private readonly Queue<Pending> pending = new();
     private readonly Stack<ID3D11Texture2D> free = new();
 
-    // (read-backs not taken yet at most this many: a GPU that holds them back does not have a staging texture made for
-    // every frame meanwhile; a thumbnail is then left out)
     private const int MostPending = 4;
 
-    // JPEGs being made on the thread pool: waited for before the WIC factory they use is let go of
+    // In-flight thread-pool JPEG encodes; Dispose waits for these before releasing WIC factory.
     private int encoding;
 
     public Thumbnailer(Gpu gpu, int width, int height, int frameRate)
@@ -122,9 +112,6 @@ internal sealed class Thumbnailer : IDisposable
         smallView = gpu.Device.CreateRenderTargetView(small);
     }
 
-    /// <summary>The SDR BGRA picture in <paramref name="source"/> (<paramref name="srcW"/> × <paramref name="srcH"/>)
-    /// shrunk and its read-back begun, its thumbnail <paramref name="writer"/>'s at <paramref name="ms"/> into its
-    /// segment. On the recorder's clock thread, as each frame is made.</summary>
     public void Take(ID3D11Texture2D source, int srcW, int srcH, SegmentWriter writer, long ms)
     {
         if (pending.Count >= MostPending || srcW < 2 || srcH < 2)
@@ -137,7 +124,7 @@ internal sealed class Thumbnailer : IDisposable
             inputView?.Dispose();
             inputTexture?.Dispose();
             inputView = gpu.Device.CreateShaderResourceView(source);
-            // (held so that its pointer is not reused by another texture while the view is cached)
+            // AddRef source so its COM pointer cannot be recycled while the cached inputView holds it.
             source.AddRef();
             inputTexture = new ID3D11Texture2D(source.NativePointer);
         }
@@ -198,8 +185,6 @@ internal sealed class Thumbnailer : IDisposable
         pending.Enqueue(new Pending(staging, writer, ms));
     }
 
-    /// <summary>The read-backs whose copies the GPU has done taken (each asked without waiting) and handed to a pool
-    /// thread to be JPEG'd; <paramref name="all"/>: every one, waited for (the recording stopping).</summary>
     public void Collect(bool all = false)
     {
         var ctx = gpu.Context;
@@ -213,13 +198,11 @@ internal sealed class Thumbnailer : IDisposable
             }
             catch (SharpGen.Runtime.SharpGenException ex) when (ex.HResult == unchecked((int)0x887A000A))
             {
-                // (DXGI_ERROR_WAS_STILL_DRAWING: the next frame asks again)
+                // DXGI_ERROR_WAS_STILL_DRAWING: retry on next frame.
                 return;
             }
 
             pending.Dequeue();
-            // (its rows in a pooled buffer: 331 KB each, twice a second, every one a new array on the large object heap
-            // before, some 2.3 GB an hour for the GC)
             var size = outW * outH * 4;
             var rows = System.Buffers.ArrayPool<byte>.Shared.Rent(size);
             unsafe
@@ -253,7 +236,6 @@ internal sealed class Thumbnailer : IDisposable
     {
         try
         {
-            // (made at about its size: some 15-30 KB a thumbnail)
             using var stream = new MemoryStream(32 << 10);
             using var encoder = wic.CreateEncoder(ContainerFormat.Jpeg);
             encoder.Initialize(stream, BitmapEncoderCacheOption.NoCache);
@@ -338,7 +320,7 @@ internal sealed class Thumbnailer : IDisposable
             free.Pop().Dispose();
         }
 
-        // (the JPEGs still being made finish before their factory goes: 2 s at most, else it is left to them)
+        // Wait up to 2 s for in-flight JPEG jobs before releasing WIC factory.
         var until = Environment.TickCount64 + 2000;
         while (Volatile.Read(ref encoding) > 0 && Environment.TickCount64 < until)
         {

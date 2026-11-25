@@ -5,21 +5,6 @@ import "signals"
 import "ui"
 import "view"
 
-// How the timeline looks and answers the hand, as nodes made once, bound to the view, the buffer and the playhead.
-// One band: the apps that were in front, each a stretch with its name, where nothing was recorded hatched; the
-// loudness's outline standing in each stretch; the markers over it, the clip framed, the playhead. Under it the time of
-// day, and the overview of the whole buffer.
-//
-// What is drawn by the view (its start and length) is worked out where it is drawn: as the view glides it follows the
-// clock (state.mbt's `shown`), and the playhead follows the clock while it plays (`pos_drawn`), drawn off by parts of
-// a pixel (View::drawn_off's exact): the capsule, its time, its neck and line one layer moving smoothly.
-
-
-/// The app names found (process, lower case), and when one not found yet was last looked for.
-
-
-/// What a person calls the app a process belongs to: its name as Windows gives it in the system's language (the
-/// program's description, kept by the recorder in AppIcons\<process>.txt), else the process's own name.
 fn app_name(process : String) -> String {
   let key = str_to_ascii_lower(process)
   match app_names.get(key) {
@@ -31,7 +16,7 @@ fn app_name(process : String) -> String {
     return process
   }
   let text = read_text(pjoin(pjoin(root_dir(), "AppIcons"), key + ".txt")).trim()
-  // (none, or a window's title of a page or a document kept by an earlier recorder: the program's name instead)
+  // Ignore legacy AppIcons .txt entries containing document/page window titles.
   if text == "" || text.contains(" - ") || text.contains(" — ") || text.contains(" – ") || text.contains(" | ") {
     app_names_missed.set(key, now)
     return process
@@ -39,10 +24,7 @@ fn app_name(process : String) -> String {
   app_names.set(key, text)
   text}
 
-/// The app in front at `at` (ms into the buffer), "" none known.
 fn app_at(at : Double) -> String {
-  // (the last noted at or before it, found by halving: apps.jsonl's lines are in time's order; the title bar asks it
-  // each frame while playing, and a long buffer has thousands)
   let abs = t0() + at
   let mut lo = 0
   let mut hi = apps.length()
@@ -60,7 +42,6 @@ fn app_at(at : Double) -> String {
     apps[lo - 1].1
   }}
 
-/// The stretches recorded without a break (ms into the buffer), gaps under 1.5 s let pass.
 fn recorded_runs() -> Array[(Double, Double)] {
   let base = t0()
   let runs : Array[(Double, Double)] = []
@@ -76,7 +57,6 @@ fn recorded_runs() -> Array[(Double, Double)] {
   }
   runs}
 
-/// The apps' stretches cut where nothing was recorded: (from, to, the app's process), ms into the buffer.
 fn app_pieces() -> Array[(Double, Double, String)] {
   let base = t0()
   let stretches : Array[(Double, Double, String)] = []
@@ -103,14 +83,6 @@ fn app_pieces() -> Array[(Double, Double, String)] {
   }
   pieces}
 
-/// The stretches recorded without a break, worked out again only as the buffer changes (bound).
-
-
-/// The apps' stretches as the buffer has them now, worked out again only as it changes (bound).
-
-
-/// The app's stretch at `at` (ms into the buffer): from where it came to the front to where it left it, its pieces
-/// either side of a short gap taken as one (bound).
 fn stretch_at(at : Double) -> Option[(Double, Double)] {
   let ps = pieces_now.get()
   let mut k = -1
@@ -133,7 +105,6 @@ fn stretch_at(at : Double) -> Option[(Double, Double)] {
   }
   Option::Some((ps[a].0, ps[z].1))}
 
-/// The gaps where nothing was recorded (over 1.5 s), ms into the buffer.
 fn gaps() -> Array[(Double, Double)] {
   let base = t0()
   let out : Array[(Double, Double)] = []
@@ -147,9 +118,6 @@ fn gaps() -> Array[(Double, Double)] {
   }
   out}
 
-/// The gaps where nothing was recorded (over 1.5 s), worked out again only as the buffer changes (bound).
-
-
 fn rect_d(x : Double, y : Double, w : Double, h : Double) -> String {
   let r = fn(v : Double) { (v * 10.0).round() / 10.0 }
   let x0 = r(x)
@@ -162,11 +130,9 @@ fn layer(d : String, fill : Int64, stroke? : Int64, width? : Double) -> pixels::
 
   { d: d, fill: fill, stroke: stroke, width: width, even_odd: false, sx: 1.0, sy: 1.0, tx: 0.0, ty: 0.0 }}
 
-/// Hatching inside `x` … `x + w` by `h` (1 wide lines 7 apart at 135°), each line cut to the box.
 fn hatch_d(x : Double, w : Double, h : Double) -> String {
   let b = StringBuilder()
   let r = fn(v : Double) { (v * 10.0).round() / 10.0 }
-  // (a line from (u, h) to (u + h, 0), cut to x … x + w)
   let mut u = -h - 7.0 + ((x / 7.0).floor() * 7.0 - x) + x
   while u < x + w {
     let x0 = u
@@ -180,12 +146,6 @@ fn hatch_d(x : Double, w : Double, h : Double) -> String {
   }
   b.to_string()}
 
-/// The least width (points) a stretch is cut off from the next at: two stretches touching are drawn as one where
-/// either is narrower (the user, 2026-11-24, of a long view: 「细线就会很密集，其实没啥必要」, then 「两种线都减」).
-
-
-/// The stretches in the view from `from` `len` long across `w` as drawn: (left, right) points, the pixel apart at
-/// each cut not taken off yet; touching ones joined where one of them is narrower than cut_min_w.
 fn drawn_spans(w : Double, from : Double, len : Double) -> Array[(Double, Double)] {
   let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
   let out : Array[(Double, Double)] = []
@@ -209,8 +169,6 @@ fn drawn_spans(w : Double, from : Double, len : Double) -> Array[(Double, Double
   }
   out}
 
-/// The band's grounds as one picture `w` wide, for the view from `from` `len` long: each app's stretch square, a pixel
-/// apart (drawn_spans: not where they are too narrow); where nothing was recorded a faint hatching and a hairline inside.
 fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Vector] {
   if w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return Option::None
@@ -251,9 +209,7 @@ fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Ve
   }
   Option::Some({ w: w, h: strip_h, layers: layers })}
 
-/// The loudness standing in each stretch, sampled once on a grid fixed in time (`cell` ms, about 3 points: panning
-/// moves the shape, never reshapes it; smoothed 1:4:1, 6 under the top at the loudest), cut to each stretch and drawn
-/// as one layer in `ink`.
+// Sample peaks on a time-aligned grid so panning translates without reshaping the waveform.
 fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[pixels::Vector] {
   if w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return Option::None
@@ -277,8 +233,7 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
     let s = (raw[imax(0, i - 1)] + 4 * raw[i] + raw[imin(n - 1, i + 1)]).to_double() / 6.0
     if s >= 26.0 {
       any = true
-      // (the levels are decibels, -50 to 0 dB over 0 to 255; raised to 1.6 so that ordinary sound, about -20 dB, stands
-      // half way up and only the loudest near its top (the reviewer's 52nd, 25: flat tops where all was loud))
+      // Input is -50..0 dB mapped to 0..255; gamma 1.6 prevents typical -20 dB audio from pegging the top.
       top_y[i] = r(strip_h - mbt_compat::math_pow(s / 255.0, 1.6) * (strip_h - 6.0))
     }
   }
@@ -317,15 +272,6 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
   let layers : Array[pixels::VectorPath] = if d == "" { [] } else { [layer(d, ink)] }
   Option::Some({ w: w, h: strip_h, layers: layers })}
 
-/// The activity's heat lane: 8 high, right on the track (the user's pick, 2026-11-14: 「H1 轨道上方独立热力条」; 4 over it
-/// till 2026-11-16, the user: 「热力图和timeline的中间的gap有啥必要吗」).
-
-
-/// How many strengths the heat is drawn in (one layer each).
-
-
-/// A strength of the heat (0 to 1) as its ink, cold to hot: clear, amber, orange, red (the mock's stops: amber at 45%
-/// by 0.3, orange at 65% by 0.65, red at 85% at the top: a hot stretch reads, never shouts).
 fn heat_ink(v : Double) -> Int64 {
   let stops : Array[(Double, Int64)] = [(0.0, 0xFFC44000L), (0.3, 0xFFC4405CL), (0.65, 0xFF8C28A6L), (1.0, 0xEB3232D9L)]
   for k in 1..<stops.length() {
@@ -337,11 +283,6 @@ fn heat_ink(v : Double) -> Int64 {
   }
   stops[stops.length() - 1].1}
 
-/// How busy the mouse, the keyboard and the controller were, as a heat lane over each stretch, apart from the track
-/// (the user's pick after a tint, dots and fine dots read poorly: a heatmap, 「感觉还是得用heatmap那种形式」, H1):
-/// its strength the busiest 100 ms of it averaged twice over about 0.75 s either way, so it warms and cools softly;
-/// inked cold to hot (heat_ink), at full heat only at the busiest. Nothing where nothing was done, a segment has no
-/// `.input` or nothing was recorded. Worked out once for both sides of the playhead (whole where played, 0.6 ahead).
 fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vector], Option[pixels::Vector]) {
   if w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return (None, None)
@@ -357,13 +298,11 @@ fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vec
   if !any {
     return (None, None)
   }
-  // (the samples' running sums, so each average is two reads)
   let sum = Array::make(n + 1, 0.0)
   for i in 0..<n {
     sum[i + 1] = sum[i] + raw[i].to_double()
   }
-  // (averaged twice over the same reach, a triangle's weights: one box left a stripe each burst and holes between
-  // them, the user, 2026-11-16: 「热力条为啥颜色这么不连续」「是否能更平滑一点」)
+  // Two-pass box filter (triangular kernel) to smooth bursty input spikes.
   let box = fn(sums : Array[Double], i : Int) {
     let lo = imax(0, i - half)
     let hi = imin(n - 1, i + half)
@@ -379,8 +318,7 @@ fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vec
   })
   let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
   let paths = mbt_compat::arr_makei(heat_steps + 1, fn(_) { StringBuilder() })
-  // (over each stretch recorded without a break, never cut where the app changes: cut there as the track's blocks are,
-  // a 1 point gap at each switch made it a row of stripes, the user, 2026-11-16: 「热力条应该是平滑变化的，而不能单独一条一条画」)
+  // Draw across continuous recorded runs (not per-app pieces) to avoid gaps at app switches.
   for p in runs_now.get() {
     if p.1 <= from || p.0 >= from + len {
       continue
@@ -390,7 +328,6 @@ fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vec
     if b - a < 1.0 {
       continue
     }
-    // (the columns over the stretch, runs of one strength laid as one box, cut to the stretch)
     let first = imax(0, ((from + a / w * len) / cell - k0).floor().to_int())
     let last = imin(n - 1, ((from + b / w * len) / cell - k0).ceil().to_int())
     let mut i = first
@@ -404,8 +341,7 @@ fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vec
         let x0 = clamp(((k0 + i.to_double()) * cell - from) / len * w, a, b)
         let x1 = clamp(((k0 + j.to_double()) * cell - from) / len * w, a, b)
         if x1 > x0 {
-          // (on over the next run by most of a point: the inks are solid, so where two meet the pixel they share is
-          // covered whole, never a lighter line between them as two see-through edges each half over it left)
+          // Overlap adjacent opaque runs by 0.75 pt to prevent anti-aliasing seam lines.
           paths[s].write_string(rect_d(x0, 0.0, dmin(b, x1 + 0.75) - x0, heat_h))
         }
       }
@@ -418,7 +354,7 @@ fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vec
   for s in 1..=heat_steps {
     let d = paths[s].to_string()
     if d != "" {
-      // (each ink laid solid on the dock's ground, as it would show over it)
+      // Pre-composite opaque against c_bg() so 0.75 pt run overlaps do not double-blend.
       let c = heat_ink(s.to_double() / heat_steps.to_double())
       let a = (c & 0xFFL).to_double() / 255.0
       let solid = c | 0xFFL
@@ -428,46 +364,26 @@ fn heat_pictures(w : Double, from : Double, len : Double) -> (Option[pixels::Vec
   }
   (Some({ w: w, h: heat_h, layers: played_layers }), Some({ w: w, h: heat_h, layers: ahead_layers }))}
 
-/// The playhead's time capsule: as wide as its words (HH:MM:SS, its digits all one width) and 8 either side.
-
-
-/// The playhead's time to the millisecond (HH:MM:SS.mmm), its capsule wider for it: after a step by a frame, till it
-/// plays or goes elsewhere (the user, 2026-11-15: 「逐帧跳的时候，给 playhead 加上更精确的时间戳」).
-
-
-/// How much wider the capsule is with the milliseconds: as wide as they are (their digits all one width), so the
-/// words stand as far in on the right as on the left (a fixed 26 for 24 wide words left them ~4 more on the right: the
-/// user, 2026-11-16 「右边的padding似乎比左边大」).
 fn fine_words_w() -> Double {
   sf_node_words_w(".000", 11.0, weight=600).ceil()}
 
-/// The playhead (letters 24 and 25) over the band `w` wide: one continuous shape in the accent, no edge: a capsule with
-/// the time (11, 600, in the accent's opposite) whose foot is 4 over the track, a tangent concave neck drawn in to a 2
-/// wide line down to the track's foot. Near an end of the view the capsule stops and the line slides along its foot to
-/// its side: that side's bottom corner and neck half merge smoothly into a continuous taper until the line sits flush
-/// with the capsule's edge as a flag. All of it is one vector path drawn off by parts of a pixel (View::drawn_off's
-/// exact), smooth, with zero seam between capsule, neck and line.
 fn playhead(band : view::View, w : () -> Double) -> Unit {
-  // (the milliseconds coming in and going: the capsule widening and they wiping in, faded, 160 ms eased out; the user,
-  // 2026-11-15 「有渐变动画吗」)
   let fine = motion::NodeWay::new(0.0)
   let fine_w = fine_words_w()
   let cw = fn(v : view::View) { capsule_w + fine_w * fine.shown(v) }
-  // (where the line is across the band, as drawn; None where it is out of view)
   let x_drawn = fn(v : view::View) -> Option[Double] {
     let (from, len) = shown(v)
     let p = ax_d(pos_drawn(v), view_len())
     if p < from || p > from + len {
       None
     } else {
-      // (its 2 wide line kept inside the band at its ends: flush with the capsule's side there, never past it)
       Some(clamp((p - from) / len * w(), 1.0, dmax(1.0, w() - 1.0)))
     }
   }
   let cap_x = fn(v : view::View, x : Double) { clamp(x - cw(v) / 2.0, 0.0, dmax(0.0, w() - cw(v))) }
   let cap_h = 19.0
   let total_h = 23.0 + strip_h
-  // its time, in the middle of the capsule (digits have no descent: centred by their line they sit low, so lifted)
+  // Lift 0.5 pt to optically center digits (no descenders).
   let time = fn(b : view::View) {
     b.lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
     b.box(fn(lift) {
@@ -475,7 +391,7 @@ fn playhead(band : view::View, w : () -> Double) -> Unit {
       words(lift, fn() { wall(t0() + pos_drawn(lift)) }, 11.0, ui_on_accent, weight=600) |> ignore
       lift.box(fn(m) {
         m.width(view::Live::By(fn() { Some(fine_w * fine.shown(m)) })).shrink(view::Live::Is(0.0)).clips(view::Live::Is(true)) |> ignore
-        // (laid out whole at their own width, the box over them widening: a wipe, never words cut short)
+        // Fixed-width inner box inside expanding clip container creates a wipe without re-wrapping text.
         m.box(fn(f) {
           f.width(view::Live::Is(Some(fine_w))).shrink(view::Live::Is(0.0)) |> ignore
           words(f, fn() { ms_words(t0() + pos_drawn(f)) }, 11.0, fn() { mix(clear(ui_on_accent()), ui_on_accent(), fine.shown(f)) }, weight=600)
@@ -492,13 +408,10 @@ fn playhead(band : view::View, w : () -> Double) -> Unit {
     layer.show(fn() { has_segs() }, fn(ph) {
       ph.over(view::Live::Is(true)) |> ignore
       ph.reacts(fn() { fine_time.get() }, fn(on) { fine.go_ms(ph, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 160.0 }) })
-      // the capsule, its neck, its line and its time as one node, off by parts of a pixel (B, the capsule on whole
-      // pixels, was tried and taken back by the user, 2026-11-13: 「不如之前」)
       ph.box(fn(o) {
         o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
         o.box(fn(b) {
-          // (in the middle of the band `sl = c / 2 - 1` stays constant as the playhead moves, so the picture is rebuilt
-          // only while the stem slides near an edge or the capsule widens for milliseconds)
+          // Memoize (width, stem_left) so the vector path only rebuilds near band edges or during ms animation.
           let shape = signals::computed_by(fn(_) {
             let c = cw(b)
             let x = x_drawn(b).unwrap_or(0.0)
@@ -530,11 +443,8 @@ fn playhead(band : view::View, w : () -> Double) -> Unit {
   })
   |> ignore}
 
-/// The playhead as one closed SVG path `w` × `total_h`: a `cap_h`-tall squircle capsule seamlessly joined into a 2-wide
-/// stem whose left edge is at `sl`. On each side of the stem, where room >= 13 pt (`c_max + f_max`), a full squircle
-/// corner meets a tangent concave neck; where room is tighter near a timeline edge, the corner and neck merge into two
-/// G1-continuous cubics whose shared inflection tangent eases from horizontal to vertical, tapering smoothly down to a
-/// flush flag at room = 0 with no square overhang or notch.
+// Single closed SVG path: squircle capsule joined via G1-continuous cubics to a 2 pt stem at sl,
+// tapering to a flush flag when room near a band edge drops to 0.
 fn playhead_path(w : Double, cap_h : Double, total_h : Double, sl : Double) -> String {
   let f = fn(v : Double) { (v * 100.0).round() / 100.0 }
   let q = 0.36
@@ -548,9 +458,7 @@ fn playhead_path(w : Double, cap_h : Double, total_h : Double, sl : Double) -> S
   let dl = sl
   let dr = w - sr
   let b = StringBuilder()
-  // top edge + top-right squircle
   b.write_string("M\{f(top_r)} 0H\{f(w - top_r)}C\{f(w - top_r * q)} 0 \{f(w)} \{f(top_r * q)} \{f(w)} \{f(top_r)}")
-  // right side: capsule right wall -> stem right wall
   if dr <= 0.01 {
     b.write_string("V\{f(cap_h)}L\{f(sr)} \{f(cap_h)}V\{f(total_h)}")
   } else if dr >= span_full {
@@ -575,9 +483,7 @@ fn playhead_path(w : Double, cap_h : Double, total_h : Double, sl : Double) -> S
       "V\{f(cap_h - cy)}C\{f(w)} \{f(cap_h - cy + l0)} \{f(sr + u_m - l1 * tu)} \{f(cap_h - l1 * ty)} \{f(sr + u_m)} \{f(cap_h)}C\{f(sr + u_m + l2 * tu)} \{f(cap_h + l2 * ty)} \{f(sr)} \{f(cap_h + fy - l3)} \{f(sr)} \{f(cap_h + fy)}V\{f(total_h)}",
     )
   }
-  // stem foot
   b.write_string("H\{f(sl)}")
-  // left side: stem left wall -> capsule left wall (mirror of right side, reversed)
   if dl <= 0.01 {
     b.write_string("V\{f(cap_h)}L0 \{f(cap_h)}V\{f(top_r)}")
   } else if dl >= span_full {
@@ -602,11 +508,9 @@ fn playhead_path(w : Double, cap_h : Double, total_h : Double, sl : Double) -> S
       "V\{f(cap_h + fy)}C\{f(sl)} \{f(cap_h + fy - l3)} \{f(sl - (u_m + l2 * tu))} \{f(cap_h + l2 * ty)} \{f(sl - u_m)} \{f(cap_h)}C\{f(sl - (u_m - l1 * tu))} \{f(cap_h - l1 * ty)} 0 \{f(cap_h - cy + l0)} 0 \{f(cap_h - cy)}V\{f(top_r)}",
     )
   }
-  // top-left squircle
   b.write_string("C0 \{f(top_r * q)} \{f(top_r * q)} 0 \{f(top_r)} 0Z")
   b.to_string()}
 
-/// Which edge of the clip a press at `at` takes (10 points either side): 1 its start, 2 its end, 0 neither.
 fn near_edge(at : Double, w : Double) -> Int {
   if !clipping.untracked() || w <= 0.0 {
     return 0
@@ -622,7 +526,6 @@ fn near_edge(at : Double, w : Double) -> Int {
     0
   }}
 
-/// In clip mode, the playhead dragged within 6 points of an end of the clip lands on that end exactly.
 fn snap_to_clip(at : Double, w : Double) -> Double {
   if !clipping.untracked() || w <= 0.0 {
     return at
@@ -637,26 +540,6 @@ fn snap_to_clip(at : Double, w : Double) -> Double {
     at
   }}
 
-/// The clip's start when a drag of it began, and whether it has moved since.
-
-
-/// Whether the playhead held on the band has been dragged (4 points from where it went down): only then does the
-/// picture follow it by the scrub's way (native_player.mbt's `Deck::scrub`). A click seeks exactly.
-
-
-/// Where on the band the press went down, in the timeline's time: a clip held inside keeps that much of it before the
-/// pointer, however far the view has scrolled under it since.
-
-
-/// Where the pointer is on the band while it is held, and whether the view is being scrolled for it at an edge.
-
-
-/// How near the band's ends (points) a held clip end or clip scrolls the view (the user, 2026-11-16: 「clip移动区域鼠标
-/// 到达边缘时候应该能滚动timeline」).
-
-
-/// How fast the view scrolls at an edge: none at the zone's inner side, a view's length a second at the band's end and
-/// past it (up to 2 views a second well past it).
 fn edge_speed(x : Double, w : Double) -> Double {
   if x < edge_room {
     -clamp((edge_room - x) / edge_room, 0.0, 2.0)
@@ -666,8 +549,6 @@ fn edge_speed(x : Double, w : Double) -> Double {
     0.0
   }}
 
-/// While a clip's end or the clip is held at an edge of the band, the view scrolls that way each frame (16 ms), and
-/// what is held goes along with the pointer's place in the new view; it stops as it is let go or leaves the edge.
 fn edge_scroll(w : Double) -> Unit {
   if edge_running.v {
     return
@@ -679,11 +560,8 @@ fn edge_scroll(w : Double) -> Unit {
     band.at_moment(t + 16.0, fn() { __mbt_local_edge_scroll_step_12(band, w, t) }, later=true) |> ignore
   }}
 
-/// The pointer held on the band at `x` (of `w`): what is held follows it.
 fn band_moved(x : Double, w : Double) -> Unit {
   let at = at_x(x, w)
-  // (an end of the clip moves only once it is dragged 4 points: pressed and let go, it is a click that takes the
-  // playhead to that end; the user, 2026-11-20 「在clip模式下，很难把playhead移动到开头」)
   let g = grabbed.untracked()
   if (g == 1 || g == 2 || g == 4) && !clip_moved.v {
     if (x - band_down_x.v).abs() < 4.0 {
@@ -692,10 +570,6 @@ fn band_moved(x : Double, w : Double) -> Unit {
     clip_moved.v = true
   }
   match g {
-    // (an end dragged past the other: the two change places, the one in hand now the other end, as editors do;
-    // the user, 2026-11-14 「右侧拖拽越过左侧时，需要调转左右」)
-    // (an end dragged past the other: the two change places, the one in hand now the other end, as editors do;
-    // the user, 2026-11-14 「右侧拖拽越过左侧时，需要调转左右」)
     1 =>
       if at > clip_b.untracked() {
         let b = clip_b.untracked()
@@ -729,8 +603,6 @@ fn band_moved(x : Double, w : Double) -> Unit {
     _ => ()
   }}
 
-/// A press or a drag on the band `w` wide: a press moves the playhead there at once, a drag scrubs (the picture
-/// following); in clip mode a press near an edge of the clip moves that edge, inside it a drag moves all of it.
 fn band_drag(d : view::Drag, w : Double) -> Unit {
   if w <= 0.0 {
     return
@@ -739,20 +611,18 @@ fn band_drag(d : view::Drag, w : Double) -> Unit {
   match d.kind {
     Down => {
       clip_mark()
-      // (a press on the timeline lets a selected region go)
       region_let_go()
       let edge = near_edge(at, w)
       let (a, b) = (clip_a.untracked(), clip_b.untracked())
       let inside = clipping.untracked() && edge == 0 && at > a && at < b
       clip_moved.v = false
       clip_origin.v = a
-      // (where it went down: a raw event's own `ox` is where it is now)
+      // Record press x manually (raw drag events update origin to current position).
       band_down_x.v = d.x
       band_down_at.v = at
       scrub_dragged.set(false)
       grabbed.set(if edge != 0 { edge } else if inside { 4 } else { 3 })
       follow_latest.set(false)
-      // (exactly, at once: not by the scrub's nearest key frame; inside the clip the playhead waits for the release)
       if grabbed.untracked() == 3 {
         seek_to(at)
       }
@@ -767,9 +637,7 @@ fn band_drag(d : view::Drag, w : Double) -> Unit {
       let dragged = scrub_dragged.untracked()
       grabbed.set(0)
       scrub_dragged.set(false)
-      // (a press alone went there as it went down: not again as it lets go, which while playing began the sound again
-      // from the same moment, the ~100 ms between heard twice (the user, 2026-11-15: 「声音，播放中点时间线」 of
-      // 「跳帧后还是会复读那么100毫秒」); after a drag, to where it was let go, exactly)
+      // Do not re-seek on simple click release (already sought on Down; re-seeking replays ~100 ms of audio).
       if d.kind == view::DragIs::Up && ((was == 3 && dragged) || (was == 4 && !clip_moved.v)) {
         seek_to(if was == 3 { snap_to_clip(at, w) } else { at })
       } else if d.kind == view::DragIs::Up && (was == 1 || was == 2) && !clip_moved.v {
@@ -778,8 +646,6 @@ fn band_drag(d : view::Drag, w : Double) -> Unit {
     }
   }}
 
-/// The wheel over the timeline's block: it pans (down or right: later), a notch (100 points) a twentieth of the view,
-/// as Steam's timeline does; with Ctrl, or a touchpad's pinch, it zooms about the pointer, a notch about a tenth.
 fn block_wheel(e : view::Wheel, x : Double, w : Double) -> Unit {
   if w <= 0.0 || (e.dx == 0.0 && e.dy == 0.0) {
     return
@@ -792,15 +658,12 @@ fn block_wheel(e : view::Wheel, x : Double, w : Double) -> Unit {
     pan_timeline((if e.dx != 0.0 { e.dx } else { e.dy }) * 0.0005 * len)
   }}
 
-/// The timeline's block in `parent`: the band (40) with the playhead over it, the ruler under it.
 fn timeline(parent : view::View) -> Unit {
   parent.by_room(fn(held, room) {
     hover_node.v = Some(held)
     held.padding(view::Live::Is((0.0, dock_over, 0.0, 0.0))) |> ignore
     let w = fn() { room.width() }
     held.on_wheel(fn(e) { block_wheel(e, e.x, room.width()) }) |> ignore
-    // (a press or a drag on the heat lane and the room over the band seeks as one on the band does: the user,
-    // 2026-11-17 「点击heatmap应该也能跳转到相应位置，就跟点击timeline一样」; the band's own, under it, go to the band)
     held.presses(view::Live::Is(true)).on_drag(fn(d) { band_drag(d, room.width()) }, captures=true) |> ignore
     held.box(fn(band) {
       band_node.v = Some(band)
@@ -813,7 +676,6 @@ fn timeline(parent : view::View) -> Unit {
             1 | 2 => view::Cursor::ResizeX
             3 | 4 => view::Cursor::Arrow
             _ =>
-              // (in clip mode: an edge of the clip under the pointer, it is resized; inside it, the clip is grabbed)
               match (clipping.get(), hover_now()) {
                 (true, Some(x)) => {
                   let (_, len) = shown(band)
@@ -834,22 +696,18 @@ fn timeline(parent : view::View) -> Unit {
       }))
       .on_drag(fn(d) { band_drag(d, signals::untracked(w)) }, captures=true)
       |> ignore
-      // the stretches, the input's activity, the loudness, the gaps: one picture, drawn again as the view or the buffer changes
       band.box(fn(s) {
         s
         .over(view::Live::Is(true))
         .presses(view::Live::Is(false))
         .clips(view::Live::Is(true))
         |> ignore
-        // (dimmed in clip mode, over 160 ms as it is entered or left)
         let dim = motion::NodeWay::new(if clipping.untracked() { 0.45 } else { 1.0 })
         s.reacts(fn() { clipping.get() }, fn(on) { dim.go_ms(s, if on { 0.45 } else { 1.0 }, if motion_off() { 1.0 } else { 160.0 }) })
         s
         .alpha(view::Live::By(fn() { dim.shown(s) }))
         |> ignore
-        // (the band's pictures made over three of its widths, the view's and one either side of it, once; slid where
-        // they are drawn as the view moves along within them (a drag, the wheel, the overview), made again only as it
-        // leaves them, as it is zoomed, or the buffer changes: their start and length, and how wide they are)
+        // Render 3x view width (1x overscan each side) so panning translates without rebuilding vectors.
         let cover = signals::computed_by(fn(_) {
           let (from, len) = shown(s)
           if view_resizing.get() {
@@ -863,7 +721,6 @@ fn timeline(parent : view::View) -> Unit {
           let (from, len) = shown(v)
           ((cover.get().0 - from) / len * w(), 0.0)
         }
-        // the stretches' grounds and the gaps
         s.box(fn(o) {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(g) {
@@ -874,7 +731,6 @@ fn timeline(parent : view::View) -> Unit {
             .picture(view::Live::By(fn() {
               data()
               let (at, len, cw) = cover.get()
-              // (under a filter of apps, its stretches side by side and its seams between: axis.mbt)
               let g = ax_picture(cw, at, len, grounds_picture)
               match (g, seams_picture(cw, at, len, strip_h)) {
                 (Some(p), Some(s)) => {
@@ -891,14 +747,8 @@ fn timeline(parent : view::View) -> Unit {
           |> ignore
         })
         |> ignore
-        // the stretch under the playhead a step lighter
         current_piece(s, w)
-        // the loudness (one picture, in the ink each draws it in): ahead of the playhead, and over it, cut at the
-        // playhead, played
-        // (the loudness's own reach: while the overview's viewfinder is dragged it is not made again each time the
-        // band's pictures are, only once the view is no longer all inside what it was made for, and as the drag lets
-        // go: made again every few moves of a fast drag, each time a frame lost. Held past that, the band showed no
-        // loudness where the view had gone: the user, 2026-11-14 「拖拽 timeline 的时候音频线有时候不渲染」)
+        // During overview drag, keep existing 3x cover until viewport exits it to avoid per-move rebuilds.
         let loud_held : mbt_compat::Ref[Option[(Double, Double, Double)]] = mbt_compat::ref_new(None)
         let loud_cover = signals::computed_by(fn(_) {
           let c = cover.get()
@@ -920,9 +770,6 @@ fn timeline(parent : view::View) -> Unit {
           let (at, len, cw) = loud_cover.get()
           ax_picture(cw, at, len, fn(w, f, l) { loud_picture(w, f, l, 0x000000FFL) })
         })
-        // the input's activity, a heat lane over the stretches, apart from the track (in the band, not in its clipped
-        // pictures): whole where played, 0.6 of it ahead of the playhead; each side cut at the playhead, never one laid
-        // over the other
         let heat_both = signals::computed_ref(fn(_) {
           data()
           let (at, len, cw) = loud_cover.get()
@@ -941,8 +788,7 @@ fn timeline(parent : view::View) -> Unit {
         }
         for played in [true, false] {
           band.box(fn(o) {
-            // (clipped to the band: the played side reaches a band's width left of the playhead, and with heat recorded
-            // before the view it showed out past the band's start, the user, 2026-11-25 「热力条有问题」)
+            // Clip outer container to band width so the played-side overscan cannot bleed left past the band.
             o
             .over(view::Live::Is(true))
             .presses(view::Live::Is(false))
@@ -952,8 +798,7 @@ fn timeline(parent : view::View) -> Unit {
             .height(view::Live::Is(Some(heat_h)))
             .clips(view::Live::Is(true))
             |> ignore
-            // (a box as wide as the band, its far edge at the playhead (played) or its near edge there (ahead), what it
-            // holds slid back as far)
+            // Clip at playhead via opposing drawn_off transforms so playback never triggers relayout.
             o.box(fn(c) {
               c
               .height(view::Live::Is(Some(heat_h)))
@@ -997,8 +842,6 @@ fn timeline(parent : view::View) -> Unit {
           .over(view::Live::Is(true))
           .lines_up(view::Live::Is(Some(view::Along::Start)))
           |> ignore
-          // (cut by a box as wide as the band slid left to the playhead, what it holds slid back as far: moved where it is
-          // drawn alone as the playhead goes, never laid out again)
           let played = fn(v : view::View) {
             let (from, len) = shown(v)
             clamp((ax_d(pos_drawn(v), view_len()) - from) / len * w(), 0.0, w())
@@ -1027,7 +870,6 @@ fn timeline(parent : view::View) -> Unit {
         time_ticks(s, w)
         piece_labels(s, w)
         gap_labels(s, w)
-        // the stretches of the apps not ticked dimmed, over their names too, while a filter of apps is on
         s.box(fn(o) {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(g) {

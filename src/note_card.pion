@@ -4,20 +4,8 @@ import "signals"
 import "ui"
 import "view"
 
-// The note of a clip saved (the user, 2026-11-18: 「托盘save后感觉需要有个通知啥的，现在啥都没有」, then
-// 「做自己的保存卡片」 and 「这个卡片应该在回放窗口使用也是通用的」): one card, drawn by note_body, wherever a clip is
-// saved. By the tray: the same program run by the recorder with REPLAY_NOTE, a window of its own at the foot of the
-// screen, never taking the focus, gone by itself after a few seconds (kept while the pointer is over it);
-// REPLAY_NOTE=saved: a clip just saved (REPLAY_NOTE_PATH); =text: one line the recorder gives (REPLAY_NOTE_TEXT,
-// already in the user's language), a warning with REPLAY_NOTE_WARN=1. Shown whatever Windows' do-not-disturb says: it
-// answers what the user just pressed. In the replay window: over the picture's corner (save.mbt saved_note).
-
-
 fn note_mode() -> String {
   ui::env("REPLAY_NOTE")}
-
-/// The card's width, and its heights: a clip's (14 in, a picture 72 high, 12, the buttons 28, 14 in), a line's.
-
 
 fn note_h() -> Double {
   if note_mode() == "saved" && ui::env("REPLAY_NOTE_PATH") != "" {
@@ -26,12 +14,6 @@ fn note_h() -> Double {
     note_line_h
   }}
 
-/// The clip its copy button has copied: that button says so while the card shows it.
-
-
-/// The card's inside, in `parent` (its ground, corners and size the caller's): a clip saved at `path` (its first
-/// picture, pressed played; what was saved, its date, length and size; play, copy, show in the folder), or where `path`
-/// is "" one line, `title`, after `mark` (a tick; amber with `warning`). The close button in its corner.
 fn note_body(parent : view::View, title : () -> String, path : String, play : () -> Unit, reveal : () -> Unit, close : () -> Unit, warning? : Bool, mark? : String) -> Unit {
   let warning = match warning { Some(__mbt_v) => __mbt_v, None => false }
   let mark = match mark { Some(__mbt_v) => __mbt_v, None => "check-circle" }
@@ -65,9 +47,7 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
       .lies_along(view::Live::Is(view::Lies::Middle))
       .edge(view::Live::By(fn() { (1.0, if pic.pointed() { tone(0xFFFFFF33L, 0x00000040L) } else { hair2() }) }))
       |> ignore
-      // the picture on a node of its own with square corners: a picture drawn on the frame takes the frame's rounded
-      // corners even where, contained, it lies inside it (a wide strip letterboxed); the frame's clip still rounds a
-      // picture as big as it
+      // Host image on an unrounded child so letterboxed frames aren't independently rounded; parent clips() rounds full-bleed corners.
       pic.box(fn(o) {
         o
         .over(view::Live::Is(true))
@@ -85,7 +65,6 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
         |> ignore
       })
       |> ignore
-      // its length on its corner, as the library's cards have it
       pic.box(fn(o) {
         o.over(view::Live::Is(true)).pad(view::Live::Is(5.0)).lines_up(view::Live::Is(Some(view::Along::End))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
         let ms = clip_duration(path)
@@ -98,7 +77,6 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
         }
       })
       |> ignore
-      // under the pointer, a play mark over it
       pic.box(fn(o) {
         o
         .over(view::Live::Is(true))
@@ -117,7 +95,6 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
       |> ignore
     })
     |> ignore
-    // what was saved, its date, its size: in the middle of the picture's height
     head.box(fn(says) {
       says.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::Is(Some(0.0))).gap(view::Live::Is(4.0)) |> ignore
       says.box(fn(top) {
@@ -131,7 +108,6 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
       words(says, fn() { bytes_text(rp_size(cstr(path))) }, 12.0, ui_subtle) |> ignore
     })
     |> ignore
-    // (the close button at the head's right, its top with the picture's)
     head.box(fn(c) {
       c.height(view::Live::Is(Some(72.0))) |> ignore
       icon_button(c, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore
@@ -139,7 +115,6 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
     |> ignore
   })
   |> ignore
-  // what can be done with it: three buttons sharing the card's width
   parent.box(fn(acts) {
     acts.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     let even = fn(b : view::View) { b.grow(view::Live::Is(1.0)).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore }
@@ -153,8 +128,6 @@ fn note_body(parent : view::View, title : () -> String, path : String, play : ()
   })
   |> ignore}
 
-/// A clip being saved: one quiet line (the user, 2026-11-18: 「saving过程我觉得应该降低打扰，不用这么大卡片」), its dot
-/// breathing; the card grows to the clip's once it is made.
 fn note_pending(parent : view::View, title : () -> String, close : () -> Unit) -> Unit {
   parent.padding(view::Live::Is((14.0, 0.0, 8.0, 0.0))).row(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).gap(view::Live::Is(10.0)) |> ignore
   parent.box(fn(d) {
@@ -169,17 +142,12 @@ fn note_pending(parent : view::View, title : () -> String, close : () -> Unit) -
   |> ignore
   icon_button(parent, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore}
 
-/// How much of a shape being waited for shows: from 0.55 to 1 and back over 1.4 s, still where motions are off.
 fn note_breath(v : view::View) -> Double {
   if motion_off() {
     return 0.8
   }
   let k = v.cycle_resident(1400.0)
   0.775 + 0.225 * mbt_compat::math_cos(k * 2.0 * 3.141592653589793)}
-
-/// What the recorder asks the card to show, as note.json beside the buffer has it ({"id", "mode": "saved" | "text",
-/// "path", "text", "warn"}), or as the card was started with (REPLAY_NOTE…, where none was kept warm): its id, mode,
-/// clip ("" while being saved), line, whether a warning.
 
 #derive(Eq)
 struct NoteAsk {
@@ -191,8 +159,6 @@ struct NoteAsk {
 }
 
 fn note_file_ask() -> Option[NoteAsk] {
-  // (read and parsed only where it was written since it was last read: it is looked at 10 times a second while the
-  // card shows; the same ask as before otherwise)
   let path = pjoin(root_dir(), "note.json")
   let written = rp_modified(cstr(path))
   let size = rp_size(cstr(path))
@@ -203,9 +169,6 @@ fn note_file_ask() -> Option[NoteAsk] {
   let ask = note_file_parse(path)
   note_read.v = (written, size, ask)
   ask}
-
-/// note.json as last read: when it was written then, and what it asked.
-
 
 fn note_file_parse(path : String) -> Option[NoteAsk] {
   match parse(read_text(path)) {
@@ -225,9 +188,6 @@ fn note_file_parse(path : String) -> Option[NoteAsk] {
     _ => Option::None
   }}
 
-/// Active in-process note card state (shared between Window 0's dispatcher and the secondary note window).
-
-
 fn note_ask_height(a : NoteAsk) -> Double {
   if a.mode == "saved" && a.path != "" {
     note_clip_h
@@ -235,7 +195,6 @@ fn note_ask_height(a : NoteAsk) -> Double {
     note_line_h
   }}
 
-/// The save/status note card hosted as a secondary window inside the single resident ScreenReplayViewer process.
 fn note_popup_window(wid : Int, root : view::View) -> Unit {
   root.tree.hand_over_presses(false)
   ui::set_tree_theme(sf_ui_theme_now)
@@ -306,11 +265,6 @@ fn note_popup_window(wid : Int, root : view::View) -> Unit {
   })
   |> ignore}
 
-/// The card by the tray, as made once: the whole window is the card. Kept warm (REPLAY_NOTE=warm: started with the
-/// recorder, drawn once unseen, hidden), it shows what the recorder asks the moment it is asked (the recorder shows its
-/// window, rp_note_ask, and its look here finds the ask): started only then, it took a second to come up, by when a
-/// clip was saved already (the user, 2026-11-18, 「我没看到这个啊？」 of the line shown while saving). Gone, the
-/// process ends; the recorder keeps another warm.
 fn note_window(root : view::View) -> Unit {
   the_root.v = Some(root)
   root.tree.hand_over_presses(false)
@@ -321,8 +275,7 @@ fn note_window(root : view::View) -> Unit {
   load_settings()
   root.ground(view::Live::By(c_s2)) |> ignore
   let gone = fn() { hostapi::exit(0) }
-  // (kept warm: what was asked before it was started is no ask of its own (another card's, shown or gone), only
-  // what comes after; it once came up of itself with the last card's ask, saving that never ended)
+  // Warm mode: record current note.json id so stale prior notifications are ignored.
   let first : NoteAsk = if note_mode() == "warm" {
     let id = match note_file_ask() {
       Option::Some(f) => f.id
@@ -331,7 +284,7 @@ fn note_window(root : view::View) -> Unit {
     NoteAsk::{ id: id, mode: "", path: "", text: "", warn: false }
   } else {
     NoteAsk::{
-      // (its id the ask the recorder wrote before starting it, so the same ask is not taken again)
+      // Seed id from note.json so the launching request isn't re-handled.
       id: match note_file_ask() {
         Option::Some(f) => f.id
         Option::None => 0

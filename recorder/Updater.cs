@@ -9,12 +9,6 @@ using Microsoft.Win32;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// Updates for standalone (non-Store) installs: checks https://screenreplay.pages.dev/dl/latest.json,
-/// verifies ECDSA P-256 signature over version + setup SHA-256, downloads ScreenReplay-Setup-&lt;ver&gt;.exe
-/// in the background with streaming SHA-256 verification, and runs it silently (/UPDATE) when idle or
-/// when requested from Settings › About. Store MSIX builds (Packaged.Is) are updated by Microsoft Store.
-/// </summary>
 internal sealed class Updater : IDisposable
 {
     public const string AppVersion = "0.1.24";
@@ -190,13 +184,11 @@ internal sealed class Updater : IDisposable
         catch (Exception) { }
     }
 
-    /// <summary>Polls update.request from the viewer UI and runs periodic auto-update checks.</summary>
     public void Poll(bool autoUpdateEnabled, bool startedOverMinuteAgo)
     {
         if (disposed || installKind == 2) return;
         if (IsTestMode() && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REPLAY_UPDATE_URL"))) return;
 
-        // 1. Handle explicit UI action from Settings > About
         if (Program.TryConsumeRequest(RequestFilePath, out var req))
         {
             if (req == "check")
@@ -223,7 +215,6 @@ internal sealed class Updater : IDisposable
             }
         }
 
-        // 2. Background automatic update (only for Setup installs when autoUpdate is enabled)
         if (installKind != 1 || !(autoUpdateEnabled || IsUpdateNowTest())) return;
         if (!startedOverMinuteAgo && !IsUpdateNowTest()) return;
         if (Volatile.Read(ref busy) != 0) return;
@@ -304,7 +295,6 @@ internal sealed class Updater : IDisposable
 
             foundVersion = ver;
             foundSha = sha;
-            // Only Setup installs (installKind == 1) with a valid ECDSA signature auto-install; others open website
             byHand = installKind != 1 || !signedOk;
             state = "found";
             percent = -1;

@@ -1,4 +1,3 @@
-// Background scrub thumbnail indexer on macOS (AVAssetImageGenerator + ImageIO JPEG + RPT1/RPT2 disk cache).
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
 #include <strings.h>
@@ -373,7 +372,7 @@ const Thumb *nearest(const Seg &s, double ms) {
   return lo == 0 ? &s.thumbs[0] : &s.thumbs[lo - 1];
 }
 
-}  // namespace
+}
 
 extern "C" void rp_idx_dir(moonbit_bytes_t dir) {
   std::lock_guard<std::mutex> lock(mu);

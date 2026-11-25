@@ -1,9 +1,5 @@
 import "mbt_compat"
 
-// The settings (REPLAY_ROOT's settings.json, which the recorder reads every few seconds): whether it records in the
-// background, how far back it keeps, how much disk it may take, whether it starts with Windows. Changed in the
-// settings dialog, written at once.
-
 pub struct Settings {
   mut enabled : Bool
   mut window_minutes : Int
@@ -23,11 +19,6 @@ pub struct Settings {
   mut auto_update : Bool
 }
 
-
-/// Told as the settings are read or changed: what shows them reads `sets`.
-
-
-/// The settings, bound.
 fn sets() -> Settings {
   settings_rev.get() |> ignore
   settings}
@@ -145,7 +136,6 @@ fn save_settings() -> Unit {
     "}"
   rp_write(cstr(settings_path()), mbt_compat::utf8_encode(text)) |> ignore}
 
-
 fn index_of(xs : Array[Int], v : Int, fallback : Int) -> Int {
   for i, x in xs {
     if x == v {
@@ -153,9 +143,6 @@ fn index_of(xs : Array[Int], v : Int, fallback : Int) -> Int {
     }
   }
   fallback}
-
-/// Rows drawn in the group open now (the first has no rule over it).
-
 
 fn index_of_text(xs : Array[String], v : String, fallback : Int) -> Int {
   for i, x in xs {
@@ -165,8 +152,6 @@ fn index_of_text(xs : Array[String], v : String, fallback : Int) -> Int {
   }
   fallback}
 
-/// What the recorder says of how it records (state.json): its codec, size, rate and bitrate, the display's size, the
-/// disk's free bytes (-1 not known).
 pub struct RecordingInfo {
   codec : String
   width : Int
@@ -185,7 +170,6 @@ pub struct RecordingInfo {
   frames_skipped : Int
 }
 
-/// A frame rate as the recorder takes it: 30, 60, 90 or 120 (recorder/Program.cs).
 fn fps_of(v : Double) -> Int {
   if v >= 120.0 {
     120
@@ -196,12 +180,6 @@ fn fps_of(v : Double) -> Int {
   } else {
     30
   }}
-
-/// The recorder's state.json as last read: read and parsed once each time status_rev moves (each read of the folder,
-/// 3 s; every 250 ms while an ask of the recorder is followed), not by each who asks. Before, the recording's size
-/// (rec_size, under the region and the window picker) read and parsed the file at each move of the pointer, and the
-/// title bar's chip twice a read.
-
 
 fn state_json() -> Option[mbt_compat::MbtJson] {
   let rev = status_rev.untracked()
@@ -277,9 +255,7 @@ fn recording_info() -> RecordingInfo {
   }
   info}
 
-/// The bitrate the recorder will use for these settings at the display's size, as the recorder works it out
-/// (recording/Bitrate.cs): 3 Mbps × (pixels / 10⁶)^0.8 × (fps / 30)^0.6 × the quality (0.5 low, 0.75 medium, 1 high,
-/// 1.6 ultra) × the codec (H.265 1, H.264 1.5), held to 1…150 Mbps, of the picture brought down to maxHeight.
+// Must match recorder's recording/Bitrate.cs bitrate formula.
 fn planned_bitrate(screen_w : Double, screen_h : Double) -> Double {
   let mut w = if screen_w > 0.0 { screen_w } else { 1920.0 }
   let mut h = if screen_h > 0.0 { screen_h } else { 1080.0 }
@@ -305,7 +281,6 @@ fn planned_bitrate(screen_w : Double, screen_h : Double) -> Double {
     c
   dmin(150000000.0, dmax(1000000.0, rate))}
 
-/// Bytes as "1.4 GB", "620 MB" or, under a megabyte (a short GIF), "180 KB".
 fn bytes_text(bytes : Double) -> String {
   let mb = bytes / 1048576.0
   if mb >= 1024.0 {
@@ -317,11 +292,6 @@ fn bytes_text(bytes : Double) -> String {
     "\{mb.round().to_int()} MB"
   }}
 
-
-/// The storage card: a 6 high meter of the window's ground, the recordings (t1) and the scrub index (t3) in it against
-/// the limit; under it a legend, the disk's free room at its right.
-
-/// The keys, a row each: what it does on the left, its keys on the right.
 fn shortcut_rows() -> Array[(String, Array[String])] {
   let mac = is_mac()
   [

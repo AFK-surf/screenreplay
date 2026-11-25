@@ -2,26 +2,15 @@ import "motion"
 import "ui"
 import "view"
 
-// About's sponsor card (the user's pick, 2026-11-21: 方案 B of the design's preview, its CSS's numbers the spec): a card
-// of its own over the links, faintly warm, its coffee badge at its left, two lines in the middle, a warm gold pill at
-// its right; the whole card opens the sponsor's page. Its motion only as it comes and while the hand is over it: the
-// steam rises two breaths as the page opens and goes on while pointed at, the badge lifts and tips, a small heart
-// floats off its corner, a sheen crosses the pill. Each a way that ends: at rest nothing is drawn again (the window
-// hidden or the page left, nothing at all).
-
-/// `c` with its alpha `a` (0 to 1).
 fn with_alpha(c : Int64, a : Double) -> Int64 {
   (c & 0xFFFFFF00L) | (clamp(a, 0.0, 1.0) * 255.0).round().to_int64()}
 
-/// The warm gold, and its brighter (dark) or deeper (light) hover.
 fn amber() -> Int64 {
   tone(0xE5A545FFL, 0x9E600DFFL)}
 
 fn amber_hi() -> Int64 {
   tone(0xF5C36BFFL, 0x824E08FFL)}
 
-/// A steam line's look at `phase` (0 to 1 of a breath): its alpha and how far it is lifted (in the icon's 16 units),
-/// as the preview's steam-rise keyframes (0%: 0.15, +1.2; 45%: 0.95, -0.8; 100%: 0.10, -2.4), eased in and out.
 fn steam_at(phase : Double) -> (Double, Double) {
   let p = phase - phase.floor()
   let ease = fn(t : Double) { t * t * (3.0 - 2.0 * t) }
@@ -33,7 +22,6 @@ fn steam_at(phase : Double) -> (Double, Double) {
     (0.95 + (0.10 - 0.95) * t, -0.8 + (-2.4 - -0.8) * t)
   }}
 
-/// The heart's look at `t` (0 to 1 of its 1.1 s): alpha, lift (px, up negative) and size, as heart-float's keyframes.
 fn heart_at(t : Double) -> (Double, Double, Double) {
   let lerp = fn(a : Double, b : Double, k : Double) { a + (b - a) * k }
   if t <= 0.0 || t >= 1.0 {
@@ -49,15 +37,10 @@ fn heart_at(t : Double) -> (Double, Double, Double) {
     (lerp(0.95, 0.0, k), lerp(-5.0, -10.0, k), lerp(0.95, 0.8, k))
   }}
 
-/// A breath of the steam (ms).
-
-
 fn sponsor_card(p : view::View) -> Unit {
   pressable(p, fn() { t("赞助作者") }, fn() {
     rp_launch(cstr(sponsor_url + (if is_english() { "?lang=en" } else { "?lang=zh" }))) |> ignore
   }, fn(card) {
-    // the hand over it (200 ms), the badge's lift (with a little overshoot), the steam's breaths (in breaths), the
-    // heart (0 to 1 over 1.1 s), the pill's sheen (0 to 1, its sweep after 240 ms), the card's glow as it comes
     let hand = motion::NodeWay::new(0.0)
     let lift = motion::NodeWay::new(0.0)
     let steam = motion::NodeWay::new(0.0)
@@ -66,7 +49,6 @@ fn sponsor_card(p : view::View) -> Unit {
     let glow = motion::NodeWay::new(0.0)
     let held = motion::NodeWay::new(1.0)
     let still = motion_off()
-    // (as it comes: two breaths of steam, a sheen, the glow; none where Windows' animations are off)
     if !still {
       steam.go_ms(card, 2.45, steam_breath * 2.0, ease=ui::Ease::Linear)
       sheen.go(card, 1.0, motion::tween(820.0, ease=ui::Ease::Out, delay=240.0))
@@ -74,7 +56,7 @@ fn sponsor_card(p : view::View) -> Unit {
     } else {
       steam.put(0.45)
     }
-    // (REPLAY_DEV_POINTER's pointer, a test window's, points at nothing: where it is within the card counts so)
+    // REPLAY_DEV_POINTER=1: synthetic test pointer doesn't trigger pointed(), fall back to pointer_within().
     let dev_hand = ui::env("REPLAY_DEV_POINTER") == "1"
     card.reacts(fn() { card.pointed() || card.focus_shown() || (dev_hand && card.pointer_within()) }, fn(on) {
       if motion_off() {
@@ -84,10 +66,8 @@ fn sponsor_card(p : view::View) -> Unit {
       hand.go_ms(card, if on { 1.0 } else { 0.0 }, 200.0)
       lift.go_ms(card, if on { 1.0 } else { 0.0 }, 240.0, ease=ui::Ease::Move)
       if on {
-        // (the steam goes on while it is pointed at: a long way, linear, stopped at the next rest as the hand leaves)
         let from = steam.target()
         steam.go_ms(card, from + 100.0, steam_breath * 100.0, ease=ui::Ease::Linear)
-        // (floated off once each time the hand comes, played out whole: not cut off as it leaves)
         let h = heart.value_at(now())
         if h <= 0.0 || h >= 1.0 {
           heart.put(0.0)
@@ -126,14 +106,12 @@ fn sponsor_card(p : view::View) -> Unit {
         return (1.5, focus_ring())
       }
       let h = hand.shown(card)
-      // (the glow as it comes: its edge brighter a moment, gone by its end)
       let g = glow.shown(card)
       let bump = if g <= 0.0 || g >= 1.0 { 0.0 } else if g < 0.4 { g / 0.4 } else { (1.0 - g) / 0.6 }
       let base = if is_dark() { 0.22 + 0.24 * h } else { 0.24 + 0.24 * h }
       (1.0, with_alpha(if h > 0.5 { amber_hi() } else { amber() }, base + 0.2 * bump))
     }))
     |> ignore
-    // its badge: 36 by 36, radius 9, the cup at 18 in its middle; lifted and tipped under the hand
     card.box(fn(badge) {
       badge
       .width(view::Live::Is(Some(36.0)))
@@ -157,7 +135,6 @@ fn sponsor_card(p : view::View) -> Unit {
           |> ignore
         })
         |> ignore
-        // (its three lines of steam, each a breath behind the one before by 0.4 s)
         for k, d in ["M5 2.4v1.8", "M7.4 2.1v2.1", "M9.8 2.4v1.8"] {
           let delay = k.to_double() * 400.0 / steam_breath
           icon.box(fn(line) {
@@ -173,7 +150,6 @@ fn sponsor_card(p : view::View) -> Unit {
         }
       })
       |> ignore
-      // the heart off its corner, floating up and gone
       badge.box(fn(h) {
         h
         .over(view::Live::Is(true), edges=(None, Some(-4.0), Some(-4.0), None))
@@ -190,7 +166,6 @@ fn sponsor_card(p : view::View) -> Unit {
       |> ignore
     })
     |> ignore
-    // its two lines
     card.box(fn(copy) {
       copy.grow(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)) |> ignore
       words(copy, fn() { t("赞助作者") }, 13.0, ui_text, weight=600) |> ignore
@@ -201,7 +176,6 @@ fn sponsor_card(p : view::View) -> Unit {
       |> ignore
     })
     |> ignore
-    // its pill: 28 high, radius 7, warm gold, dark words on it (white in the light), a sheen crossing it
     card.box(fn(pill) {
       pill
       .row(view::Live::Is(true))
@@ -225,7 +199,6 @@ fn sponsor_card(p : view::View) -> Unit {
         |> ignore
       })
       |> ignore
-      // (the sheen: a band of white faded at both sides, swept across once)
       pill.box(fn(band) {
         band
         .over(view::Live::Is(true), edges=(Some(0.0), Some(0.0), None, Some(0.0)))
@@ -238,7 +211,7 @@ fn sponsor_card(p : view::View) -> Unit {
         }))
         .offset(view::Live::By(fn() { (-50.0 + 200.0 * sheen.shown(card), 0.0) }))
         |> ignore
-        // (what it fades is what it holds: the white is its own child's)
+        // .fades() masks child content, not this node's own ground.
         band.box(fn(w) { w.grow(view::Live::Is(1.0)).ground(view::Live::Is(0xFFFFFF6BL)) |> ignore }) |> ignore
       })
       |> ignore

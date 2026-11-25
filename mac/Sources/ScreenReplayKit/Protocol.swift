@@ -92,10 +92,10 @@ public struct RecorderSettings: Sendable, Equatable {
   public var microphone: Bool
   public var recordCursor: Bool
   public var pauseInFullscreen: Bool
-  public var codec: String // "HEVC" or "H264"
+  public var codec: String
   public var maxHeight: Int
   public var frameRate: Int
-  public var quality: String // "low", "medium", "high", "ultra"
+  public var quality: String
   public var lastSeconds: Int
   public var bufferDir: String
   public var consented: Bool
@@ -257,7 +257,7 @@ public struct RecorderSettings: Sendable, Equatable {
 }
 
 public struct ViewerPrefs: Sendable, Equatable {
-  public var language: String // "system", "zh", "en"
+  public var language: String
   public var hideFromCapture: Bool
 
   public init(language: String = "system", hideFromCapture: Bool = true) {
@@ -339,8 +339,6 @@ public enum SRStrings {
 }
 
 public enum Bitrate {
-  /// Exact bitrate formula matching `recording/Bitrate.cs` and `app/settings_data.mbt`:
-  /// `3 Mbps * (pixels / 1_000_000)^0.8 * (fps / 30)^0.6 * quality * codec`, clamped to `1...150 Mbps`.
   public static func compute(width: Int, height: Int, frameRate: Int, quality: String, codec: String) -> Int {
     let megapixels = Double(max(2, width)) * Double(max(2, height)) / 1_000_000.0
     let q: Double

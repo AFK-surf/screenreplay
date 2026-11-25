@@ -1,5 +1,3 @@
-// The replay app's files on Windows: the buffer's segments listed, a part of a file read for the player, a small file
-// read whole. Paths come as UTF-8 ending in a NUL.
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -79,7 +77,6 @@ static moonbit_bytes_t rp_bytes(const char *p, int32_t n) {
   return b;
 }
 
-// The names of `dir`'s files matching one of `globs`, one a line.
 static moonbit_bytes_t rp_list_globs(moonbit_bytes_t dir, const char *const *globs, int n_globs) {
   size_t cap = 4096, len = 0;
   char *out = (char *)malloc(cap);
@@ -99,7 +96,6 @@ static moonbit_bytes_t rp_list_globs(moonbit_bytes_t dir, const char *const *glo
       if (len + (size_t)n + 1 > cap) {
         cap = (len + n + 1) * 2;
         char *more = (char *)realloc(out, cap);
-        // (no more memory: the names so far)
         if (!more) break;
         out = more;
       }
@@ -114,13 +110,11 @@ static moonbit_bytes_t rp_list_globs(moonbit_bytes_t dir, const char *const *glo
   return b;
 }
 
-// The names of `dir`'s files ending in `.mp4`, one a line.
 moonbit_bytes_t rp_list(moonbit_bytes_t dir) {
   static const char *const globs[] = {"*.mp4"};
   return rp_list_globs(dir, globs, 1);
 }
 
-// The saved clips' names in `dir`: its videos and its GIFs, one a line.
 moonbit_bytes_t rp_list_clips(moonbit_bytes_t dir) {
   static const char *const globs[] = {"*.mp4", "*.gif"};
   return rp_list_globs(dir, globs, 2);
@@ -134,9 +128,7 @@ static HANDLE rp_open(moonbit_bytes_t path) {
   return h;
 }
 
-// A file's attributes as its folder has them (no handle opened: opening one cost the system's scan of the file, for
-// each of the many files whose size or time is asked); false where there is none, or it is a folder (as before, when a
-// folder could not be opened as a file).
+// Uses GetFileAttributesExW to avoid opening a file handle (AV scan overhead); rejects directories.
 static BOOL rp_attributes(moonbit_bytes_t path, WIN32_FILE_ATTRIBUTE_DATA *a) {
   wchar_t *w = rp_wide((const char *)path);
   BOOL ok = GetFileAttributesExW(w, GetFileExInfoStandard, a);
@@ -144,14 +136,12 @@ static BOOL rp_attributes(moonbit_bytes_t path, WIN32_FILE_ATTRIBUTE_DATA *a) {
   return ok && !(a->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// A file's size in bytes, -1 when there is none.
 double rp_size(moonbit_bytes_t path) {
   WIN32_FILE_ATTRIBUTE_DATA a;
   if (!rp_attributes(path, &a)) return -1.0;
   return (double)(((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow);
 }
 
-// Last-write time helps invalidate a preview when a clip is replaced in place.
 double rp_modified(moonbit_bytes_t path) {
   WIN32_FILE_ATTRIBUTE_DATA a;
   if (!rp_attributes(path, &a)) return -1.0;
@@ -161,7 +151,6 @@ double rp_modified(moonbit_bytes_t path) {
   return (double)(t.QuadPart / 10000ULL);
 }
 
-// At most `length` bytes of a file from `offset`; none when it cannot be read.
 moonbit_bytes_t rp_read(moonbit_bytes_t path, double offset, int32_t length) {
   HANDLE h = rp_open(path);
   if (h == INVALID_HANDLE_VALUE || length <= 0) {
@@ -169,7 +158,6 @@ moonbit_bytes_t rp_read(moonbit_bytes_t path, double offset, int32_t length) {
     return moonbit_make_bytes(0, 0);
   }
   LARGE_INTEGER sz;
-  // (its size not known: nothing read, rather than `length` made ready for a whole file asked for: read_text's)
   if (!GetFileSizeEx(h, &sz)) {
     CloseHandle(h);
     return moonbit_make_bytes(0, 0);
@@ -195,8 +183,7 @@ moonbit_bytes_t rp_read(moonbit_bytes_t path, double offset, int32_t length) {
   return rp_bytes((const char *)b, (int32_t)got);
 }
 
-// Writes `data` to a file atomically via a sibling temp file + MoveFileExW so readers (and the recorder's
-// FileSystemWatcher) never see a truncated or write-locked settings/request file; falls back to direct write.
+// Atomic write via sibling temp file + MoveFileExW so readers/FileSystemWatcher never see partial writes.
 int32_t rp_write(moonbit_bytes_t path, moonbit_bytes_t data) {
   wchar_t *w = rp_wide((const char *)path);
   size_t wlen = wcslen(w);
@@ -230,11 +217,10 @@ int32_t rp_write(moonbit_bytes_t path, moonbit_bytes_t data) {
   return ok ? 1 : 0;
 }
 
-// Makes a directory and those above it.
 int32_t rp_mkdirs(moonbit_bytes_t path) {
   wchar_t *w = rp_wide((const char *)path);
   int32_t ok = 1;
-  // (from past the drive's "C:\"; a path shorter than that from its start: w + 3 was past its end, read beyond it)
+  // Skip drive prefix (e.g. "C:\") without reading past short paths.
   size_t len = wcslen(w);
   for (wchar_t *p = w + (len < 3 ? len : 3); *p; p++) {
     if (*p == L'\\' || *p == L'/') {
@@ -249,7 +235,6 @@ int32_t rp_mkdirs(moonbit_bytes_t path) {
   return ok;
 }
 
-// How far local time is ahead of UTC now, in minutes.
 int32_t rp_local_offset(void) {
   SYSTEMTIME utc, local;
   GetSystemTime(&utc);
@@ -263,17 +248,13 @@ int32_t rp_local_offset(void) {
   return (int32_t)(((LONGLONG)b.QuadPart - (LONGLONG)a.QuadPart) / 600000000LL);
 }
 
-// Milliseconds since the epoch, UTC.
 double rp_now(void) {
   FILETIME ft;
-  // (precise and to the fraction of a millisecond: the playhead is moved by it every frame, and the plain clock's
-  // whole milliseconds, or its 15.6 ms ticks, made it go in uneven steps)
   GetSystemTimePreciseAsFileTime(&ft);
   ULARGE_INTEGER t;
   t.LowPart = ft.dwLowDateTime; t.HighPart = ft.dwHighDateTime;
   double real = (double)(t.QuadPart - 116444736000000000ULL) / 10000.0;
-  // (REPLAY_NOW, ms since the epoch: the clock set to that moment as the window starts and going on from it, for a
-  // demo's pictures to say "Today 10:40 · 3 min ago" whenever they are taken; a test instance's only)
+  // REPLAY_NOW (epoch ms): anchor clock offset for deterministic test/demo runs.
   static int asked = 0;
   static double shift = 0.0;
   if (!asked) {
@@ -285,7 +266,6 @@ double rp_now(void) {
   return real + shift;
 }
 
-// The file shown selected in Explorer.
 void rp_reveal(moonbit_bytes_t path) {
   char args[2300];
   snprintf(args, sizeof args, "/select,\"%s\"", (const char *)path);
@@ -294,8 +274,6 @@ void rp_reveal(moonbit_bytes_t path) {
   free(w);
 }
 
-// The file put on the clipboard as a file (CF_HDROP), as Explorer's Copy does: pasted into a chat or a folder, it is
-// the file. 1 when it is there.
 int32_t rp_copy_file(moonbit_bytes_t path) {
   wchar_t *w = rp_wide((const char *)path);
   size_t n = wcslen(w);
@@ -324,8 +302,6 @@ int32_t rp_copy_file(moonbit_bytes_t path) {
   return ok;
 }
 
-// The recorder (ScreenReplay.exe, beside this program) started in the background: what the replay window's "start
-// recording" does when the recorder is not running. 1 when it was started.
 int32_t rp_launch_recorder(void) {
   wchar_t self[MAX_PATH];
   DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
@@ -337,7 +313,6 @@ int32_t rp_launch_recorder(void) {
   return r > 32;
 }
 
-// A file moved to another name, replacing nothing (1 when it was).
 int32_t rp_rename(moonbit_bytes_t from, moonbit_bytes_t to) {
   wchar_t *a = rp_wide((const char *)from);
   wchar_t *b = rp_wide((const char *)to);
@@ -347,14 +322,12 @@ int32_t rp_rename(moonbit_bytes_t from, moonbit_bytes_t to) {
   return ok ? 1 : 0;
 }
 
-// A file removed (what a failed save left).
 void rp_delete(moonbit_bytes_t path) {
   wchar_t *w = rp_wide((const char *)path);
   DeleteFileW(w);
   free(w);
 }
 
-// The folder this program is in (UTF-8, no slash at its end).
 moonbit_bytes_t rp_exe_dir(void) {
   wchar_t self[MAX_PATH];
   DWORD n = GetModuleFileNameW(NULL, self, MAX_PATH);
@@ -367,7 +340,6 @@ moonbit_bytes_t rp_exe_dir(void) {
   return out;
 }
 
-// How many bytes the files directly in a folder take (-1: no such folder).
 double rp_dir_size(moonbit_bytes_t dir) {
   char pattern[2100];
   snprintf(pattern, sizeof pattern, "%s\\*", (const char *)dir);
@@ -385,7 +357,6 @@ double rp_dir_size(moonbit_bytes_t dir) {
   return total;
 }
 
-// Adds `data` at the end of a file (made if missing; another program may be appending too); whether it could.
 int32_t rp_append(moonbit_bytes_t path, moonbit_bytes_t data) {
   wchar_t *w = rp_wide((const char *)path);
   HANDLE h = CreateFileW(w, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS,
@@ -398,7 +369,6 @@ int32_t rp_append(moonbit_bytes_t path, moonbit_bytes_t data) {
   return ok ? 1 : 0;
 }
 
-// The window filling its screen, or back as it was (mbui's Windows host has none of this: @hostapi.set_full_screen).
 static HWND rp_main_window;
 static BOOL CALLBACK rp_find_main(HWND hwnd, LPARAM context) {
   DWORD pid = 0;
@@ -441,7 +411,6 @@ int32_t rp_fullscreen(int32_t on) {
   return rp_full;
 }
 
-// Whether Windows' apps are light (HKCU ... Themes\Personalize, AppsUseLightTheme; 0 when it cannot be read).
 int32_t rp_system_light(void) {
   DWORD v = 0, n = sizeof(v);
   if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
@@ -450,12 +419,10 @@ int32_t rp_system_light(void) {
   return v ? 1 : 0;
 }
 
-// Whether Windows shows Chinese (its UI language's primary language).
 int32_t rp_system_chinese(void) {
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE ? 1 : 0;
 }
 
-// The window's frame and system menu dark or light (DWMWA_USE_IMMERSIVE_DARK_MODE).
 void rp_window_dark(int32_t on) {
   if (!rp_main_window || !IsWindow(rp_main_window)) {
     rp_main_window = NULL;
@@ -466,10 +433,6 @@ void rp_window_dark(int32_t on) {
   DwmSetWindowAttribute(rp_main_window, 20, &v, sizeof(v));
 }
 
-// Every window of this process kept out of what the screen is captured into, or let back (SetWindowDisplayAffinity's
-// WDA_EXCLUDEFROMCAPTURE: the recorder's capture shows what is under them, and so does every other screenshot, recording
-// or share; the user, 2026-11-15: 「可以不录制 screenreplay 本身」, a switch in the settings, on at first). Set only
-// where it is not so already, each window as it is found (the tray's panel, a window made later).
 static BOOL CALLBACK rp_affinity_one(HWND hwnd, LPARAM on) {
   DWORD pid = 0;
   GetWindowThreadProcessId(hwnd, &pid);
@@ -480,9 +443,6 @@ static BOOL CALLBACK rp_affinity_one(HWND hwnd, LPARAM on) {
   return TRUE;
 }
 
-// (asked every second, in each of the program's three processes: every window of the desktop walked each time before;
-// now this thread's own windows, where its windows are made, and the whole desktop's only as the switch turns or
-// every 30 s for a window another thread of the process made)
 static BOOL CALLBACK rp_affinity_thread(HWND hwnd, LPARAM on) { return rp_affinity_one(hwnd, on); }
 
 static int rp_last_affinity = -1;
@@ -499,19 +459,16 @@ void rp_hide_from_capture(int32_t on) {
   EnumThreadWindows(GetCurrentThreadId(), rp_affinity_thread, (LPARAM)on);
 }
 
-// The pointer hidden till it moves (full screen, the bars gone): the window shows its own again at the next move.
 void rp_hide_cursor(void) {
   SetCursor(NULL);
 }
 
-// Whether Windows' animation effects are off (Accessibility > Visual effects > Animation effects).
 int32_t rp_animations_off(void) {
   BOOL on = TRUE;
   if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0)) return 0;
   return on ? 0 : 1;
 }
 
-// Text put on the clipboard (UTF-8 in); whether it could.
 int32_t rp_copy_text(moonbit_bytes_t text) {
   wchar_t *w = rp_wide((const char *)text);
   size_t n = (wcslen(w) + 1) * sizeof(wchar_t);
@@ -539,7 +496,7 @@ static moonbit_bytes_t rp_utf8(const wchar_t *w) {
   return out;
 }
 
-// Windows' version, "10.0.26300" (RtlGetVersion: not what the manifest lets GetVersionEx say).
+// RtlGetVersion bypasses GetVersionEx manifest lie.
 moonbit_bytes_t rp_windows_version(void) {
   typedef LONG(WINAPI * RtlGetVersionFn)(OSVERSIONINFOW *);
   OSVERSIONINFOW v = {sizeof(v)};
@@ -549,7 +506,6 @@ moonbit_bytes_t rp_windows_version(void) {
   return rp_utf8(s);
 }
 
-// The primary display adapter's name and its driver's version (from the registry key EnumDisplayDevices names).
 moonbit_bytes_t rp_gpu(void) {
   DISPLAY_DEVICEW d = {sizeof(d)};
   wchar_t s[512] = L"?";
@@ -570,10 +526,6 @@ moonbit_bytes_t rp_gpu(void) {
   return rp_utf8(s);
 }
 
-// Resident (the user's ask, 2026-11-13: 「做成常驻，瞬开」): the window kept by the recorder from its start, hidden, and
-// shown at once when asked (the recorder shows it: ScreenReplay.exe's OpenReplay). Closed, it is only hidden again:
-// its close (the title bar's ×, Alt+F4, WM_CLOSE) taken here before mbui's host would end the program. How many times it
-// was hidden and shown, for the app to put itself back as at a fresh open (rp_window_turns).
 extern void *mb_app_hwnd(void);
 extern void *mb_app_hwnd_of(int wid);
 extern void mb_app_wake(void);
@@ -590,10 +542,8 @@ static HWND rp_primed_hwnd, rp_hiding_hwnd;
 static LONG_PTR rp_primed_ex;
 static COLORREF rp_bg_rgb = RGB(0x1B, 0x1C, 0x1F);
 
-// What the hidden window holds for playing let go of at once, as it hides (replay_play.cpp, replay_mf.cpp): mbui draws
-// no frame for a hidden window, so nothing of the app's runs till it shows again; on WM_CLOSE the window is cloaked
-// immediately (0 ms visual vanish) and given one frame for MoonBit's put_away() to release GPU/image caches before
-// rp_resident_hidden() calls ShowWindow(SW_HIDE), with a short fallback timer in case no frame runs.
+// On WM_CLOSE, cloak immediately and allow one frame for MoonBit put_away() to release GPU/image caches
+// before rp_resident_hidden() calls ShowWindow(SW_HIDE), since mbui stops ticking hidden windows.
 extern void rp_play_release(void);
 extern void rp_aac_release_all(void);
 extern void rp_thumb_release(void);
@@ -725,7 +675,6 @@ static LRESULT CALLBACK rp_resident_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
   return CallWindowProcW(rp_prev_proc, h, msg, wp, lp);
 }
 
-// The window kept when closed (1 when it is now).
 int32_t rp_stay_resident(void) {
   HWND h = (HWND)mb_app_hwnd();
   if (!h || rp_prev_proc) return rp_prev_proc ? 1 : 0;
@@ -733,9 +682,7 @@ int32_t rp_stay_resident(void) {
   return rp_prev_proc ? 1 : 0;
 }
 
-// Alt with an arrow (a clip's region resized by the keys): Windows sends it as WM_SYSKEYDOWN, which mbui's host takes
-// for back and forward; given to it as a WM_KEYDOWN instead, it tells the arrow with the modifiers held (Alt among
-// them), as any key.
+// Rewrite Alt+Arrow WM_SYSKEYDOWN to WM_KEYDOWN so mbui does not swallow it as back/forward.
 static WNDPROC rp_alt_prev;
 
 static LRESULT CALLBACK rp_alt_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -744,7 +691,6 @@ static LRESULT CALLBACK rp_alt_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   return CallWindowProcW(rp_alt_prev, h, msg, wp, lp);
 }
 
-// The Alt+arrows taken so (1 when they are now).
 int32_t rp_alt_arrows(void) {
   HWND h = (HWND)mb_app_hwnd();
   if (!h || rp_alt_prev) return rp_alt_prev ? 1 : 0;
@@ -752,22 +698,17 @@ int32_t rp_alt_arrows(void) {
   return rp_alt_prev ? 1 : 0;
 }
 
-// How many times it was hidden (closed) and shown, as hides * 65536 + shows (each kept under 65536).
 int32_t rp_window_turns(void) {
   return (int32_t)(((rp_hides & 0x7FFF) << 16) | (rp_shows & 0xFFFF));
 }
 
-// Whether the window shows now (false while cloaked for hidden first-frame priming or closing cleanup).
 int32_t rp_window_shown(void) {
   HWND h = (HWND)mb_app_hwnd();
   return h && IsWindowVisible(h) && !rp_priming && !rp_hiding ? 1 : 0;
 }
 
-// Started hidden (the recorder's resident start, REPLAY_HIDDEN=1): mbui's host shows its window as it makes it, and
-// the program's start-up show state is not asked there, so the first show of this thread's first top-level window is
-// either stripped (tray panel / note card: rp_start_hidden) or shown DWM-cloaked with WS_EX_TOOLWINDOW for one frame
-// (main resident window: rp_start_resident_hidden) so shaders and the UI shell are presented before the window hides,
-// preventing a ~0.5 s blank white flash on first activation.
+// CBT hook intercepts mbui's initial ShowWindow: strip show (tray/note) or DWM-cloak for one frame
+// (resident main window) so shaders/UI prime before hiding without a white flash.
 static HHOOK rp_cbt;
 static WNDPROC rp_hidden_prev;
 static HWND rp_hidden_window;
@@ -826,10 +767,7 @@ void rp_start_resident_hidden(void) {
   if (!rp_cbt) rp_cbt = SetWindowsHookExW(WH_CBT, rp_cbt_proc, NULL, GetCurrentThreadId());
 }
 
-// The window's menu (Restore, Move, Size, Minimize, Maximize, Close), as a right click on a title bar opens it: at
-// (x, y) in pixels of the window's client area. mbui's host moves the window from the app's own title bar but opens
-// no menu for it. (Its calls found as it is asked, not linked: linked, the window took 0.27 s longer to first show,
-// measured 2026-11-13; WM_SYSMENU posted to the window opens nothing, mbui's window procedure keeping it.)
+// Dynamically resolve system menu APIs (static linking slows startup; WM_SYSMENU is swallowed by mbui).
 typedef HMENU(WINAPI *rp_get_menu_f)(HWND, BOOL);
 typedef BOOL(WINAPI *rp_enable_f)(HMENU, UINT, UINT);
 typedef BOOL(WINAPI *rp_default_f)(HMENU, UINT, UINT);
@@ -857,14 +795,12 @@ void rp_system_menu(double x, double y) {
   if (cmd) PostMessageW(h, WM_SYSCOMMAND, (WPARAM)cmd, 0);
 }
 
-// How the window stands, for the playing log (perf_log.mbt): 1 in front, 2 minimized, 4 shown.
 int rp_window_state(void) {
   HWND h = (HWND)mb_app_hwnd();
   if (!h) return 0;
   return (GetForegroundWindow() == h ? 1 : 0) | (IsIconic(h) ? 2 : 0) | (IsWindowVisible(h) ? 4 : 0);
 }
 
-// The buffer's folder chosen by the system's own folder dialog over the window, its path in UTF-8 ("" none chosen).
 moonbit_bytes_t rp_pick_folder(void) {
   HWND h = (HWND)mb_app_hwnd();
   IFileOpenDialog *d = NULL;
@@ -890,7 +826,6 @@ moonbit_bytes_t rp_pick_folder(void) {
   return rp_bytes(out, n > 1 ? n - 1 : 0);
 }
 
-// Whether a file can be made in `dir` (made where it is not there yet): 1 yes, 0 no.
 int32_t rp_can_write(moonbit_bytes_t dir) {
   wchar_t *w = rp_wide((const char *)dir);
   SHCreateDirectoryExW(NULL, w, NULL);
@@ -903,7 +838,6 @@ int32_t rp_can_write(moonbit_bytes_t dir) {
   return 1;
 }
 
-// The bytes free on the drive `dir` is on (-1 not known).
 double rp_disk_free(moonbit_bytes_t dir) {
   wchar_t *w = rp_wide((const char *)dir);
   ULARGE_INTEGER free_bytes;
@@ -912,17 +846,12 @@ double rp_disk_free(moonbit_bytes_t dir) {
   return ok ? (double)free_bytes.QuadPart : -1.0;
 }
 
-// The tray's panel (REPLAY_TRAY=1, tray_panel.mbt): its window made a panel once it is up: no caption, no frame, no
-// taskbar button, over the other windows, its corners round as Windows 11 draws a menu's; hidden (not closed) when it
-// loses the focus or is closed, as a menu goes. The recorder shows it, where its icon is.
 static WNDPROC rp_tray_prev;
 static HHOOK rp_tray_mouse;
 static HWND rp_tray_hwnd;
-// (while it is shown cloaked to be drawn once; and whether it has been shown since, by the recorder: then left shown)
 static int rp_tray_priming, rp_tray_asked;
 
-// (a press anywhere outside it while it shows: hidden, as a menu goes; it may not have the focus to lose, Windows
-// keeping the focus where it was when the panel could not take it)
+// Low-level mouse hook hides the popup on outside clicks even when it never received focus.
 static LRESULT CALLBACK rp_tray_mouse_proc(int code, WPARAM wp, LPARAM lp) {
   if (code == HC_ACTION && (wp == WM_LBUTTONDOWN || wp == WM_RBUTTONDOWN || wp == WM_MBUTTONDOWN) && rp_tray_hwnd) {
     MSLLHOOKSTRUCT *m = (MSLLHOOKSTRUCT *)lp;
@@ -939,12 +868,11 @@ static LRESULT CALLBACK rp_tray_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   }
   if (msg == WM_ACTIVATE && LOWORD(wp) == WA_INACTIVE) ShowWindow(h, SW_HIDE);
-  // (shown or hidden by ShowWindow or by SetWindowPos, as the recorder shows it: WM_SHOWWINDOW does not come for that)
+  // SetWindowPos(SWP_SHOWWINDOW) does not send WM_SHOWWINDOW.
   if (msg == WM_WINDOWPOSCHANGED) {
     const WINDOWPOS *pos = (const WINDOWPOS *)lp;
     if ((pos->flags & SWP_SHOWWINDOW) && !rp_tray_priming) rp_tray_asked = 1;
-    // (not for its showing cloaked to be drawn once (priming): the hook then hid it at the first press anywhere on the
-    // desktop in those 2.5 s, its first frame not drawn yet, and watched every press of the whole desktop meanwhile)
+    // Skip mouse hook during cloaked priming so desktop clicks do not dismiss it prematurely.
     if ((pos->flags & SWP_SHOWWINDOW) && !rp_tray_mouse && !rp_tray_priming) {
       rp_tray_mouse = SetWindowsHookExW(WH_MOUSE_LL, rp_tray_mouse_proc, GetModuleHandleW(NULL), 0);
     } else if ((pos->flags & SWP_HIDEWINDOW) && rp_tray_mouse) {
@@ -980,18 +908,13 @@ int32_t rp_tray_window(double w_pt, double h_pt) {
   // DWMWA_WINDOW_CORNER_PREFERENCE: DWMWCP_ROUND
   DWORD corner = 2;
   DwmSetWindowAttribute(h, 33, &corner, sizeof(corner));
-  // (sized to the panel as its frame goes: the window mbui made has room for a frame it no longer has, the panel's
-  // right and foot margins wider than its left and top, as the note card's were)
+  // Re-apply client size after stripping window frame so margins stay symmetric.
   int dpi = (int)GetDpiForWindow(h);
   SetWindowPos(h, HWND_TOPMOST, 0, 0, (int)(w_pt * dpi / 96.0 + 0.5), (int)(h_pt * dpi / 96.0 + 0.5),
                SWP_NOMOVE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
   rp_tray_hwnd = h;
   rp_tray_prev = (WNDPROC)SetWindowLongPtrW(h, GWLP_WNDPROC, (LONG_PTR)rp_tray_proc);
-  // (shown once now, cloaked (DWMWA_CLOAK: drawn, never seen, no input), so its device is made and its first frame
-  // drawn while nobody waits: mbui makes them only for a window shown, and made at the press they took 3 s once, the
-  // panel an empty frame meanwhile (the user, 2026-11-18, 「这会托盘点击又卡住了」); rp_tray_primed hides it again
-  // 2.5 s on, by a timer of the window's own: one of the tree's waited while the window was hidden by anything else
-  // first, and left it cloaked, its first showing empty (mbui of monoid 96481b9))
+  // Show once while DWM-cloaked (attr 13) so mbui initializes D3D11 and its first frame before first click.
   if (rp_tray_prev) {
     BOOL cloak = TRUE;
     DwmSetWindowAttribute(h, 13, &cloak, sizeof(cloak));
@@ -1003,24 +926,17 @@ int32_t rp_tray_window(double w_pt, double h_pt) {
   return rp_tray_prev ? 1 : 0;
 }
 
-// The panel drawn once while cloaked (rp_tray_window): hidden, then let be seen when the recorder shows it. Left as it
-// is where the recorder showed it meanwhile (it is visible and has been pressed for: only the cloak taken off).
 void rp_tray_primed(void) {
   HWND h = rp_tray_hwnd;
   if (!h) return;
-  // (shown by the recorder meanwhile, a press come before the priming was done: left shown, only seen now)
   if (!rp_tray_asked && GetForegroundWindow() != h) ShowWindow(h, SW_HIDE);
   BOOL cloak = FALSE;
   DwmSetWindowAttribute(h, 13, &cloak, sizeof(cloak));
 }
 
-// The recorder's note (REPLAY_NOTE, note_card.mbt): its window made a card at the foot of the screen by the tray, over
-// the other windows, never taking the focus (a game in front keeps it), shown cloaked till rp_note_reveal so its first
-// frame is drawn before it is seen.
 static WNDPROC rp_note_prev;
 
-// (the recorder's ask (WM_APP + 0x53, the card kept warm and hidden): shown, still cloaked, so its frames go and its
-// look finds the ask in note.json; let be seen by rp_note_reveal once drawn)
+// WM_APP + 0x53: recorder wakes resident note card cloaked until rp_note_reveal.
 static LRESULT CALLBACK rp_note_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   if (msg == WM_APP + 0x53) {
     BOOL cloak = TRUE;
@@ -1042,11 +958,8 @@ int32_t rp_note_window(double w_pt, double h_pt, int32_t cloaked) {
   SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & ~(LONG_PTR)WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE);
   DWORD corner = 2;
   DwmSetWindowAttribute(h, 33, &corner, sizeof(corner));
-  // (cloaked as it is placed when it is to be seen anew; left as it is when it grows in sight)
   BOOL cloak = TRUE;
   if (cloaked) DwmSetWindowAttribute(h, 13, &cloak, sizeof(cloak));
-  // (its size set again as its frame goes: the window mbui made has room for a frame it no longer has, which left
-  // the card's margins uneven, wider at the right and the foot)
   RECT work;
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
   int dpi = (int)GetDpiForWindow(h);
@@ -1065,7 +978,7 @@ void rp_note_hide(void) {
 void rp_note_reveal(void) {
   HWND h = (HWND)mb_app_hwnd();
   if (!h) return;
-  // (a test's card left cloaked: looked at with PrintWindow, never over the screen of whoever is at it)
+  // Keep cloaked in test runs (captured via PrintWindow).
   wchar_t v[4];
   if (GetEnvironmentVariableW(L"REPLAY_NOTE_UNSEEN", v, 4) > 0) return;
   BOOL cloak = FALSE;
@@ -1077,8 +990,6 @@ void rp_tray_hide(void) {
   if (h) ShowWindow(h, SW_HIDE);
 }
 
-// In-process secondary popups (tray menu and save note card hosted inside the single resident ScreenReplayViewer.exe,
-// sharing its D3D11 device, shaders, and 64 MB font atlas so the background app stays at 2 processes total).
 int32_t rp_tray_req_seq_get(void) { return (int32_t)rp_tray_req_seq; }
 int32_t rp_tray_req_x_get(void) { return (int32_t)rp_tray_req_x; }
 int32_t rp_tray_req_y_get(void) { return (int32_t)rp_tray_req_y; }
@@ -1247,8 +1158,6 @@ int32_t rp_style_note_win(int32_t wid, double w_pt, double h_pt) {
   return 1;
 }
 
-// What was chosen in the panel told to the recorder: its window (REPLAY_RECORDER_HWND, hex) sent WM_APP + 0x51 with
-// the command. Whether it was.
 int32_t rp_tray_tell(int32_t command) {
   wchar_t v[32];
   DWORD n = GetEnvironmentVariableW(L"REPLAY_RECORDER_HWND", v, 32);
@@ -1258,8 +1167,6 @@ int32_t rp_tray_tell(int32_t command) {
   return PostMessageW(recorder, WM_APP + 0x51, (WPARAM)command, 0) ? 1 : 0;
 }
 
-// Whether this process runs from a package (installed from the Store, or a package put in by hand): it has a package
-// identity (GetCurrentPackageFullName, APPMODEL_ERROR_NO_PACKAGE without one).
 int32_t rp_packaged(void) {
   UINT32 n = 0;
   return GetCurrentPackageFullName(&n, NULL) == ERROR_INSUFFICIENT_BUFFER ? 1 : 0;

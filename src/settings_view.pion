@@ -4,27 +4,15 @@ import "signals"
 import "ui"
 import "view"
 
-// The settings, a sheet over the window (760 by 560, radius 12, s1): its pages in a 176 wide column of the window's
-// ground at its left, one page at a time at its right, in groups; About at the column's foot (letter 30). Each choice
-// written to settings.json at once (the recorder reads it every few seconds), the window's own to viewer.json.
-
-/// Told every time the folder is read (3 s): what shows the recorder's word (state.json) reads it again.
-
-
-/// The recorder's word as last read (bound).
 fn info() -> RecordingInfo {
   status_rev.get() |> ignore
   recording_info()}
 
-/// What the recordings kept take at these settings: the time kept at the planned bitrate and the sound's (bound).
-/// Kept by time alone (the user, 2026-11-14): there is no limit of the space they take, only the disk's own.
 fn kept_bytes() -> Double {
   sets() |> ignore
   hour_bytes() * sets().window_minutes.to_double() / 60.0}
 
-/// What an hour of recording takes (bound): as the latest recordings did (the last two hours recorded, once ten
-/// minutes of them), else at the planned bitrate, which is only a ceiling (the user, 2026-11-16: four hours recorded
-/// took 3 GB where it said 42).
+// Prefer actual rate from recent segments (>=10 min); planned_bitrate is a VBR ceiling.
 fn hour_bytes() -> Double {
   data()
   let mut size = 0.0
@@ -40,9 +28,6 @@ fn hour_bytes() -> Double {
     (planned_bitrate(inf.screen_w, inf.screen_h) + 192000.0) * 3600.0 / 8.0
   }}
 
-
-/// A group: its name (12, 500, subtle) over a card of s2 (in the light a near-white with a hairline), radius 10,
-/// holding its rows.
 fn setting_group(parent : view::View, title : () -> String, body : (view::View) -> Unit) -> Unit {
   parent.box(fn(g) {
     let has_title = signals::untracked(title) != ""
@@ -63,7 +48,6 @@ fn setting_group(parent : view::View, title : () -> String, body : (view::View) 
   })
   |> ignore}
 
-/// A switch's row, written back at once.
 fn toggle_row(parent : view::View, first : Bool, title : () -> String, note : () -> String, on : () -> Bool, set : (Bool) -> Unit) -> Unit {
   setting_row(parent, first, title, note, fn(c) {
     switch(c, title, on, fn(v) {
@@ -72,7 +56,6 @@ fn toggle_row(parent : view::View, first : Bool, title : () -> String, note : ()
     })
   })}
 
-/// A choice's row of a few, written back at once.
 fn choice_row(parent : view::View, first : Bool, title : () -> String, note : () -> String, labels : () -> Array[String], chosen : () -> Int, choose : (Int) -> Unit) -> Unit {
   setting_row(parent, first, title, note, fn(c) {
     segmented(c, labels, chosen, fn(i) {
@@ -81,15 +64,6 @@ fn choice_row(parent : view::View, first : Bool, title : () -> String, note : ()
     })
   })}
 
-/// The scrub index's folder's size as last walked, and when (rp_now's ms; 0 never).
-
-
-/// 删除全部录像: 0 its key, 1 asked again, 2 asked of the recorder.
-
-
-/// The space the recordings take (the Storage page's alone: the user, 2026-11-15, 「quality和storage都有这块感觉很怪」),
-/// one card: what is used, large, and under it in one line the recordings, the scrub index and what it writes an hour
-/// and a day (no meter: the user, 2026-11-16, 「没必要画chart」); last 删除全部录像 as a row with its key at its right.
 fn storage_card(parent : view::View) -> Unit {
   let used = fn() {
     data()
@@ -97,8 +71,7 @@ fn storage_card(parent : view::View) -> Unit {
   }
   let thumbs = fn() {
     status_rev.get() |> ignore
-    // (the folder walked at most once in 30 s: status_rev moves every 3 s while the window shows, and each walk
-    // read every thumbnail file's entry)
+    // Throttle directory walk to once per 30 s (status_rev ticks every 3 s).
     let (at, bytes) = thumbs_size.v
     if at > 0.0 && rp_now() - at < 30000.0 {
       return bytes
@@ -118,13 +91,10 @@ fn storage_card(parent : view::View) -> Unit {
       top.box(fn(head) {
         head.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::End))) |> ignore
         words(head, fn() { bytes_text(used() + thumbs()) }, 20.0, ui_text, weight=600) |> ignore
-        // (bottoms lined up put the small words' baseline 3 under the large one's: lifted as much, so the two share it)
+        // Lift 3 pt to share baseline with 20 pt figure under End alignment.
         words(head, fn() { t("已用") }, 12.0, ui_subtle).padding(view::Live::Is((0.0, 0.0, 0.0, 3.0))) |> ignore
       })
       |> ignore
-      // (the rest in one line under it (the user's pick, 2026-11-16: 「B 一行总览」, no meter): the recordings, the
-      // scrub index, and what it writes an hour and a day (the user, 2026-11-13: whether recording all day wears the
-      // disk); over 300 GB a day in amber, with what to do about it)
       top.box(fn(x) {
         x
         .words(
@@ -143,7 +113,6 @@ fn storage_card(parent : view::View) -> Unit {
         |> ignore
       })
       |> ignore
-      // (the recorder deleting before their time for want of room: said with what to do)
       top.show(fn() { info().disk_tight }, fn(n) {
         n
         .words(
@@ -156,9 +125,6 @@ fn storage_card(parent : view::View) -> Unit {
       |> ignore
     })
     |> ignore
-    // every recording deleted (the reviewer's 85th: the privacy policy names it as the person's to do): asked again
-    // in the row, then the recorder told (purge.request), which closes the segment it writes, deletes what the
-    // buffer's folders hold and records on; the clips saved, the settings and the logs kept
     setting_row(card, false, fn() { t("删除全部录像") }, fn() {
       match purge_state.get() {
         1 => t("会删除缓冲里的全部录像，已保存的片段不受影响，无法恢复。")
@@ -202,14 +168,12 @@ fn storage_card(parent : view::View) -> Unit {
     })
   })}
 
-/// One of the pages in the column: its icon and name; s2 under the one shown, s1 under the pointer.
 fn nav_item(parent : view::View, i : Int, icon : () -> String, label : () -> String) -> Unit {
   pressable(parent, label, fn() {
     purge_state.set(0)
     settings_page.set(i)
   }, fn(b) {
     let on = fn() { settings_page.get() == i }
-    // (under the pointer a faint tint over the sidebar's ground, coming in and going over 100 ms; the page shown s2)
     let (hand, _) = answer(b)
     let picked = motion::NodeWay::new(if signals::untracked(on) { 1.0 } else { 0.0 })
     b.reacts(on, fn(v) { picked.go_ms(b, if v { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 140.0 }) })
@@ -272,7 +236,6 @@ fn settings_dialog(root : view::View) -> Unit {
     |> ignore
     card.box(fn(right) {
       right.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::Is(Some(0.0))) |> ignore
-      // (sticky top bar: page title + close button, so scrolled content never slides under ×)
       right.box(fn(head) {
         head.row(view::Live::Is(true)).height(view::Live::Is(Some(48.0))).padding(view::Live::Is((24.0, 0.0, 14.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
         words(head, fn() { settings_page_title(settings_page.get()) }, 15.0, ui_text, weight=600) |> ignore
@@ -281,8 +244,6 @@ fn settings_dialog(root : view::View) -> Unit {
       })
       |> ignore
       rule(right, hair)
-      // (each page scrolls where it is taller than the card, from its top as it is picked: the user, 2026-11-15
-      // 「about 内容过长不能滚动了」)
       right.box(fn(page) {
         page.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_height(view::Live::Is(Some(0.0))) |> ignore
         page.pick(fn() { settings_page.get() }, fn(sp, i) {
@@ -299,9 +260,6 @@ fn settings_dialog(root : view::View) -> Unit {
     |> ignore
   })}
 
-/// NVIDIA's Fast Sync on (the recorder reads it, state.json's fastSync): with it some games' recordings flicker
-/// between the new picture and an old one (the user's Psycho Sleuth, 2026-11-15; Discord's share and OBS's display
-/// capture alike), so it is said above the recording's settings with how to turn it off. Nothing is changed for it.
 fn fast_sync_note(p : view::View) -> Unit {
   p.show(fn() { !is_mac() && info().fast_sync != "" }, fn(n) {
     setting_group(n, fn() { t("NVIDIA 显卡开着「快速同步」") }, fn(card) {
@@ -311,7 +269,6 @@ fn fast_sync_note(p : view::View) -> Unit {
           x
           .words(
             view::Live::By(fn() {
-              // (no program named: the user, 2026-11-15, 「不要提游戏名字」)
               t("部分游戏的录像可能会一帧新、一帧旧地闪烁。打开 NVIDIA 控制面板 → 管理 3D 设置 → 垂直同步，改成「使用 3D 应用程序设置」或「关」")
             }),
             look={ ..view::words_plain, size: 12.0, line: 17.0, wrap: true },
@@ -348,7 +305,6 @@ fn settings_page_body(p : view::View, i : Int) -> Unit {
         toggle_row(g, false, fn() { t("全屏时暂停") }, fn() { t("游戏、全屏视频在前台时不录") }, fn() { sets().pause_in_fullscreen }, fn(v) {
           settings.pause_in_fullscreen = v
         })
-        // (the window's own, viewer.json's: applied to its windows at once and each second, replay_win.c)
         setting_row(g, false, fn() { t("不录 ScreenReplay 自己") }, fn() {
           t("回放窗口不进录像，录到的是它后面的内容；开着时其他截图、录屏工具也截不到它")
         }, fn(c) {
@@ -382,8 +338,6 @@ fn settings_page_body(p : view::View, i : Int) -> Unit {
         choice_row(g, false, fn() { t("分辨率") }, fn() { height_note() }, fn() { [t("原始"), "1440p", "1080p", "720p"] }, fn() {
           index_of(height_choices, sets().max_height, 0)
         }, fn(i) { settings.max_height = height_choices[i] })
-        // (90 and 120 for a game's motion, said what they cost: the user, 2026-11-17 「可以做一下90/120hz录制和输出的
-        // 选项，但需要警告用户」)
         choice_row(g, false, fn() { t("帧率") }, fn() { fps_note() }, fn() { ["30", "60", "90", "120"] }, fn() {
           index_of(fps_choices, fps_of(sets().fps.to_double()), 1)
         }, fn(i) { settings.fps = fps_choices[i] })
@@ -475,18 +429,6 @@ fn settings_page_body(p : view::View, i : Int) -> Unit {
       })
   }}
 
-
-/// A folder chosen or the default taken back since the settings opened (its switching, then switched, said).
-
-
-/// Why the folder last chosen was not taken ("" none).
-
-
-/// Where the recorder keeps its segments (the user, 2026-11-13: 「两处都做」): the folder now and its drive's free room,
-/// another chosen by the system's folder dialog (taken where it can be written and holds 1.2 times the limit), back to
-/// the default. Taken, the recorder writes there from its next segment; what is where it wrote before stays there and
-/// expires there, the window reading both. Where the folder chosen cannot be written (a drive taken out) the recorder
-/// writes to the default and says so here.
 fn buffer_place(p : view::View) -> Unit {
   setting_group(p, fn() { t("录像缓冲位置") }, fn(g) {
     let shown_dir = fn() {
@@ -533,7 +475,6 @@ fn buffer_place(p : view::View) -> Unit {
       })
       |> ignore
     })
-    // (after a change: switching, then switched; what is left where it wrote before and when it is cleared)
     let lowered = fn(s : String) { str_trim_end_chars(str_to_ascii_lower(s), "/\\") }
     let switching = fn() {
       let want = sets().buffer_dir
@@ -608,8 +549,6 @@ fn buffer_place(p : view::View) -> Unit {
     }, at_once=true)
   })}
 
-/// Integrated graphics recording a screen over 1440p at its own size: said under the choice that its video engine
-/// both records and plays video, so a smaller picture leaves video playing smooth.
 fn height_note() -> String {
   let info = info()
   if info.shared_gpu && sets().max_height == 0 && (info.screen_h == 0.0 || info.screen_h > 1440.0) {
@@ -618,9 +557,6 @@ fn height_note() -> String {
     ""
   }}
 
-/// The encoder fell behind in the last 10 s (recorder/Program.cs's framesSkipped: frames left out rather than waited
-/// for, a GPU too slow for this size and rate or its video engine busy playing a video): said above the recording's
-/// settings while it lasts, with what to do.
 fn behind_note(p : view::View) -> Unit {
   p.show(fn() {
     let i = info()
@@ -652,14 +588,12 @@ fn behind_note(p : view::View) -> Unit {
   })
   |> ignore}
 
-
-/// What a frame rate over 60 costs, said under the choice: the space, the GPU's encoder, the display it is over.
 fn fps_note() -> String {
   let fps = fps_of(sets().fps.to_double())
   if fps <= 60 {
     return ""
   }
-  // (bound to the recorder's word as it is read again: info(), not recording_info(), which it read once and kept)
+  // Use info() (not recording_info()) to subscribe to status_rev updates.
   let info = info()
   if info.fps_fell_back {
     return t("显卡编码器不支持这个帧率，正在按 60 帧录制")

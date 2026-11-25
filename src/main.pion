@@ -5,14 +5,6 @@ import "signals"
 import "ui"
 import "view"
 
-// The replay window: the background recording's last hours on one timeline, played back, and a range of it saved as
-// a video. Opened by the recorder (its tray icon, Ctrl+Alt+R), which says where the buffer is (REPLAY_ROOT).
-//
-// Made once as nodes of the window's tree (mbui's view): the title bar, the picture (the player, a native view of its
-// own in the tree), and under it one dock: the timeline and the controls. What changes is bound to the signals it is
-// worked out of (state.mbt); what the hand and the keys do is done in their handlers.
-
-
 fn exe_dir() -> String {
   text_of(rp_exe_dir())}
 
@@ -23,15 +15,11 @@ fn title_h() -> Double {
     40.0
   }}
 
-
-/// The folder read again every 3 s while the window is open (the recorder keeps adding to it and tells nothing); the
-/// first time, the recorder asked to close what it is writing and the playhead put 30 s before the end.
 fn refresh(root : view::View, first : Bool) -> Unit {
   load()
   if clipping.untracked() {
     load_windows()
   } else if !snaps.is_empty() {
-    // (clip mode left: the windows noted and the clip's steps let go of till it is entered again, which reads them anew)
     clear_windows()
     clip_history_free()
   }
@@ -45,9 +33,7 @@ fn refresh(root : view::View, first : Bool) -> Unit {
     consent_check()
   } else if rp_window_shown() == 1 && !segs.is_empty() && signals::untracked(recorder_status).1 &&
     rp_now() - (t0() + span()) > 6000.0 {
-    // (while the window shows, what is being written closed whenever it is more than 6 s behind, so the timeline's
-    // end keeps up with now: the user, 2026-11-14 「感觉timeline的更新好像有点慢」; a segment is closed only when it
-    // has been 30 s long otherwise)
+    // Flush active 30 s segment when >6 s behind so the live timeline stays current.
     ask_flush()
   }
   if current.v < 0 && !segs.is_empty() {
@@ -58,7 +44,6 @@ fn refresh(root : view::View, first : Bool) -> Unit {
   }
   again(root, 3000.0, fn() { refresh(root, false) })}
 
-/// A recorder's status code in words (the recorder's own table: recorder/Program.cs, L.Status).
 fn status_words(code : String, arg : String) -> String {
   match code {
     "recording" => t("后台录制中")
@@ -74,13 +59,12 @@ fn status_words(code : String, arg : String) -> String {
     _ => t("启动中…")
   }}
 
-/// A window button: its glyph centred, its ground under the pointer (close: Windows' red, its glyph white).
 fn window_key(parent : view::View, label : () -> String, icon : () -> String, press : () -> Unit, close? : Bool, snap? : Bool) -> Unit {
   let close = match close { Some(__mbt_v) => __mbt_v, None => false }
   let snap = match snap { Some(__mbt_v) => __mbt_v, None => false }
 
   pressable(parent, label, press, fn(b) {
-    // (the maximize key: the pointer over it is the host's (its snap layouts), which says how it stands on it)
+    // Maximize button hover/press can come from host Windows Snap Layouts.
     let lit = fn() { b.pointed() || b.pressed() || (snap && ui::window_snap_state() != 0) }
     let held = fn() { b.pressed() || (snap && ui::window_snap_state() == 2) }
     b
@@ -116,28 +100,22 @@ fn window_key(parent : view::View, label : () -> String, icon : () -> String, pr
   })
   |> ignore}
 
-/// The title bar, 40 high: the app's mark and name; in the middle the moment the playhead is at and how long ago; the
-/// window's buttons as Windows 11 draws them. Its empty room moves the window (a double click maximizes it).
 fn title_bar(parent : view::View) -> Unit {
   let th = title_h()
   let mac = is_mac()
   parent.box(fn(bar) {
     bar.row(view::Live::Is(true)).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))).ground(view::Live::By(c_bg)) |> ignore
-    // (empty room in the bar moves the window; on Windows a right click opens the window's system menu; on macOS
-    // moves_window also forwards double-clicks to AppKit's standard titlebar zoom/miniaturize action)
+    // Windows: manual system menu on right-click; macOS: moves_window handles titlebar double-click.
     let moves = fn(v : view::View) {
       v.presses(view::Live::Is(true)).moves_window(view::Live::Is(true)) |> ignore
       if !mac {
         v.on_menu(fn(m) { rp_system_menu(m.wx * v.pixel_scale(), m.wy * v.pixel_scale()) }) |> ignore
       }
     }
-    // (the two sides one width, the wider's: so the middle is on the window's middle and never under either. Their
-    // contents measured once laid out, again when what they say changes: a side grown by grow from basis 0 is laid out
-    // narrower than what it holds where the room is short, mbui keeping no item at least as wide as its content)
+    // Measure both sides post-layout and lock min_width so center stays centered without overlap.
     let side_need : signals::Signal[Double] = signals::signal_by(0.0, fn(a, b) { a == b })
     let left_box : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
     let right_box : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
-    // (not laid out yet, 0: looked at again 100 ms on)
     let measure = fn() -> Unit { __mbt_local_title_bar_measure_5(bar, left_box, right_box, side_need) }
     bar.reacts(
       fn() {
@@ -145,7 +123,6 @@ fn title_bar(parent : view::View) -> Unit {
       },
       fn(_) { bar.at_moment(now() + 30.0, measure, later=true) |> ignore },
     )
-    // the left side: the app's mark and name (the saved clips: back and their count)
     bar.box(fn(side) {
       side.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::By(fn() { Some(side_need.get()) })).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
       moves(side)
@@ -155,7 +132,6 @@ fn title_bar(parent : view::View) -> Unit {
         left.pick(fn() { library_open.get() }, fn(b, lib) {
           b.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           if lib {
-            // (in the saved clips: back, and their count)
             icon_button(b, fn() { "chevron-left" }, fn() { t("回放") }, fn() { library_open.set(false) }, side=view::Side::Bottom) |> ignore
             words(b, fn() { t("已保存片段") }, 12.0, ui_text, weight=500) |> ignore
             words(b, fn() {
@@ -172,15 +148,10 @@ fn title_bar(parent : view::View) -> Unit {
       |> ignore
     })
     |> ignore
-    // the middle: the moment the playhead is at, how long ago and the app then; in clip mode a pill, 剪辑. Between two
-    // sides of one width (each half of what it leaves), so on the window's middle; where a side needs more than its
-    // half (a narrow window, a long word of the recorder's), the middle gives way, the app's name first, never under it
-    // (the user, 2026-11-14: 「文字有重叠」)
     bar.box(fn(o) {
       o.row(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)).gap(view::Live::Is(10.0)).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).clips(view::Live::Is(true)) |> ignore
       moves(o)
-      // (its parts laid out or not, not made anew: a part a pick makes sits in a slot of its own that never gives way,
-      // so the app's name in one could not end in an ellipsis where the room is short)
+      // Use laid_nowhere instead of pick so text nodes stay direct flex children and can ellipsize.
       let kind = fn() { if library_open.get() || !has_segs() { 0 } else if clipping.get() { 1 } else { 2 } }
       let app_now = fn() {
         data()
@@ -208,14 +179,13 @@ fn title_bar(parent : view::View) -> Unit {
       .min_width(view::Live::Is(Some(0.0)))
       .allow_ellipsis(view::Live::Is(true))
       |> ignore
-      // (giving way the app's name first, then how long ago, the moment last)
+      // Shrink priority: app name (400) -> relative time (0.05) -> wall clock (0.01).
       words(o, fn() { ago(t0() + pos_drawn(o)) }, 12.0, ui_muted)
       .laid_nowhere(view::Live::By(fn() { kind() != 2 }))
       .shrink(view::Live::Is(0.05))
       .min_width(view::Live::Is(Some(0.0)))
       .allow_ellipsis(view::Live::Is(true))
       |> ignore
-      // (the dot before it one with it: it goes as the name does)
       words(o, fn() { "·   " + app_name(app_now()) }, 12.0, ui_muted)
       .laid_nowhere(view::Live::By(fn() { kind() != 2 || app_now() == "" }))
       .shrink(view::Live::Is(400.0))
@@ -224,7 +194,6 @@ fn title_bar(parent : view::View) -> Unit {
       |> ignore
     })
     |> ignore
-    // the right side: the recorder's chip, the folder and settings keys, and (on Windows) the window's keys
     bar.box(fn(side) {
       side.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::By(fn() { Some(side_need.get()) })).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
       moves(side)
@@ -234,8 +203,6 @@ fn title_bar(parent : view::View) -> Unit {
         content.box(fn(tools) {
           tools.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).padding(view::Live::Is((0.0, 0.0, if mac { 14.0 } else { 6.0 }, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           recorder_chip(tools)
-          // (the saved clips' key, a stack of clips (the folder read as 「open a folder」: the user, 2026-11-15); on
-          // their page, the key that opens their folder)
           icon_button(tools, fn() { if library_open.get() { "folder" } else { "clips" } }, fn() { if library_open.get() { t("打开文件夹") } else { t("已保存片段") } }, fn() {
             if library_open.untracked() {
               rp_mkdirs(cstr(clips_dir())) |> ignore
@@ -272,7 +239,7 @@ fn title_bar(parent : view::View) -> Unit {
       |> ignore
     })
     |> ignore
-    // (the maximize button the host's as well, for Windows Snap Layouts: the second from the right)
+    // Register maximize button rect for Windows Snap Layouts.
     if !mac {
       let snap = bar.by_room(fn(_, room) {
         bar.reacts(fn() { room.width() }, fn(w) { hostapi::window_snap(w - key_w * 2.0, 0.0, key_w, th) })
@@ -282,9 +249,6 @@ fn title_bar(parent : view::View) -> Unit {
   })
   |> ignore}
 
-/// The picture on the stage, in the well, as large as it fits with no margin, corner or hairline round it (the user,
-/// 2026-11-14: 「视频的四周的padding感觉不需要」), at its own shape; filling the screen edge to edge in full screen. A press plays or pauses, a double
-/// press fills the screen or comes back.
 fn picture(parent : view::View) -> Unit {
   parent.box(fn(stage) {
     stage
@@ -312,11 +276,9 @@ fn picture(parent : view::View) -> Unit {
           .on_menu(fn(m) { open_moment_menu(m.wx, m.wy, pos_now(), true) })
           .on_pointer_moved(fn() {
             (pointer_moved.v)()
-            // (where it is over the picture, for the window picker as clip mode begins under a still pointer)
             picker_at.set(pic.pointer_here())
           })
           |> ignore
-          // (dragged, the real frames: never the index's picture over it, the user's 「画面会变糊…有闪烁」 of 2026-11-14)
           native()
           .picture(pic)
           .grow(view::Live::Is(1.0))
@@ -342,16 +304,11 @@ fn picture(parent : view::View) -> Unit {
   })
   |> ignore}
 
-/// The window filling its screen (1), back (0), or only asked (-1): whether it fills it now.
-
 fn set_full_screen(on : Bool) -> Unit {
   full_screen.set(rp_fullscreen(if on { 1 } else { 0 }) == 1)}
 
-/// The row under the timeline, 40 high: left the marker, full screen and the volume; the play key in the middle with
-/// back and on; right back to the newest and the clip.
 fn controls(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    // (as tall as its tallest key, 保存/剪辑's 32: 40 left room round them for nothing, the user, 2026-11-16)
     row.row(view::Live::Is(true)).height(view::Live::Is(Some(32.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     let play_key = fn(b : view::View, press : () -> Unit) { play_button(b, press) }
     row.box(fn(left) {
@@ -361,7 +318,6 @@ fn controls(parent : view::View) -> Unit {
         if clip {
           window_bar(b)
         } else {
-          // (a toggle: filled where a marker is at the playhead, pressed it takes that one away)
           icon_button(b, fn() {
               match the_root.v {
                 Some(r) if mark_at_playhead(r) is Some(_) => "bookmark-on"
@@ -394,19 +350,13 @@ fn controls(parent : view::View) -> Unit {
       }, at_once=true)
     })
     |> ignore
-    // the middle: the play key at the very middle of the window, back and forward either side of it, and beyond them
-    // two slots of one width, so what is in them never moves the play key (the user, 2026-11-14: 「好像没居中」): on its
-    // left in clip mode where the playhead is in the clip (0:12 / 0:30, as Steam's editor has it), on its right the
-    // speed
     row.box(fn(mid) {
       mid.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
       let slot_w = 112.0
       mid.box(fn(l) {
         l.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 6.0, 0.0))) |> ignore
         l.show(fn() { clipping.get() }, fn(b) {
-          // (its digits all one width (the theme's tabular figures), so nothing shifts as the seconds go)
           words(b, fn() {
-            // (on the clip's own times: what the seams leave out not counted, as the saved clip has it)
             let (a, z) = (clip_a.get(), clip_b.get())
             let at = clip_time(clamp(pos_drawn(b), a, z))
             clock(at) + " / " + clock(clip_kept())
@@ -416,7 +366,6 @@ fn controls(parent : view::View) -> Unit {
       })
       |> ignore
       icon_button(mid, fn() { "back-15" }, fn() { t("后退 15 秒") }, fn() { jump_by(-15000.0) }, shortcut="back15") |> ignore
-      // (in clip mode play goes on from where it was in the clip, from its start past it)
       play_key(mid, fn() {
         if clipping.untracked() {
           if want_play.untracked() {
@@ -442,7 +391,6 @@ fn controls(parent : view::View) -> Unit {
         b.row(view::Live::Is(true)).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
         if clip {
           window_options_button(b)
-          // (undo and redo, as Ctrl+Z and Ctrl+Y: the user, 2026-11-14 「需要加上手动历史前进后退按钮」)
           b.box(fn(h) {
             h.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
             for step in [("undo", true), ("redo", false)] {
@@ -472,7 +420,6 @@ fn controls(parent : view::View) -> Unit {
           })
           tip(save_k, fn() { t("保存片段") }, shortcut="save")
         } else {
-          // (under a filter of apps: how many of its stretches the timeline shows and how long they come to)
           b.show(fn() { filter_on() && ax_on() }, fn(x) {
             x.padding(view::Live::Is((0.0, 0.0, 2.0, 0.0))) |> ignore
             words(x, filter_summary, 12.0, ui_subtle) |> ignore
@@ -491,8 +438,6 @@ fn controls(parent : view::View) -> Unit {
   })
   |> ignore}
 
-/// How fast it plays, pressed for the next speed (0.5× … 4×): the replay's, or what `now` and `set` say (a saved
-/// clip's, on its dark `stage`).
 fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, stage? : Bool) -> Unit {
   let now = match now { Some(__mbt_v) => __mbt_v, None => fn() { speed.get() } }
   let set = match set { Some(__mbt_v) => __mbt_v, None => set_speed }
@@ -506,9 +451,6 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
       "\{s}×"
     }
   }
-  // (a menu of the speeds over it, up to 20× (the user, 2026-11-13: 「最快应该能到x10」「需要dropdown」; 2026-11-23:
-  // 「需要再加上20x」), the one now ticked; that those past 4× have no sound the speaker says, not this (the user,
-  // 2026-11-23: 「不需要写到速度切换这里，只在播放那里的声音图标标一下就行」))
   let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
   let k = pressable(parent, label, fn() {
     guard key.v is Some(b) else { return }
@@ -553,9 +495,6 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
   })
   key.v = Some(k)}
 
-/// The zoom key (the user, 2026-11-13: 「找一个地方放一下缩放比例」, 「放控制行右边」): a magnifier, how long the view
-/// is (as it changes: the wheel, the overview's ends, the keys), a chevron; pressed, a menu over it of 1, 5, 10, 30
-/// minutes, an hour and all of it (none longer than the buffer), the one the view is ticked.
 fn zoom_key(parent : view::View) -> Unit {
   let zoom_tip = fn() { t(if is_mac() { "时间线缩放 · ⌘+滚轮" } else { "时间线缩放 · Ctrl+滚轮" }) }
   let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
@@ -582,7 +521,6 @@ fn zoom_key(parent : view::View) -> Unit {
     .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .ground(view::Live::By(fn() { mix(clear(c_s3()), c_s3(), hand.shown(b)) }))
-    // (nothing recorded, nothing to zoom: no 「0 秒」)
     .laid_nowhere(view::Live::By(fn() { !has_segs() }))
     |> ignore
     b.box(fn(g) {
@@ -603,12 +541,10 @@ fn zoom_key(parent : view::View) -> Unit {
   tip(k, zoom_tip)
   key.v = Some(k)}
 
-/// The dock: a hairline over it, 26 over, 20 either side, 10 under; the timeline and the controls row.
 fn dock(parent : view::View) -> Unit {
   rule(parent, hair)
   parent.box(fn(d) {
-    // (its 18 over the timeline are the timeline's own: the pointer anywhere over the heat lane and the room above it
-    // shows the hover card, the user, 2026-11-17 「触发preview的区域太小了，实际上应该也能包含heatmap以及上方padding部分」)
+    // Top padding (dock_over) lives inside timeline() so hover preview covers the heatmap and margin above it.
     d.ground(view::Live::By(c_bg)).padding(view::Live::Is((20.0, 0.0, 20.0, 6.0))) |> ignore
     d.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
     d.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
@@ -616,7 +552,6 @@ fn dock(parent : view::View) -> Unit {
   })
   |> ignore}
 
-/// The replay's keys, as actions the keymap binds (none while a dialog is open).
 fn key_bindings() -> view::Keymap {
   let k = fn(code : Int, action : String, mods : Int) -> view::Binding {
     view::Binding::{ keys: [view::Stroke::{ code: code, mods: mods }], action: action, when: view::KeyWhen::Always }
@@ -630,7 +565,6 @@ fn key_bindings() -> view::Keymap {
     k(ui::key_escape, "escape", 0),
     k(ui::key_code_enter, "save", 0),
     k(ui::key_code_enter, "save-copy", shift),
-    // (the arrows a frame, as an editor's; with Shift 5 s: the user, 2026-11-14 「键盘左右按键应该是按照帧来跳」)
     k(ui::key_code_left, "frame-back", 0),
     k(ui::key_code_right, "frame-on", 0),
     k(ui::key_code_left, "back5", shift),
@@ -641,7 +575,6 @@ fn key_bindings() -> view::Keymap {
     ch('.', "frame-on", 0),
     k(ui::key_code_home, "home", 0),
     k(ui::key_code_end, "latest", 0),
-    // (a saved clip's player: the clip before and after)
     k(ui::key_code_page_up, "page-back", 0),
     k(ui::key_code_page_down, "page-on", 0),
     ch('=', "zoom-in", 0),
@@ -655,7 +588,6 @@ fn key_bindings() -> view::Keymap {
     ch('i', "clip-start", 0),
     ch('o', "clip-end", 0),
     ch('c', "clip", 0),
-    // (the frame shown, onto the clipboard: the user, 2026-11-16 「copy frame 感觉应该加个快捷键，比如ctrl c」)
     k(ui::key_code_copy, "copy-frame", ui::mod_ctrl),
     ch('s', "save", ui::mod_ctrl),
     ch('s', "save-copy", ui::mod_ctrl | shift),
@@ -680,11 +612,6 @@ fn key_bindings() -> view::Keymap {
   arr_append(keys, region_bindings())
   view::Keymap::new(keys)}
 
-/// What each of the replay's actions does, by its name (replay_actions).
-
-
-/// The actions a layer over the rest (a modal one: the keys reach nothing under it) does itself, as the window does
-/// them (Escape closing what is open, Enter saving in the save dialog).
 fn layer_keys(v : view::View, names : Array[String]) -> Unit {
   for name in names {
     v.on_action(name, fn(_) {
@@ -699,13 +626,10 @@ fn layer_keys(v : view::View, names : Array[String]) -> Unit {
     |> ignore
   }}
 
-/// What each of the replay's actions does. While the saved clips' page is over the replay, only Escape: the player
-/// under it neither plays nor moves for its keys.
 fn replay_actions(root : view::View) -> Unit {
   let on = fn(name : String, f : () -> Unit) {
     actions.set(name, f)
     root.on_action(name, fn(_) {
-      // (Escape and Settings work whether there is anything recorded or not)
       if (segs.is_empty() || library_open.untracked()) && name != "escape" && name != "settings" {
         return false
       }
@@ -734,7 +658,6 @@ fn replay_actions(root : view::View) -> Unit {
   })
   on("full", fn() { set_full_screen(!full_screen.untracked()) })
   on("save", fn() { if export_open.untracked() { export_now(false) } else if clipping.untracked() { open_export() } })
-  // (in export dialog: honor the dialog's chosen mode and copy; outside it: instant lossless save+copy when not cropping)
   on("save-copy", fn() {
     if export_open.untracked() {
       export_now(true)
@@ -749,7 +672,6 @@ fn replay_actions(root : view::View) -> Unit {
   })
   on("escape", fn() {
     if window_options_open.untracked() {
-      // (the window's options over their key (a menu of a kind: menu_up): they close, the window stays picked)
       window_options_open.set(false)
       menu_up.set(false)
     } else if menu_up.untracked() {
@@ -757,7 +679,6 @@ fn replay_actions(root : view::View) -> Unit {
     } else if av1_note.untracked() != "" {
       av1_note.set("")
     } else if consent_open.untracked() {
-      // (the first run's sheet: the window hidden, as its close does, nothing written; read again, the sheet closes)
       if consent_reading.untracked() {
         consent_open.set(false)
       } else if is_mac() {
@@ -770,7 +691,6 @@ fn replay_actions(root : view::View) -> Unit {
         hostapi::window_act(3)
       }
     } else if clip_playing.untracked() != "" {
-      // (full screen left before the player is closed)
       if full_screen.untracked() {
         set_full_screen(false)
       } else {
@@ -799,7 +719,6 @@ fn replay_actions(root : view::View) -> Unit {
     } else if clipping.untracked() && region.untracked() is Some(_) {
       clear_region()
     } else if full_screen.untracked() {
-      // (full screen left before the window picked is let go)
       set_full_screen(false)
     } else if picked_hwnd.untracked() != 0L {
       pick_window(Option::None)
@@ -809,7 +728,6 @@ fn replay_actions(root : view::View) -> Unit {
       saved.set("")
     }
   })
-  // (the arrows move a selected region, else the playhead)
   on("back5", fn() {
     if region_selected.untracked() {
       clip_mark()
@@ -860,7 +778,6 @@ fn replay_actions(root : view::View) -> Unit {
       native_step(1)
     }
   })
-  // (in clip mode Home and End go to the clip's start and end)
   on("home", fn() { jump_to(if clipping.untracked() { clip_a.untracked() } else { 0.0 }) })
   on("latest", fn() { if clipping.untracked() { jump_to(clip_b.untracked()) } else { show_latest() } })
   on("zoom-in", fn() { zoom_by(2.0) })
@@ -890,14 +807,10 @@ fn replay_actions(root : view::View) -> Unit {
   on("mark", fn() { toggle_marker(root) })
   on("copy-frame", fn() { copy_frame(pos_now(), shown=true) })}
 
-/// The window as made once.
 fn make_window(root : view::View) -> Unit {
   the_root.v = Some(root)
-  // (the arrow over what is pressed, as Windows' own apps keep it: no hand anywhere, the user's, 2026-11-14)
   root.tree.hand_over_presses(false)
-  // (the window's parts drawn in still.fail's theme, its digits all one width among them (a time running keeps its
-  // width): told as the tree is made, as still.fail's app does; told before @ui.run it was forgotten as the window's
-  // own was made (mbui window_kept.mbt), the tree in mbui's plain theme, its digits the font's own, 2026-11-17)
+  // Must set theme after tree creation; pre-run theme is overwritten when the window is constructed.
   ui::set_tree_theme(sf_ui_theme_now)
   load_prefs()
   ask_system(root)
@@ -908,7 +821,6 @@ fn make_window(root : view::View) -> Unit {
   region_keys(root)
   watch_pointer(root)
   dev_pointer(root)
-  // (a test window's saved note shown at once, for its picture: REPLAY_DEV_SAVED, the clip's path; "-" its line alone)
   let dev_saved = ui::env("REPLAY_DEV_SAVED")
   if dev_saved != "" {
     saved.set(if dev_saved == "-" { t("正在保存…") } else { tf("已保存 {0} 的片段", ["0:30"]) })
@@ -920,7 +832,7 @@ fn make_window(root : view::View) -> Unit {
   })
   chrome(root, top)
   picture(root)
-  // (in full screen the picture is over all of the window: the dock kept at its foot)
+  // Spacer keeps the dock pinned to the bottom when picture switches to over() in fullscreen.
   root.box(fn(s) { s.grow(view::Live::Is(1.0)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore }) |> ignore
   let foot = root.box(fn(b) { dock(b) })
   chrome(root, foot)
@@ -936,14 +848,12 @@ fn make_window(root : view::View) -> Unit {
   index_watch(root)
   perf_watch(root)
   update_watch(root)
-  // (the folder first read once the window is up, a moment after it is made)
   if hidden_unshown() {
     awaiting_first_show.set(true)
   }
   root.reacts(fn() { ((c_bg() >> 8) & 0xFFFFFFL).to_int() }, fn(rgb) { rp_set_bg_rgb(rgb) })
   root.at_moment(now() + 1.0, fn() {
-    // (started hidden by the recorder and not shown yet: frame 1 is now presented while cloaked, so hide it and wait
-    // to read or decode the folder till its first real show, resident.mbt)
+    // Started hidden/cloaked by recorder: defer folder load/decode until first real show (resident.pion).
     if hidden_unshown() {
       first_show_waits.v = Some(root)
       stay_resident(root)
@@ -958,21 +868,18 @@ fn make_window(root : view::View) -> Unit {
   })
   |> ignore}
 
-
 fn main() -> Unit {
   host::install()
   if demux_dump() {
     return
   }
   sf_set_shortcuts(shortcut_words)
-  // (the recorder's note: a card by the tray, shown once drawn, gone by itself: note_card.mbt)
   if note_mode() != "" {
     rp_start_hidden()
     hostapi::window_setup(note_w, note_h(), note_w, note_h(), true)
     ui::run("ScreenReplay", note_window, theme=sf_ui_theme_now)
     return
   }
-  // (the tray's panel: the same program, its own small window, hidden till the recorder shows it)
   if tray_mode() {
     rp_start_hidden()
     hostapi::window_setup(tray_w, tray_h, tray_w, tray_h, true)
@@ -981,11 +888,8 @@ fn main() -> Unit {
   }
   rp_set_bg_rgb(((signals::untracked(c_bg) >> 8) & 0xFFFFFFL).to_int())
   start_hidden()
-  // (no title bar of the system's: the app's own)
   hostapi::window_setup(1000.0, 720.0, 1440.0, 900.0, true)
-  // (what the host clears to and what shows where nothing of the tree draws its own ground: the window's, as the
-  // theme has it; left as mbui's own near-white, the hairlines between the title bar, the picture and the dock were
-  // drawn over white: bright lines in the dark, the reviewer's 52nd, 24)
+  // Pass theme to ui::run so host clear color matches dark background instead of white.
   ui::run("ScreenReplay", make_window, theme=sf_ui_theme_now)
 }
 fn __mbt_local_title_bar_measure_5(bar : view::View, left_box : mbt_compat::Ref[Option[view::View]], right_box : mbt_compat::Ref[Option[view::View]], side_need : signals::Signal[Double]) -> Unit {

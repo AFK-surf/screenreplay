@@ -2,19 +2,6 @@ import "signals"
 import "ui"
 import "view"
 
-// A custom region to clip (自定义区域, clip mode): dragged out on the picture (a press moved 4 points or more; less is
-// a click, the window picker's), moved by its inside, resized by its edges and corners, its shape free or locked to a
-// ratio. It is kept in the recording's pixels, so it stays on the same part of the picture as the window is resized or
-// fills the screen; exported, it is one fixed crop for the whole clip (crop_plan's lines, one of them). A window
-// picked and a region are one or the other. Selected (drawn or its frame clicked), the arrows move it, Shift by 10,
-// Alt resizes it by its bottom right corner; a press on the timeline, on a control outside the picture, or Tab lets
-// it go (it stays, unselected).
-
-/// What the clip is of, chosen in clip mode's bar: 0 the whole picture (整屏), 1 a window picked (选窗口), 2 an area
-/// dragged out (框选区域). 整屏 each time clip mode is entered.
-
-
-/// Another kind chosen: what the one before had (a window picked, a region) let go.
 fn set_clip_kind(k : Int) -> Unit {
   clip_mark()
   clip_kind.set(k)
@@ -25,28 +12,9 @@ fn set_clip_kind(k : Int) -> Unit {
     clear_region()
   }}
 
-/// The region in the recording's pixels (x, y, w, h, whole pixels), None none.
-
-
-/// Whether it is selected (its handles filled; the arrows its).
-
-
-/// Its shape: 0 free, 1 16:9, 2 9:16, 3 1:1, 4 4:3. Free unless picked from the chip's menu for the region there is.
-
-
-/// What the hand is doing to it: 0 nothing, 1 drawing it, 2 moving it, 3 resizing it.
-
-
-/// The edge or corner held while resizing (hx, hy: -1 left/top, 1 right/bottom, 0 neither).
-
-
-/// The ratios' names and their width over height (0: free).
-
-
 fn ratio_now() -> Double {
   region_ratios[region_ratio.get()].1}
 
-/// The region in force: in clip mode only.
 fn region_on() -> Option[(Double, Double, Double, Double)] {
   if clipping.get() {
     region.get()
@@ -54,33 +22,27 @@ fn region_on() -> Option[(Double, Double, Double, Double)] {
     Option::None
   }}
 
-/// Whether the clip is a part of the picture: a window picked or a region.
 fn cropping() -> Bool {
   picked_hwnd.get() != 0L || region_on() is Some(_)}
 
-/// The recording's size in pixels.
 fn rec_size() -> (Double, Double) {
   let (sw, sh, _) = source_format()
   (sw, sh)}
 
-/// The region let go; the next one starts free (a ratio only as it is picked from the chip's menu).
 fn clear_region() -> Unit {
   region.set(None)
   region_ratio.set(0)
   region_selected.set(false)
   region_grab.set(0)}
 
-/// Let go (unselected) by a press elsewhere: the timeline, a control outside the picture, Tab.
 fn region_let_go() -> Unit {
   if region_selected.untracked() {
     region_selected.set(false)
   }}
 
-/// The size it is exported at: its own, each down to even.
 fn region_export_size(r : (Double, Double, Double, Double)) -> (Int, Int) {
   (even(r.2), even(r.3))}
 
-/// Its size as its label says it: 「1754 × 986」, and 「 · 16:9」 when locked.
 fn region_label() -> String {
   match region_on() {
     Option::Some(r) => {
@@ -91,12 +53,10 @@ fn region_label() -> String {
     Option::None => ""
   }}
 
-/// The crop for the encoder (a line: from the clip's start, x, y, w, h) and the picture it makes.
 fn region_crop(r : (Double, Double, Double, Double)) -> (String, Int, Int) {
   let (w, h) = region_export_size(r)
   ("0\t\{r.0.to_int()}\t\{r.1.to_int()}\t\{w}\t\{h}", w, h)}
 
-/// A rectangle (x0, y0, x1, y1) as the region: whole pixels, at least the least size, inside the picture `sw` × `sh`.
 fn region_fit(x0 : Double, y0 : Double, x1 : Double, y1 : Double, sw : Double, sh : Double) -> (Double, Double, Double, Double) {
   let w = clamp((x1 - x0).round(), dmin(region_min, sw), sw)
   let h = clamp((y1 - y0).round(), dmin(region_min, sh), sh)
@@ -104,9 +64,6 @@ fn region_fit(x0 : Double, y0 : Double, x1 : Double, y1 : Double, sw : Double, s
   let y = clamp(y0.round(), 0.0, sh - h)
   (x, y, w, h)}
 
-/// The rectangle (x0, y0, x1, y1) with the edge or corner (hx, hy) brought to (px, py), in the recording's pixels: free,
-/// that edge alone (stopping at the picture's edge and at the least size); locked to `r` (width over height), a corner
-/// scales it about the opposite corner, an edge changes the other side too about the opposite edge's middle.
 fn region_resized(o : (Double, Double, Double, Double), hx : Int, hy : Int, px : Double, py : Double, r : Double, sw : Double, sh : Double) -> (Double, Double, Double, Double) {
   let (x0, y0, x1, y1) = o
   if r <= 0.0 {
@@ -118,7 +75,6 @@ fn region_resized(o : (Double, Double, Double, Double), hx : Int, hy : Int, px :
   }
   let min_w = dmax(region_min, region_min * r)
   if hx != 0 && hy != 0 {
-    // a corner: about the opposite one, as far as the pointer goes either way
     let ax = if hx > 0 { x0 } else { x1 }
     let ay = if hy > 0 { y0 } else { y1 }
     let want = dmax(dmax(0.0, hx.to_double() * (px - ax)), dmax(0.0, hy.to_double() * (py - ay)) * r)
@@ -131,7 +87,6 @@ fn region_resized(o : (Double, Double, Double, Double), hx : Int, hy : Int, px :
     return region_fit(nx0, ny0, nx0 + w, ny0 + h, sw, sh)
   }
   if hx != 0 {
-    // a side edge: the width from the opposite edge, the height about its middle
     let ax = if hx > 0 { x0 } else { x1 }
     let cy = (y0 + y1) / 2.0
     let room_w = if hx > 0 { sw - ax } else { ax }
@@ -141,7 +96,6 @@ fn region_resized(o : (Double, Double, Double, Double), hx : Int, hy : Int, px :
     let ny0 = clamp(cy - h / 2.0, 0.0, sh - h)
     return region_fit(nx0, ny0, nx0 + w, ny0 + h, sw, sh)
   }
-  // the top or the bottom edge: the height from the opposite edge, the width about its middle
   let ay = if hy > 0 { y0 } else { y1 }
   let cx = (x0 + x1) / 2.0
   let min_h = min_w / r
@@ -152,7 +106,6 @@ fn region_resized(o : (Double, Double, Double, Double), hx : Int, hy : Int, px :
   let nx0 = clamp(cx - w / 2.0, 0.0, sw - w)
   region_fit(nx0, ny0, nx0 + w, ny0 + h, sw, sh)}
 
-/// The ratio chosen: the region keeps its middle and about its area, made smaller where the picture has not the room.
 fn set_region_ratio(k : Int) -> Unit {
   clip_mark()
   region_ratio.set(k)
@@ -173,8 +126,6 @@ fn set_region_ratio(k : Int) -> Unit {
   let ny = clamp(cy - nh / 2.0, 0.0, sh - nh)
   region.set(Some(region_fit(nx, ny, nx + nw, ny + nh, sw, sh)))}
 
-/// Where a point (the picture's own points) is on the region drawn `k` points a recording's pixel: outside (None),
-/// inside ((0, 0)), or on an edge or a corner ((hx, hy)), 6 points either side of it.
 fn region_hit(r : (Double, Double, Double, Double), k : Double, x : Double, y : Double) -> Option[(Int, Int)] {
   let (rx, ry, rw, rh) = (r.0 * k, r.1 * k, r.2 * k, r.3 * k)
   let reach = 6.0
@@ -188,8 +139,6 @@ fn region_hit(r : (Double, Double, Double, Double), k : Double, x : Double, y : 
   }
   Option::Some((hx, hy))}
 
-/// The pointer's shape over the region (or drawing one): inside, the arrow, held or not (the user, 2026-11-14: no hand,
-/// no four-way arrows); an edge, resized across it; a corner, resized along its diagonal; outside, None (the picker's).
 fn region_cursor(k : Double, at : Option[(Double, Double)]) -> Option[view::Cursor] {
   match region_grab.get() {
     1 => return Option::Some(view::Cursor::Crosshair)
@@ -215,15 +164,6 @@ fn side_cursor(side : (Int, Int)) -> view::Cursor {
     _ => view::Cursor::ResizeNESW
   }}
 
-// ---- the hand ----
-
-/// A press on the picture as it went down: where (points), what it was on, the region then (x0, y0, x1, y1), the scale
-/// (points a recording's pixel), and whether it has been dragged (4 points from there).
-
-
-/// A press or a drag on the picture `w` points wide in clip mode: where it `draws` (框选区域), dragged 4 points, the
-/// region drawn, moved or resized, a click outside it letting it go unselected; else (选窗口) a click alone, the
-/// window picker's (`click`, given where), a drag nothing.
 fn region_drag(d : view::Drag, w : Double, click : (Double, Double) -> Unit, draws : Bool) -> Unit {
   let (sw, sh) = signals::untracked(rec_size)
   if w <= 0.0 || sw <= 0.0 {
@@ -258,7 +198,6 @@ fn region_drag(d : view::Drag, w : Double, click : (Double, Double) -> Unit, dra
             region_grab.set(3)
           }
           None => {
-            // (a new one is free, whatever the one before was locked to)
             region_ratio.set(0)
             region_grab.set(1)
           }
@@ -307,21 +246,12 @@ fn region_drag(d : view::Drag, w : Double, click : (Double, Double) -> Unit, dra
         return
       }
       match hit {
-        // (on its frame or in it: selected)
-        // (on its frame or in it: selected)
         Some(_) => region_selected.set(true)
-        // (outside it: drawing, it is let go unselected and stays; picking a window, the click picks)
-        // (outside it: drawing, it is let go unselected and stays; picking a window, the click picks)
         None => if draws { region_let_go() } else { click(x0, y0) }
       }
     }
   }}
 
-// ---- the keys ----
-
-/// Alt with an arrow told as an arrow with Alt held (replay_win.c), once the window is up: 1 where it is.
-
-/// The region moved by (`dx`, `dy`) pixels, only while it is selected in clip mode; whether it was.
 fn region_nudge(dx : Double, dy : Double) -> Bool {
   guard clipping.untracked() && region_selected.untracked() else { return false }
   guard region.untracked() is Some((x, y, w, h)) else { return false }
@@ -329,15 +259,12 @@ fn region_nudge(dx : Double, dy : Double) -> Bool {
   region.set(Some((clamp(x + dx, 0.0, sw - w), clamp(y + dy, 0.0, sh - h), w, h)))
   true}
 
-/// The region's bottom right corner moved by (`dw`, `dh`) pixels (its shape kept where it is locked), only while it is
-/// selected in clip mode; whether it was.
 fn region_grow(dw : Double, dh : Double) -> Bool {
   guard clipping.untracked() && region_selected.untracked() else { return false }
   guard region.untracked() is Some((x, y, w, h)) else { return false }
   let (sw, sh) = signals::untracked(rec_size)
   let r = signals::untracked(ratio_now)
   let next = if r > 0.0 {
-    // (locked: the width by the step, or by the height's step at its ratio; the height from the width)
     let want = if dw != 0.0 { w + dw } else { (h + dh) * r }
     let nw = clamp(want, dmax(region_min, region_min * r), dmin(sw - x, (sh - y) * r))
     region_fit(x, y, x + nw, y + nw / r, sw, sh)
@@ -347,7 +274,6 @@ fn region_grow(dw : Double, dh : Double) -> Bool {
   region.set(Some(next))
   true}
 
-/// The keys of the region: the arrows (Shift by 10; Alt resizing), Delete and Backspace; Tab lets it go.
 fn region_keys(root : view::View) -> Unit {
   let act = fn(name : String, f : () -> Bool) {
     root.on_action(name, fn(_) {
@@ -378,13 +304,12 @@ fn region_keys(root : view::View) -> Unit {
   })
   act("clip-undo", clip_undo)
   act("clip-redo", clip_redo)
-  // (Tab: let go, and on to what Tab does)
+  // Return false so Tab still advances focus.
   act("rgn-tab", fn() {
     region_let_go()
     false
   })}
 
-/// The region's keys in the keymap.
 fn region_bindings() -> Array[view::Binding] {
   let k = fn(code : Int, action : String, mods : Int) -> view::Binding {
     view::Binding::{ keys: [view::Stroke::{ code: code, mods: mods }], action: action, when: view::KeyWhen::Always }

@@ -1,5 +1,3 @@
-// Re-encoded clip export (H.264, HEVC, AV1, animated GIF) and GIF byte-size estimator on macOS
-// (matching app/replay_export.cpp's exact C ABI, plan/crops formats, and state machine).
 #import "replay_mac_common.h"
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
@@ -122,7 +120,6 @@ static CropStep crop_at(const std::vector<CropStep> &crops, double clip_ms) {
   return *cur;
 }
 
-// Renders `srcBuf` (optionally pre-scaled by `scale` and cropped in top-left pixels `crop`) into `dstW x dstH` `dstBuf`.
 static bool render_cropped_pixelbuffer(CIContext *ciCtx, CVPixelBufferRef srcBuf,
                                        double scale, const CropStep &crop,
                                        CVPixelBufferRef dstBuf, int dstW, int dstH) {
@@ -206,7 +203,6 @@ static int run_video_export(const ExportJob &job) {
       AVVideoColorPropertiesKey : colorProps,
     };
     if (![writer canApplyOutputSettings:vSettings forMediaType:AVMediaTypeVideo]) {
-      // Fallback to H.264 if requested codec cannot apply settings
       vSettings = @{
         AVVideoCodecKey : AVVideoCodecTypeH264,
         AVVideoWidthKey : @(job.width),
@@ -230,7 +226,6 @@ static int run_video_export(const ExportJob &job) {
                                                                          sourcePixelBufferAttributes:pbAttrs];
     [writer addInput:vInput];
 
-    // Check if any segment has audio
     bool anyAudioSource = false;
     for (const auto &seg : job.segs) {
       AVURLAsset *a = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:seg.path.c_str()]] options:nil];
@@ -382,7 +377,6 @@ static int run_video_export(const ExportJob &job) {
       }
     }];
 
-    // Audio pull queue (independent AVAssetReader per segment)
     if (aInput) {
       dispatch_group_enter(group);
       dispatch_queue_t aQueue = dispatch_queue_create("dev.pengx17.screenreplay.export.audio", DISPATCH_QUEUE_SERIAL);
@@ -519,7 +513,6 @@ static int run_video_export(const ExportJob &job) {
   }
 }
 
-// Encodes GIF frames to either a file URL (`to_file == true`) or in-memory CFMutableDataRef (`out_bytes`), honoring `stop_flag`.
 static bool encode_gif_common(const ExportJob &job, bool to_file, std::atomic<bool> &stop_flag,
                               bool update_progress, size_t *out_bytes, int max_sample_frames = 0) {
   @autoreleasepool {
@@ -664,8 +657,6 @@ static bool encode_gif_common(const ExportJob &job, bool to_file, std::atomic<bo
   }
 }
 
-// ---- GIF background size estimator ----
-
 static std::mutex g_est_mu;
 static std::condition_variable g_est_cv;
 static ExportJob g_est_job;
@@ -692,7 +683,7 @@ static void gif_estimator_loop() {
   }
 }
 
-}  // namespace
+}
 
 extern "C" int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output, int32_t width, int32_t height, int32_t fps,
                                    int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale) {

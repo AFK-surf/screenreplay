@@ -3,22 +3,7 @@ import "pixels"
 import "signals"
 import "view"
 
-// The timeline's axis under a filter of apps (the user, 2026-11-18: 「感觉还是得在filter模式下，主要显示过滤后的时间线」, the
-// mock's B with its seams' widths by how long was skipped, 「B4 缝宽随跳过时长」): only the ticked apps' stretches,
-// one after another, a seam between each two as wide as how long was left out between them (5 minutes about 8 points,
-// an hour about 28; 5 at least), plain ground with a faint hairline in its middle. What is before the first and after
-// the last is left out with no seam.
-//
-// The view (state.mbt's view_from and view_len) is along this axis: ms of the kept stretches, a seam counting as the
-// ms its points come to at the view's scale (`len` / ax_ref ms a point), so it keeps its width in points as the view
-// zooms. ax_d takes a moment of the buffer to the axis, ax_b back; with no filter both are the moment itself.
-
-/// The points the seams' widths are made for (about the band's width); they come to as much less on a narrower band.
-
-
-/// The kept stretches (ms into the buffer), the seam before each (points; 0 before the first) and, before each, the
-/// kept ms and the seams' points; all the kept ms and all the seams' points.
-
+// Buffer stretches (ks/kb/kept in ms) interleaved with folded gap seams (g/gb/seams in pt at ax_ref, scaled by len/ax_ref to keep constant screen width).
 pub struct Axis {
   ks : Array[(Double, Double)]
   g : Array[Double]
@@ -31,31 +16,15 @@ pub fn __mbt_eq_axis(a : Axis, b : Axis) -> Bool {
   ({ let mut __aeq_0 = a.ks.length() == b.ks.length(); if __aeq_0 { let mut __ai_0 = 0; while __ai_0 < a.ks.length() { if !(((a.ks[__ai_0]).0 == (b.ks[__ai_0]).0) && ((a.ks[__ai_0]).1 == (b.ks[__ai_0]).1)) { __aeq_0 = false; break }; __ai_0 = __ai_0 + 1 } }; __aeq_0 }) && ({ let mut __aeq_1 = a.g.length() == b.g.length(); if __aeq_1 { let mut __ai_1 = 0; while __ai_1 < a.g.length() { if !(a.g[__ai_1] == b.g[__ai_1]) { __aeq_1 = false; break }; __ai_1 = __ai_1 + 1 } }; __aeq_1 }) && ({ let mut __aeq_2 = a.kb.length() == b.kb.length(); if __aeq_2 { let mut __ai_2 = 0; while __ai_2 < a.kb.length() { if !(a.kb[__ai_2] == b.kb[__ai_2]) { __aeq_2 = false; break }; __ai_2 = __ai_2 + 1 } }; __aeq_2 }) && ({ let mut __aeq_3 = a.gb.length() == b.gb.length(); if __aeq_3 { let mut __ai_3 = 0; while __ai_3 < a.gb.length() { if !(a.gb[__ai_3] == b.gb[__ai_3]) { __aeq_3 = false; break }; __ai_3 = __ai_3 + 1 } }; __aeq_3 }) && (a.kept == b.kept) && (a.seams == b.seams)
 }
 
-
-/// A seam's width for `skip` ms left out: 8 points at 5 minutes, 5.6 more each time it doubles (28 at an hour), 5 at
-/// least.
 fn seam_w(skip : Double) -> Double {
   clamp(8.0 + 5.6 * mbt_compat::math_ln(dmax(1.0, skip) / 300000.0) / mbt_compat::math_ln(2.0), 5.0, 28.0)}
-
-/// Where nothing was recorded for at least this long (ms), the timeline folds it to a seam when fold_gaps is on;
-/// shorter gaps stay where they are, hatched.
-
-
-/// What was recorded (ms into the buffer), runs apart by less than fold_min taken as one (bound).
-
-
-/// The axis while a filter of apps is on and something of theirs was recorded; with no filter, while fold_gaps is on
-/// and there is a gap of fold_min or longer (bound).
-
 
 fn axis() -> Option[Axis] {
   axis_now.get()}
 
-/// Whether the timeline is along a filter's axis (bound).
 fn ax_on() -> Bool {
   axis_now.get() is Some(_)}
 
-/// The last kept stretch starting at or before `t` (ms into the buffer), -1 before the first.
 fn ax_find(a : Axis, t : Double) -> Int {
   let mut lo = 0
   let mut hi = a.ks.length() - 1
@@ -72,12 +41,9 @@ fn ax_find(a : Axis, t : Double) -> Int {
   }
   lo}
 
-/// Where kept stretch `i` starts along the axis, at the view's length `len`.
 fn ax_start(a : Axis, i : Int, len : Double) -> Double {
   a.kb[i] + a.gb[i] * len / ax_ref}
 
-/// Moment `t` (ms into the buffer) along the axis at the view's length `len`: in a kept stretch, where it is in it; in
-/// what was left out between two, the seam's middle; before the first, its start; after the last, the axis' end.
 fn ax_d(t : Double, len : Double) -> Double {
   match axis() {
     Option::None => t
@@ -98,14 +64,11 @@ fn ax_d(t : Double, len : Double) -> Double {
     }
   }}
 
-/// The moment (ms into the buffer) at `d` along the axis at the view's length `len`: in a seam, the end of the stretch
-/// before it (its near half) or the start of the one after (its far half).
 fn ax_b(d : Double, len : Double) -> Double {
   match axis() {
     Option::None => d
     Option::Some(a) => {
       let n = a.ks.length()
-      // (the last stretch starting at or before d)
       let mut lo = 0
       let mut hi = n - 1
       while lo < hi {
@@ -134,23 +97,18 @@ fn ax_b(d : Double, len : Double) -> Double {
     }
   }}
 
-/// How long the axis is at the view's length `len`.
 fn ax_span(len : Double) -> Double {
   match axis() {
     Option::None => span()
     Option::Some(a) => a.kept + a.seams * len / ax_ref
   }}
 
-/// The view's length that holds all of the axis (its seams as wide as that length makes them).
 fn view_total() -> Double {
   match axis() {
     Option::None => span()
     Option::Some(a) => a.kept / (1.0 - a.seams / ax_ref)
   }}
 
-/// A picture `w` wide of the axis from `from` `len` long, made of `make`'s pictures of each kept stretch (or the part
-/// of it in reach; `make(w, from, len)` draws the buffer from `from` `len` long `w` wide) laid side by side as they lie
-/// along it; with no filter, `make`'s own.
 fn ax_picture(w : Double, from : Double, len : Double, make : (Double, Double, Double) -> Option[pixels::Vector]) -> Option[pixels::Vector] {
   match axis() {
     Option::None => make(w, from, len)
@@ -192,8 +150,6 @@ fn ax_picture(w : Double, from : Double, len : Double, make : (Double, Double, D
     }
   }}
 
-/// The seams in reach as a picture `w` wide (from `from` `len` long along the axis), `h` high: a hairline down each
-/// one's middle, 9 in from its top and foot; None with no filter.
 fn seams_picture(w : Double, from : Double, len : Double, h : Double) -> Option[pixels::Vector] {
   guard axis() is Option::Some(a) else { return Option::None }
   if w <= 0.0 || len <= 0.0 {
@@ -217,15 +173,12 @@ fn seams_picture(w : Double, from : Double, len : Double, h : Double) -> Option[
     Option::Some({ w: w, h: h, layers: [layer(ds, tone(0xFFFFFF24L, 0x00000024L))] })
   }}
 
-/// Under a filter of apps, what the timeline shows: 「6 段 · 共 54 分」 (bound).
 fn filter_summary() -> String {
   match axis_now.get() {
     Option::Some(a) => tf("{0} 段 · 共 {1}", [a.ks.length().to_string(), front_words(a.kept)])
     Option::None => ""
   }}
 
-/// The seam under the pointer at `x` across the band `w` wide, as node `v` draws the view (bound): its number (the
-/// stretch after it) where the pointer is on it or 2 points either side of it.
 fn seam_under(v : view::View, x : Double, w : Double) -> Option[Int] {
   guard axis_now.get() is Option::Some(a) else { return Option::None }
   if w <= 0.0 {
@@ -246,26 +199,12 @@ fn seam_under(v : view::View, x : Double, w : Double) -> Option[Int] {
   }
   Option::None}
 
-/// The seam under the pointer on the band, as node `v` draws the view (bound), not while something on it is held.
 fn seam_hovered(v : view::View) -> Option[Int] {
   match seam_x.get() {
     Option::Some(x) if grabbed.get() == 0 && !apps_open.get() => seam_under(v, x, (band_w.v)())
     _ => Option::None
   }}
 
-/// Where the pointer is across the band for the seams, its going away held 120 ms (as the hover card holds it): the
-/// hover goes and comes back between moves along the band, and the card, holding it, showed in the tip's place.
-
-
-/// When the pointer was last over the band (now's ms).
-
-
-/// The band's width (its room's, bound), as the timeline is made: the seams' tip reads it where the band's own closure
-/// is not at hand.
-
-
-/// Over the seam under the pointer, a tip of what was left out there: 「跳过 16 分 · 10:00 – 10:16」 (the user's B4:
-/// the seams say nothing till pointed at). The hover card and line stand back while it shows.
 fn seam_tip(band : view::View, w : () -> Double) -> Unit {
   band.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
@@ -277,6 +216,7 @@ fn seam_tip(band : view::View, w : () -> Double) -> Unit {
           seam_x.set(Some(x))
         }
         None => {
+          // Debounce 120 ms to match hover_card and avoid flashing hover_card during pointer jitter.
           let t = now()
           o.at_moment(t + 120.0, fn() {
             if hover_now_untracked() is None && now() - seam_seen.v >= 119.0 {
@@ -287,7 +227,6 @@ fn seam_tip(band : view::View, w : () -> Double) -> Unit {
         }
       }
     })
-    // (its words and where its middle is across the band, worked out once for the seam pointed at)
     let at = fn() -> Option[(String, Double)] {
       guard seam_hovered(o) is Some(i) else { return None }
       guard axis_now.get() is Some(a) else { return None }
@@ -312,7 +251,6 @@ fn seam_tip(band : view::View, w : () -> Double) -> Unit {
       .presses(view::Live::Is(false))
       .laid_nowhere(view::Live::By(fn() { at() is None }))
       .offset(view::Live::By(fn() {
-        // (as wide as its words and 8 either side, its middle over the seam's, kept inside the band)
         let (s, m) = at().unwrap_or(("", 0.0))
         let tw = sf_node_words_w(s, 11.5).ceil() + 16.0
         (clamp(m - tw / 2.0, 0.0, dmax(0.0, w() - tw)), -30.0)
@@ -327,8 +265,6 @@ fn seam_tip(band : view::View, w : () -> Double) -> Unit {
 fn hover_now_untracked() -> Option[Double] {
   signals::untracked(hover_now)}
 
-/// fold_gaps turned (the settings' switch): saved, and the view kept about the playhead where it was across the band
-/// along the new axis.
 fn set_fold_gaps(on : Bool) -> Unit {
   let p = pos_now()
   let len0 = signals::untracked(view_len)

@@ -2,21 +2,12 @@ using System.Buffers.Binary;
 
 namespace Replay.Recording;
 
-/// <summary>
-/// What a HID game controller's input reports hold, as hid.dll's caps say it (HIDP_BUTTON_CAPS and HIDP_VALUE_CAPS,
-/// 72 bytes each, read as bytes), and its reports' data (HidP_GetData's HIDP_DATA list, 8 bytes each: the data index,
-/// then the value; a button is listed only while down) written into a <see cref="ControllerCounter"/>. Kept: the
-/// buttons (usage page 9), the sticks, triggers, sliders and dials (Generic Desktop X…Wheel, Simulation's accelerator
-/// and brake) as axes 0…1 over their logical range, the hat switches as switches (0 at rest, outside the range: none).
-/// All else a report holds (a DualSense's motion sensors and timestamps, on a vendor's page) is no data index of these
-/// and is passed over: never compared, so a report that changes all the time counts nothing by itself.
-/// </summary>
+// Maps HIDP_BUTTON_CAPS / HIDP_VALUE_CAPS (72 B) and HIDP_DATA (8 B), ignoring vendor pages (e.g. DualSense IMU/timestamps).
 public sealed class HidLayout
 {
     private const int CapsSize = 72;
     private const byte None = 0, Button = 1, Axis = 2, Hat = 3;
 
-    // per data index: what it is, where in the counter's arrays, its report and its value's range
     private readonly byte[] kind;
     private readonly int[] slot;
     private readonly byte[] report;
@@ -26,7 +17,6 @@ public sealed class HidLayout
 
     public ControllerCounter Counter { get; }
 
-    /// <summary>Whether its reports start with a report id (each then holds only its own items).</summary>
     public bool UsesReportIds { get; }
 
     private HidLayout(int indices, int buttons, int axes, int hats, bool ids)
@@ -41,13 +31,10 @@ public sealed class HidLayout
         UsesReportIds = ids;
     }
 
-    /// <summary>The layout of the caps given (<paramref name="buttonCaps"/> and <paramref name="valueCaps"/>, as many
-    /// as each holds); null when nothing in them is a button, an axis or a hat.</summary>
     public static HidLayout? From(ReadOnlySpan<byte> buttonCaps, ReadOnlySpan<byte> valueCaps)
     {
         int indices = 0, buttons = 0, axes = 0, hats = 0;
         var ids = false;
-        // (twice over the caps: first how many of each, then where each goes)
         for (var pass = 0; pass < 2; pass++)
         {
             HidLayout? layout = pass == 1 ? new HidLayout(indices, buttons, axes, hats, ids) : null;
@@ -84,7 +71,6 @@ public sealed class HidLayout
                 var usage0 = U16(cap, 56);
                 for (var di = di0; di <= di1; di++)
                 {
-                    // (a range's usages go with its data indices one for one)
                     var usage = cap[12] != 0 ? usage0 + (di - di0) : usage0;
                     var what = page == 0x01 && usage is >= 0x30 and <= 0x38 ? Axis
                         : page == 0x02 && usage is 0xC4 or 0xC5 ? Axis
@@ -139,9 +125,6 @@ public sealed class HidLayout
 
     private static int I32(ReadOnlySpan<byte> s, int at) => BinaryPrimitives.ReadInt32LittleEndian(s[at..]);
 
-    /// <summary>A report's data (<paramref name="count"/> HIDP_DATA of <paramref name="data"/>), its report id
-    /// <paramref name="reportId"/>, written into the counter: its buttons not listed are up, its values as they say.
-    /// The items of other reports stay as they were.</summary>
     public void Apply(byte reportId, ReadOnlySpan<byte> data, int count)
     {
         var c = Counter;
@@ -178,7 +161,6 @@ public sealed class HidLayout
         }
     }
 
-    /// <summary>A value as its logical range has it: signed where the range goes under 0.</summary>
     private long Value(int di, uint raw)
     {
         var n = bits[di];
@@ -195,7 +177,6 @@ public sealed class HidLayout
         long lo = min[di], hi = max[di];
         if (hi <= lo)
         {
-            // (a range said wrongly, as some do: the whole of its bits)
             lo = 0;
             hi = bits[di] is > 0 and < 32 ? (1L << bits[di]) - 1 : uint.MaxValue;
         }

@@ -32,14 +32,11 @@ public struct SegmentEncodeConfig: Sendable, Equatable {
   }
 }
 
-/// Single-pass hardware MP4 rolling segment writer (`AVAssetWriter` + VideoToolbox HEVC/H.264 + 48 kHz stereo AAC 160 kbps).
-/// Writes to `<Buffer>/writing-<id>.mp4.writing` and atomically publishes `<stem>.levels`, `<stem>.input`, `<stem>.json`,
-/// and `<stem>.mp4` only after `finishWriting` completes cleanly.
 public final class SegmentWriter: @unchecked Sendable {
   public static let audioSampleRate = 48_000
   public static let audioChannels = 2
   public static let audioBitrate = 160_000
-  private static let levelWindowFrames = audioSampleRate / 10 // 4800 frames = 100 ms
+  private static let levelWindowFrames = audioSampleRate / 10
 
   public let folder: String
   public let config: SegmentEncodeConfig
@@ -215,8 +212,6 @@ public final class SegmentWriter: @unchecked Sendable {
     return false
   }
 
-  /// Appends interleaved 48 kHz stereo `Int16` PCM at `targetFrameOffset` from segment start,
-  /// filling any silence gap up to 60s and computing `.levels` RMS per 100 ms.
   public func appendAudio(pcmInt16: [Int16], frames: Int, targetFrameOffset: Int64) {
     guard started, !finished, writer.status == .writing,
           let audioInput, let pcmFormatDesc, frames > 0, pcmInt16.count >= frames * 2
@@ -252,7 +247,7 @@ public final class SegmentWriter: @unchecked Sendable {
   private func writeSilence(frames totalFrames: Int64) {
     guard let audioInput, let pcmFormatDesc, totalFrames > 0 else { return }
     var left = totalFrames
-    let chunkMax = Self.audioSampleRate / 5 // 200 ms chunks = 9600 frames
+    let chunkMax = Self.audioSampleRate / 5
     let zeroChunk = [Int16](repeating: 0, count: chunkMax * 2)
     while left > 0 && audioInput.isReadyForMoreMediaData && writer.status == .writing {
       let n = Int(min(left, Int64(chunkMax)))
@@ -327,7 +322,6 @@ public final class SegmentWriter: @unchecked Sendable {
     levels.append(Self.levelByte(rms: rms))
   }
 
-  /// Exact RMS-to-byte mapping from `recording/SegmentWriter.cs`: `-50 dB` -> `0`, `0 dB` -> `255`.
   public static func levelByte(rms: Double) -> UInt8 {
     guard rms > 0 else { return 0 }
     let db = 20.0 * log10(rms)
@@ -339,7 +333,6 @@ public final class SegmentWriter: @unchecked Sendable {
     max(1, Int(ceil(durationMs / 100.0)))
   }
 
-  /// Closes the segment at `durationSeconds`, writes `.levels`, `.input`, and `.json`, then renames `.mp4.writing` to `<stem>.mp4`.
   public func finish(durationSeconds: Double, inputActivity: InputActivity?, completion: @escaping (Segment?) -> Void) {
     guard started, !finished else {
       abort()

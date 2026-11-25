@@ -3,40 +3,9 @@ import "motion"
 import "signals"
 import "view"
 
-// The window's own preferences (viewer.json in REPLAY_ROOT; settings.json is the recorder's too): its appearance
-// (following Windows, dark or light), its language (following Windows, 简体中文 or English: strings.mbt) and the
-// player's volume; and the save dialog's format and a GIF's frame rate, as last chosen (save.mbt). Following Windows,
-// both are asked of it again every second (it tells nothing as they change), so switching the system's theme or
-// language turns the window at once.
-
-/// "system", "dark" or "light".
-
-
-/// "system", "zh" or "en".
-
-
-/// Whether Windows' apps are light (AppsUseLightTheme), 1 or 0.
-
-/// Whether Windows shows Chinese (its UI language's primary language), 1 or 0.
-
-/// The window's frame and system menu dark (1) or light (0).
-
-/// Every window of this process kept out of screen capture (1) or let back (0): replay_win.c.
-
-/// Whether the window is kept out of what is recorded, and of every other capture (the user, 2026-11-15: on at first, a
-/// switch to let a screenshot of it be taken). viewer.json's, read again with the system's each second, so the tray's
-/// panel, another process, follows the switch.
-
-
-/// Whether the timeline folds away where nothing was recorded (ScreenReplay not running, recording off or paused) to a
-/// seam, as a filter's axis does (axis.mbt; the user, 2026-11-19: 「加一个选项，默认开启。假如用户没有开这个 APP，或者
-/// 没有真正录的时候，不用把这段空白的时间算进来」). viewer.json's fold_gaps; on at first.
-
-
 fn viewer_path() -> String {
   pjoin(root_dir(), "viewer.json")}
 
-/// Dark (bound).
 fn is_dark() -> Bool {
   match appearance.get() {
     "dark" => true
@@ -44,7 +13,6 @@ fn is_dark() -> Bool {
     _ => !system_light.get()
   }}
 
-/// English (bound).
 fn is_english() -> Bool {
   match language.get() {
     "en" => true
@@ -88,15 +56,11 @@ fn save_prefs() -> Unit {
   })
   |> ignore}
 
-/// When viewer.json and settings.json were written as ask_system last read them (-2 never).
-
-
-/// Windows asked how it stands (its theme, its language) now, and again in a second.
 fn ask_system(root : view::View) -> Unit {
   system_light.set(rp_system_light() == 1)
   system_chinese.set(rp_system_chinese() == 1)
   still_motion.set(rp_animations_off() == 1)
-  // (reload viewer.json and settings.json when another process writes them, so warm tray & note windows stay in sync)
+  // Reload prefs/settings on mtime change so other processes (tray/note) stay in sync.
   let written = rp_modified(cstr(viewer_path()))
   if written != viewer_seen.v {
     viewer_seen.v = written
@@ -123,7 +87,6 @@ fn ask_system(root : view::View) -> Unit {
   rp_hide_from_capture(if hidden_from_capture.untracked() { 1 } else { 0 })
   again(root, 1000.0, fn() { ask_system(root) })}
 
-/// The library's parts and the window's frame turned with the look, as it changes.
 fn keep_theme(root : view::View) -> Unit {
   let way = motion::NodeWay::new(if signals::untracked(is_dark) { 1.0 } else { 0.0 })
   theme_way.v = Some(way)
@@ -133,7 +96,6 @@ fn keep_theme(root : view::View) -> Unit {
     rp_window_dark(if dark { 1 } else { 0 })
   })}
 
-/// The players told the volume (the replay's and a saved clip's).
 fn apply_volume() -> Unit {
   let v = volume_now()
   ntrace("volume \{v}")

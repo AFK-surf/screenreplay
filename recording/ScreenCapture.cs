@@ -7,14 +7,6 @@ using Windows.Graphics.DirectX;
 
 namespace Replay.Recording;
 
-/// <summary>
-/// Windows.Graphics.Capture of a monitor or a window, the pointer drawn in, no yellow border where the system allows
-/// it. Each frame that arrives is copied into one texture of our own (the newest picture), which the recorder's clock
-/// takes when a new one has come (at most once a tick): the capture's buffers go back to the system at once, and a
-/// segment's first frame is the picture as it is, whether or not one has just come.
-/// <para>On an HDR desktop the frames are taken as FP16 scRGB (8-bit BGRA had an HDR game's colours wrong, 2026-11-15), which the
-/// converter makes SDR.</para>
-/// </summary>
 internal sealed class ScreenCapture : IDisposable
 {
     private readonly Gpu gpu;
@@ -35,30 +27,23 @@ internal sealed class ScreenCapture : IDisposable
     private HdrToSdr? hdrToSdr;
     private bool disposed;
 
-    /// <summary>Set once the first frame is in.</summary>
     public ManualResetEventSlim FirstFrame { get; } = new(false);
 
-    /// <summary>Set as each frame is taken (an auto-reset event): what the recorder's clock waits on beside its timer.</summary>
     public IntPtr FrameEvent { get; }
 
-    /// <summary>The capture stopped by itself (the window closed, the monitor gone).</summary>
     public event Action? Closed;
 
     public int Width { get; private set; }
     public int Height { get; private set; }
 
-    /// <summary>When the newest frame was composed (100 ns, the performance counter's clock).</summary>
     public long LatestTime { get; private set; }
 
     public long Frames { get; private set; }
 
-    /// <summary>What is captured.</summary>
     public CaptureTarget Target { get; }
 
-    /// <summary>Frames taken as FP16 scRGB (an HDR desktop), not BGRA.</summary>
     public bool Hdr { get; }
 
-    /// <summary>The colour of the display it is on, as last looked at (its SDR white and peak, for the FP16 frames).</summary>
     public DisplayColor Display
     {
         get
@@ -87,11 +72,7 @@ internal sealed class ScreenCapture : IDisposable
         Target = target;
         Hdr = hdr;
         this.display = display;
-        // (half the period: frames come at most twice the recording's rate, and the recorder's clock takes one a period
-        // as each comes (ScreenRecorder's credit). At 90% (15 ms) on a 240 Hz screen a frame that came a composition late
-        // was put off to the 5th (20.8 ms), and with the clock's own ticks beside it about a third of a 60 fps
-        // recording's frames were 33 ms apart (the user, 2026-11-21: 48-52 fps of a window changing 225 times a second,
-        // 60.0 with this). REPLAY_TEST_MINSTEP: another share of the period, in percent (tests only))
+        // Half frame period: 90% caused 240 Hz displays to miss compositions and drop 60 fps captures to ~50 fps.
         minStepTicks = 10_000_000L * 5 / 10 / Math.Max(1, frameRate);
         if (int.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_MINSTEP"), out var pct) && pct >= 0)
         {
@@ -102,16 +83,13 @@ internal sealed class ScreenCapture : IDisposable
         item = CreateItem(target);
         item.Closed += (_, _) => Closed?.Invoke();
         poolSize = item.Size;
-        // (2 buffers: OnFrame drains immediately, GPU-copies into `latest`, and disposes the frame in finally;
-        // at 4K FP16 each buffer is 63.3 MiB, so 2 vs 4 saves ~127 MiB VRAM and halves DWM shared surface pressure)
+        // 2 buffers (vs 4): OnFrame copies immediately and disposes; saves ~127 MiB VRAM at 4K FP16.
         pool = Direct3D11CaptureFramePool.CreateFreeThreaded(gpu.WinRtDevice, poolFormat, 2, poolSize);
         pool.FrameArrived += OnFrame;
         session = pool.CreateCaptureSession(item);
         session.IsCursorCaptureEnabled = true;
         try
         {
-            // (granted by GraphicsCaptureAccess.RequestAccessAsync(Borderless), which the app asks for; else it throws
-            // or is ignored, and the border shows)
             session.IsBorderRequired = false;
         }
         catch (Exception)
@@ -120,8 +98,6 @@ internal sealed class ScreenCapture : IDisposable
 
         try
         {
-            // (frames no closer together than half the recording's period: a 240 Hz screen is not copied 240 times a
-            // second for a 60 fps recording; Windows 11 24H2 and later)
             session.MinUpdateInterval = TimeSpan.FromTicks(minStepTicks);
         }
         catch (Exception)
@@ -131,8 +107,6 @@ internal sealed class ScreenCapture : IDisposable
 
     public void Start()
     {
-        // (tests only: REPLAY_TEST_STALL=<s>, the recording's first capture gives no new frames after that many seconds;
-        // REPLAY_TEST_STALL_FAIL=<n>, the next n captures give no first frame at all, to test restart escalation)
         if (Interlocked.Exchange(ref stallAsked, 1) == 0
             && double.TryParse(Environment.GetEnvironmentVariable("REPLAY_TEST_STALL"), System.Globalization.CultureInfo.InvariantCulture, out var s) && s > 0)
         {
@@ -197,13 +171,11 @@ internal sealed class ScreenCapture : IDisposable
 
             if (Target.IsWindow && !WindowShown.Showing(Target.Window))
             {
-                // (a window hidden or minimised: the picture before kept)
                 return;
             }
 
             if (failFirstFrame || (stallAt > 0 && Native.NowHns() >= stallAt && latest is not null))
             {
-                // (tests only: a capture stuck as one was after the screen woke, 2026-11-21)
                 return;
             }
 
@@ -211,7 +183,6 @@ internal sealed class ScreenCapture : IDisposable
             var resized = content.Width != poolSize.Width || content.Height != poolSize.Height;
             if (resized)
             {
-                // (the window resized: the pool's buffers made to its size; this frame still used, cut to it)
                 var prev = poolSize;
                 sender.Recreate(gpu.WinRtDevice, poolFormat, 2, content);
                 poolSize = content;
@@ -240,8 +211,7 @@ internal sealed class ScreenCapture : IDisposable
                     return;
                 }
 
-                // (On HDR, tone-map FP16 scRGB straight into an SDR BGRA `latest` texture instead of keeping a 63.3 MiB
-                // 4K FP16 intermediate copy alongside HdrToSdr's 31.6 MiB BGRA output.)
+                // On HDR, tone-map FP16 scRGB directly into SDR BGRA latest to avoid a 63 MiB 4K FP16 intermediate copy.
                 var convertInline = Hdr && (desc.BindFlags & BindFlags.ShaderResource) != 0;
                 var wantFormat = convertInline ? Format.B8G8R8A8_UNorm : (Hdr ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm);
                 if (latest is null || Width != w || Height != h || latestFormat != wantFormat)
@@ -281,8 +251,7 @@ internal sealed class ScreenCapture : IDisposable
                 if (FrameTrace.On) FrameTrace.Note($"capture t={frame.SystemRelativeTime.Ticks / 10000.0:F2} surface={texture.NativePointer:x} {w}x{h}");
                 LatestTime = frame.SystemRelativeTime.Ticks;
                 Frames++;
-                // (the recorder's clock woken: the frame taken as it comes, not at its next tick; under the lock, so
-                // never after Dispose has closed it)
+                // Signal under lock so SetEvent never races with CloseHandle in Dispose.
                 Native.SetEvent(FrameEvent);
             }
 
@@ -290,8 +259,6 @@ internal sealed class ScreenCapture : IDisposable
         }
         catch (Exception ex)
         {
-            // (a frame lost; the device's loss shows in the encoder's next write; reported rate-limited so repeated
-            // WGC/D3D11 callback failures leave a trace in recorder.log)
             if (!disposed && onError is not null)
             {
                 var errNow = Native.NowHns();
@@ -314,7 +281,6 @@ internal sealed class ScreenCapture : IDisposable
         }
     }
 
-    /// <summary>Runs <paramref name="use"/> with the newest picture while no frame replaces it.</summary>
     public bool WithLatest(Action<ID3D11Texture2D, int, int, DisplayColor> use)
     {
         lock (gate)
@@ -357,8 +323,7 @@ internal sealed class ScreenCapture : IDisposable
         }
 
         FirstFrame.Dispose();
-        // (closed once nothing can set it or wait on it: the frames' callbacks are unhooked above, and the recorder's
-        // clock disposes a capture only between its waits)
+        // Safe to close: frame callbacks are unhooked above and ClockLoop only disposes captures between waits.
         Native.CloseHandle(FrameEvent);
     }
 }

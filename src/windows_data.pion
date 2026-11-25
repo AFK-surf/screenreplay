@@ -1,10 +1,5 @@
 import "mbt_compat"
 
-// Where the windows were (the recorder's windows.jsonl: a line each time what was on the screen changed, the
-// windows front to back), read as it grows. In clip mode the window under the pointer on the picture is lit and a
-// press picks it: the clip is then that window's part of the picture (encoded again, the crop following the window or
-// the whole stretch it went over), and the timeline shows when it was fully in view, partly covered or not there.
-
 pub struct Win {
   hwnd : Int64
   owner : Int64
@@ -26,14 +21,6 @@ pub struct Snap {
   wins : Array[Win]
 }
 
-
-/// How much of the file has been read, and what is left of a line not ended yet.
-
-
-/// The file's first bytes as last read: other ones, it was rewritten (pruned) and is read again from its start.
-
-
-/// Drops the loaded window snapshots (hidden in the background, or buffer purged) so they are only held while clipping.
 fn clear_windows() -> Unit {
   snaps.clear()
 
@@ -90,12 +77,10 @@ fn parse_snap(line : String) -> Option[Snap] {
     _ => Option::None
   }}
 
-/// What was added to windows.jsonl since last read (all of it again when it was rewritten shorter: pruned).
 fn load_windows() -> Unit {
   let path = pjoin(root_dir(), "windows.jsonl")
   let size = rp_size(cstr(path))
   if size <= 0.0 {
-    // (emptied or gone (删除全部录像): what was read of it let go of too, not kept showing windows of then)
     if !snaps.is_empty() {
       clear_windows()
       data_changed()
@@ -127,12 +112,11 @@ fn load_windows() -> Unit {
       Option::None => ()
     }
   }
-  // (what is bound to the windows noted reads data(): the picker's taking presses)
+  // Notify data() subscribers (e.g. window picker) when new snapshots arrive.
   if snaps.length() != had {
     data_changed()
   }}
 
-/// The snapshot in force at `abs` (ms since the epoch): the last at or before it.
 fn snap_at(abs : Double) -> Option[Snap] {
   let mut lo = 0
   let mut hi = snaps.length() - 1
@@ -155,8 +139,6 @@ fn snap_at(abs : Double) -> Option[Snap] {
 fn win_shown(w : Win) -> Bool {
   w.state != 1}
 
-/// The window under screen point (x, y) at `abs`, the frontmost; a menu or a dialog over its owner counts as its
-/// owner (what a person means to pick is the app's window).
 fn window_under(abs : Double, x : Double, y : Double) -> Option[Win] {
   match snap_at(abs) {
     Option::None => Option::None
@@ -177,12 +159,6 @@ fn window_under(abs : Double, x : Double, y : Double) -> Option[Win] {
     }
   }}
 
-/// The window picked for the clip (0: the whole screen), its name for the head.
-
-
-/// The crop follows the window as it moves (else the whole stretch it went over); its menus and dialogs come too.
-
-
 fn win_label(w : Win) -> String {
   let name = app_name(w.process)
   if w.title == "" || w.title == name {
@@ -202,8 +178,6 @@ fn intersect(a : (Double, Double, Double, Double), b : (Double, Double, Double, 
     Option::Some((x0, y0, x1 - x0, y1 - y0))
   }}
 
-/// The picked window's rect at a snapshot, in screen pixels cut to the display, its popups with it when asked; None
-/// when it is not on the display then.
 fn picked_rect(s : Snap) -> Option[(Double, Double, Double, Double)] {
   let screen = (s.sx, s.sy, s.sw, s.sh)
   let mut r : Option[(Double, Double, Double, Double)] = Option::None
@@ -231,14 +205,13 @@ fn picked_rect(s : Snap) -> Option[(Double, Double, Double, Double)] {
     }
   }}
 
-/// How the picked window stands at a snapshot: 0 not there, 1 partly covered, 2 fully in view.
+// Visibility state: 0 = absent, 1 = partly occluded/offscreen, 2 = fully visible.
 fn picked_view(s : Snap) -> Int {
   match picked_rect(s) {
     Option::None => 0
     Option::Some(r) => {
       for w in s.wins {
         if w.hwnd == picked_hwnd.get() {
-          // (a part of it off the display is not fully in view)
           if r.2 < w.w - 1.0 || r.3 < w.h - 1.0 {
             return 1
           }
@@ -255,7 +228,6 @@ fn picked_view(s : Snap) -> Int {
     }
   }}
 
-/// The stretches of [a, b) (ms into the buffer) by how the picked window stood: (from, to, view).
 fn picked_runs(a : Double, b : Double) -> Array[(Double, Double, Int)] {
   let base = t0()
   let runs : Array[(Double, Double, Int)] = []
@@ -282,7 +254,6 @@ fn picked_runs(a : Double, b : Double) -> Array[(Double, Double, Int)] {
   runs.push((at, b, view))
   runs}
 
-/// Whether the picked window moved or changed size in the clip; whether a menu or dialog of it showed.
 fn picked_moved_and_popups() -> (Bool, Bool) {
   let base = t0()
   let mut first : Option[(Double, Double, Double, Double)] = Option::None
@@ -314,8 +285,7 @@ fn picked_moved_and_popups() -> (Bool, Bool) {
   }
   (moved, popups)}
 
-/// The crop in the recording's pixels, as a plan for the encoder (a line each change: ms into the clip, x, y, w, h)
-/// and the picture it makes (w, h); the whole stretch the window went over when not following it.
+// Encoder crop plan: "ms\tx\ty\tw\th" per change (0,0,0,0 = black when window absent).
 fn crop_plan(rec_w : Double, rec_h : Double) -> (String, Int, Int) {
   let base = t0()
   let rects : Array[(Double, (Double, Double, Double, Double))] = []
@@ -330,8 +300,6 @@ fn crop_plan(rec_w : Double, rec_h : Double) -> (String, Int, Int) {
     }
     match picked_rect(s) {
       Option::Some(r) => rects.push((t, ((r.0 - ox) * scale, (r.1 - oy) * scale, r.2 * scale, r.3 * scale)))
-      // (not there then: black, never what was behind it)
-      // (not there then: black, never what was behind it)
       Option::None => rects.push((t, (0.0, 0.0, 0.0, 0.0)))
     }
   }
@@ -376,7 +344,7 @@ fn crop_plan(rec_w : Double, rec_h : Double) -> (String, Int, Int) {
   if follow_window.get() {
     for e in rects {
       let r = e.1
-      // (edges on half pixels taken inward; its size from its own size alone, so a move by a fraction never changes it)
+      // Round origin inward (ceil) and size down (floor) so fractional moves never jitter dimensions.
       lines.push("\{e.0}\t\{r.0.ceil()}\t\{r.1.ceil()}\t\{r.2.floor()}\t\{r.3.floor()}")
     }
     (lines.join("\n"), even(dmin(mw, rec_w)), even(dmin(mh, rec_h)))
@@ -391,7 +359,6 @@ fn crop_plan(rec_w : Double, rec_h : Double) -> (String, Int, Int) {
     (lines.join("\n"), even(ux1 - ux0), even(uy1 - uy0))
   }}
 
-/// The clip cut to where the window was there at all, or to its longest stretch fully in view.
 fn trim_to_window(full : Bool) -> Unit {
   clip_mark()
   let runs = picked_runs(clip_a.get(), clip_b.get())
@@ -443,12 +410,6 @@ fn pick_window(w : Option[Win]) -> Unit {
       window_options_open.set(false)
     }
   }}
-
-/// The picked window's process (its icon, its app's name).
-
-
-/// The window options' popover open.
-
 
 fn even(v : Double) -> Int {
   imax(2, (v / 2.0).floor().to_int() * 2)}

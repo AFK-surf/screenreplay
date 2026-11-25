@@ -4,19 +4,11 @@ import "signals"
 import "ui"
 import "view"
 
-// The saved clips, a page of their own under the title bar: the clips as cards four across, two rows a page; a card
-// its first frame large with its length on its corner (pressed, played here), its name and size under it with copy,
-// show in the folder and delete (asked again). A saved clip plays over the window on a dark scrim.
-
-/// Told as the clips are read again, and as a card's picture is made.
-
-
 fn clips_read() -> Unit {
   load_clips()
   clips_rev.set(clips_rev.untracked() + 1)}
 
-/// Where a clip saved as recorded starts in its file, ms: the frames from the keyframe before the moment asked for,
-/// which its edit list passes over (rp_concat) and Media Foundation's reader does not; 0 for others.
+// Leading pre-roll duration (ms) from MP4 edit list that Media Foundation's reader does not skip.
 fn clip_lead(path : String) -> Double {
   if is_gif_path(path) {
     return 0.0
@@ -33,18 +25,13 @@ fn clip_lead(path : String) -> Double {
     }
   }}
 
-/// Each clip's lead (clip_lead), read once: its first picture is asked for every 50 ms till it is made.
-
-
-/// A clip's first picture as an image key, made in the background (rp_clip_thumb); "" while it is made (looked for
-/// again in 50 ms), "!" where there is none.
 fn clip_thumb(path : String) -> String {
   let identity = "\{path}|\{rp_size(cstr(path))}|\{rp_modified(cstr(path))}"
   let key = "mem:saved-clip-" + identity
   if ui::image_bytes_for(key).is_some() {
     return key
   }
-  // (the frame at the clip's start: its reader takes the first within 40 ms before the time asked for, so asked 39 ms on)
+  // Bias +39 ms because rp_clip_thumb selects the first frame within 40 ms before target.
   let lead = clip_lead(path)
   let bmp = rp_clip_thumb(cstr(path), cstr(identity), if lead > 0.0 { lead + 39.0 } else { 0.0 })
   if bmp.length() > 1 {
@@ -54,8 +41,7 @@ fn clip_thumb(path : String) -> String {
   } else if bmp.length() == 1 && bmp[0].to_int() == 1 {
     "!"
   } else {
-    // (looked for again in 50 ms: once for all the cards waiting, not a timer of each card's, each telling every card
-    // to look again)
+    // Coalesce thumbnail retries into a single 50 ms timer across all cards.
     if !clip_thumb_due.v {
       match the_root.v {
         Some(r) => {
@@ -71,9 +57,6 @@ fn clip_thumb(path : String) -> String {
     }
     ""
   }}
-
-/// Whether the cards' pictures are to be looked for again already.
-
 
 fn clip_card(parent : view::View, name : String) -> Unit {
   let path = pjoin(clips_dir(), name)
@@ -109,7 +92,6 @@ fn clip_card(parent : view::View, name : String) -> Unit {
       |> ignore
       words(pic, fn() {
         clips_rev.get() |> ignore
-        // (an AV1 clip where nothing decodes AV1: said so, its press telling what to install)
         if av1_unplayable(path) {
           return t(if is_mac() { "此设备不支持 AV1 硬解" } else { "需要 AV1 视频扩展" })
         }
@@ -120,7 +102,6 @@ fn clip_card(parent : view::View, name : String) -> Unit {
         }
       }, 11.0, ui_muted)
       |> ignore
-      // its length on its corner
       pic.box(fn(o) {
         o.over(view::Live::Is(true)).pad(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::End))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
         let ms = clip_duration(path)
@@ -133,7 +114,6 @@ fn clip_card(parent : view::View, name : String) -> Unit {
         }
       })
       |> ignore
-      // under the pointer, a play mark over it
       pic.box(fn(o) {
         o
         .over(view::Live::Is(true))
@@ -197,13 +177,11 @@ fn clip_card(parent : view::View, name : String) -> Unit {
   })
   |> ignore}
 
-/// The library over the window under the title bar while it is open.
 fn library_layer(root : view::View) -> Unit {
   root.box(fn(o) {
     o.over(view::Live::Is(true)).over_all(view::Live::By(fn() { library_open.get() })).padding(view::Live::Is((0.0, title_h() + 1.0, 0.0, 0.0))) |> ignore
     o.show(fn() { library_open.get() }, fn(page) {
       page.grow(view::Live::Is(1.0)).ground(view::Live::By(c_bg)).presses(view::Live::Is(true)).padding(view::Live::Is((28.0, 24.0, 28.0, 16.0))).gap(view::Live::Is(16.0)) |> ignore
-      // (read again every 3 s while it shows: a clip saved meanwhile, by Ctrl+Alt+S or elsewhere, comes in)
       __mbt_local_library_layer_again_4(page)
       let pages = fn() {
         clips_rev.get() |> ignore
@@ -277,9 +255,6 @@ fn library_layer(root : view::View) -> Unit {
   })
   |> ignore}
 
-/// An AV1 clip pressed where the system decodes no AV1 (no AV1 Video Extension, no GPU of its own for it): what it is,
-/// what to install and a button to the Store's page of it (the free extension, Microsoft's), never another app opened
-/// with the clip. Closed by Esc, its close or a press beside it.
 fn av1_note_layer(root : view::View) -> Unit {
   sheet(root, fn() { av1_note.get() != "" }, fn() { av1_note.set("") }, 440.0, fn(card) {
     card.box(fn(head) {
@@ -317,12 +292,6 @@ fn av1_note_layer(root : view::View) -> Unit {
     |> ignore
   })}
 
-/// The saved clip's stage: how far in from the window's sides, over its top row and under its transport row; how tall
-/// the top row is with the room under it, the bar's band with the room over it, the transport row.
-
-
-/// The picture's size on the stage: as large as fits at its own shape, between the top row and the bar (in full screen
-/// all of the screen, the rows over it).
 fn clip_fit(v : view::View) -> (Double, Double) {
   let (w, h) = v.window()
   let a = dmax(0.1, clip_aspect.get())
@@ -334,14 +303,11 @@ fn clip_fit(v : view::View) -> (Double, Double) {
   let vw = dmax(0.0, dmin(room_w, room_h * a))
   (vw, vw / a)}
 
-/// A shade over the picture's edge in full screen, behind the rows drawn over it: black from 62% at that edge (`at_top`
-/// its top) to none, eased, in 16 bands.
 fn edge_shade(parent : view::View, at_top : Bool) -> Unit {
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore
     let n = 16
     for i in 0..<n {
-      // (0 at the edge, 1 farthest in)
       let k = (if at_top { i } else { n - 1 - i }).to_double() / (n - 1).to_double()
       let a = (0.62 * (1.0 - k) * (1.0 - k) * 255.0).round().to_int64()
       o.box(fn(b) { b.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).ground(view::Live::Is(a)) |> ignore }) |> ignore
@@ -349,15 +315,6 @@ fn edge_shade(parent : view::View, at_top : Bool) -> Unit {
   })
   |> ignore}
 
-/// A saved clip played over the window, on a stage dark in both themes as the replay's picture is: the picture as large
-/// as fits at its own shape, square cornered (the user, 2026-11-14: 「视频本身也不需要圆角了」), a soft shadow under it. Over it on the left the clip's name and, muted, its size
-/// and length; on the right copy, show in the folder and close (Esc, which leaves full screen first; or a press beside
-/// it). Under it its bar (clip_progress) as wide as the picture, then the transport row bare on the stage as the
-/// replay's: the clip before, play and pause (Space), the clip after, where it is of how long; its speed, the volume
-/// (the window's), full screen (F, or a double press on the picture). In full screen the picture fills the screen and
-/// both rows are drawn over it on a shade, fading out 2 s after the pointer last moved (as the replay's bars do) and
-/// back as it moves. Its keys as the replay's: ← → a frame, Shift 5 s, , . a frame too, Home End, [ ] or PageUp PageDown the
-/// clip before and after. Played to its end, the key is play again, from its start.
 fn clip_player_layer(root : view::View) -> Unit {
   root.box(fn(o) {
     o.over(view::Live::Is(true)).over_all(view::Live::By(fn() { clip_playing.get() != "" })) |> ignore
@@ -368,8 +325,6 @@ fn clip_player_layer(root : view::View) -> Unit {
       guard clip_deck.v is Some(d) else { return }
       let name = pbase(path)
       let fs = fn() { full_screen.get() }
-      // (in full screen: the rows shown while the pointer moved in the last 2 s, or is over them, or the bar is held,
-      // or a menu is up)
       let (moved, lately) = s.holds_for(2000.0, later=true)
       let rows_way = motion::NodeWay::new(1.0)
       let head_ref : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
@@ -415,7 +370,6 @@ fn clip_player_layer(root : view::View) -> Unit {
       act("frame-on", fn() { clip_step(1) })
       act("home", fn() { clip_seek(0.0) })
       act("latest", fn() {
-        // (its last frame, stopped there)
         clip_pause()
         clip_seek((d.span)())
       })
@@ -423,7 +377,6 @@ fn clip_player_layer(root : view::View) -> Unit {
       act("mark-on", fn() { clip_go_beside(1) })
       act("page-back", fn() { clip_go_beside(-1) })
       act("page-on", fn() { clip_go_beside(1) })
-      // the picture and the rows, a column as wide as the picture (in full screen all of the window, the rows over it)
       s.box(fn(col) {
         col
         .width(view::Live::By(fn() {
@@ -438,7 +391,6 @@ fn clip_player_layer(root : view::View) -> Unit {
         .lines_up(view::Live::Is(Some(view::Along::Middle)))
         .lies_along(view::Live::Is(view::Lies::Middle))
         |> ignore
-        // over it: the name, its size and length; copy, the folder, close
         col.box(fn(head) {
           head
           .over(view::Live::By(fs))
@@ -490,7 +442,6 @@ fn clip_player_layer(root : view::View) -> Unit {
           |> ignore
         })
         |> ignore
-        // the picture
         col.box(fn(pic) {
           pic
           .width(view::Live::By(fn() { Some(clip_fit(pic).0) }))
@@ -507,7 +458,6 @@ fn clip_player_layer(root : view::View) -> Unit {
           play_state_over(pic, told=clip_told, playing=fn() { clip_view_playing.get() }, badge_may=fn() { true })
         })
         |> ignore
-        // under it: the bar, then the transport row
         col.box(fn(foot) {
           foot
           .over(view::Live::By(fs))
@@ -540,7 +490,6 @@ fn clip_player_layer(root : view::View) -> Unit {
               }
               let before = beside(-1)
               let after = beside(1)
-              // (the transport's left: the clip before, play and pause, the clip after, where it is of how long)
               row.box(fn(b) {
                 b.row(view::Live::Is(true)).margin(view::Live::Is((-6.0, 0.0, 0.0, 0.0))) |> ignore
                 let k = icon_button(b, fn() { "skip-back" }, fn() { t("上一个片段") }, fn() { clip_go_beside(-1) }, stage=true, shortcut="clip-before")
@@ -592,23 +541,6 @@ fn clip_player_layer(root : view::View) -> Unit {
   })
   |> ignore}
 
-/// Where the pointer's last drag on the clip's bar went down (a move 4 points from it is a drag: the picture follows by
-/// the scrub's way; a press goes there exactly).
-
-
-/// Where the hand holding the bar is (what its time is told by while it drags: the pointer is its then).
-
-
-/// The hover preview's picture: its width (points; its height by the clip's shape) and how many pixels it is asked at
-/// (the index's pictures are 384 wide).
-
-
-/// The saved clip's bar, as wide as the picture, 22 high to the hand: a track 4 high (the stage's hairline-light),
-/// what has played of it near-white; under the pointer or held, 6 high (over 120 ms) with a 12 knob at the playhead,
-/// the stretch up to the pointer a step lighter. Pressed, the clip goes there exactly; dragged, the picture follows by
-/// the scrub's way (its real frames). Over it while the pointer is over it or holds it, the hover preview: the picture
-/// of that moment (the index's key frame at or before it: rp_idx_add_clip) with its time under it, at the pointer,
-/// kept inside the bar's width, fading in and out over 100 ms as the replay's hover card does.
 fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Unit) -> Unit {
   parent.by_room(fn(held, room) {
     let at_x = fn(x : Double) { clamp(x / dmax(1.0, room.width()), 0.0, 1.0) * (d.span)() }
@@ -642,7 +574,6 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
         }
       }, captures=true)
       |> ignore
-      // (where the pointer is along it, a quarter of a point at least; None off it, held: where the hand is)
       let hover = fn() {
         if clip_held.get() {
           return Some(clip_bar_x.get())
@@ -654,7 +585,6 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
           Some(clamp(q.to_double() / 4.0, 0.0, room.width()))
         }
       }
-      // (what has played, a share of it: while it is held, where the hand is)
       let share = fn() {
         if clip_held.get() {
           clamp(clip_bar_x.get() / dmax(1.0, room.width()), 0.0, 1.0)
@@ -676,7 +606,6 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
         .clips(view::Live::Is(true))
         .lines_up(view::Live::Is(Some(view::Along::Start)))
         |> ignore
-        // (up to the pointer, a step lighter)
         track.box(fn(o) {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(f) {
@@ -701,7 +630,6 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
         |> ignore
       })
       |> ignore
-      // the knob at the playhead while the pointer is over the bar or holds it
       hit.box(fn(o) {
         o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
         o.box(fn(k) {
@@ -719,17 +647,14 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
         |> ignore
       })
       |> ignore
-      // the hover preview over the bar
       let pic_h = fn() { clamp(clip_card_w / dmax(0.1, clip_aspect.get()), 90.0, 180.0) }
       let card_w = clip_card_w + 8.0
       let card_h = fn() { pic_h() + 4.0 + 26.0 }
-      // (the moment it shows, kept while it fades out; the last picture shown, kept while the one wanted is made)
       let shown_at : mbt_compat::Ref[Double] = mbt_compat::ref_new(0.0)
       let last_key : mbt_compat::Ref[String] = mbt_compat::ref_new("")
       hit.box(fn(o) {
         o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))).lies_along(view::Live::Is(view::Lies::Start)) |> ignore
-        // (the pointer's leaving the bar kept for 120 ms, as the replay's hover card keeps it: no moment of no pointer
-        // between two moves over it takes the card away)
+        // Hold hover 120 ms on leave to avoid flicker during transient pointer-leave events.
         let (left, left_lately) = o.holds_for(120.0)
         o.reacts(fn() { hover() is Some(_) }, fn(over) { if !over { left() } })
         let fade = motion::NodeWay::new(0.0)
@@ -777,8 +702,7 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
             .image(view::Live::By(fn() {
               idx_tick.get() |> ignore
               let a = at()
-              // (the seconds round it asked ahead, there as the pointer comes to them; a GIF's next second alone: each
-              // of its frames is composed here, on the window's thread, from the canvas kept before it)
+              // GIF frames compose sequentially on the UI thread, so only prefetch +1 s ahead.
               let steps = if is_gif_path(path) { [1000.0] } else { [1000.0, -1000.0, 2000.0, -2000.0] }
               for step in steps {
                 let k = clip_frame_key(path, a + step)
@@ -790,7 +714,6 @@ fn clip_progress(parent : view::View, d : Deck, path : String, moved : () -> Uni
               if want == "" {
                 return if last_key.v == "" { None } else { Some((last_key.v, "", clip_card_px.to_int())) }
               }
-              // (the one wanted shown once decoded; the last one meanwhile, never an empty frame between two)
               let ready = p.image_ready(want, clip_card_px)
               let stand_in = last_key.v
               if ready {
