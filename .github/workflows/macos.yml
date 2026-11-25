@@ -1,19 +1,15 @@
 name: macOS package
-# ScreenReplay.app for Apple silicon: built (scripts/build-mac.sh), signed with AFK AI's Developer ID and notarized
-# (scripts/sign-mac.sh), kept as the run's artifact, where packaging/publish-setup.ps1 takes it for the download site
-# and latest.json. The release workflow calls it for a tag.
 on:
   workflow_dispatch:
   workflow_call:
-  # (a change to what the Mac build is made of, built, signed and notarized before it is merged)
   pull_request:
     paths:
       - 'mac/**'
-      - 'app/**'
+      - 'src/**'
+      - 'native/**'
+      - 'pion.toml'
       - 'scripts/build-mac.sh'
       - 'scripts/sign-mac.sh'
-      - 'scripts/fetch-stillfail.sh'
-      - 'stillfail.lock'
       - '.github/workflows/macos.yml'
 permissions:
   contents: read
@@ -22,7 +18,31 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout ScreenReplay
+        uses: actions/checkout@v4
+        with:
+          path: screenreplay
+
+      - name: Checkout invar
+        uses: actions/checkout@v4
+        with:
+          repository: AFK-surf/invar
+          ref: 1dfb93f6d552ee199d27156e71a7abce00877948
+          path: invar
+
+      - name: Checkout pion-packages
+        uses: actions/checkout@v4
+        with:
+          repository: AFK-surf/pion-packages
+          ref: 8014f92596624ab01af599b03851c7d3ad1f9701
+          path: pion-packages
+
+      - name: Checkout pion
+        uses: actions/checkout@v4
+        with:
+          repository: AFK-surf/pion
+          ref: 6ffebebfb4b134bf89028758593326626c766af2
+          path: pion
 
       # (vendor/PermissionFlow needs Swift tools 6.2: the newest Xcode on the runner, not its default)
       - name: Select the newest Xcode
@@ -31,15 +51,48 @@ jobs:
           sudo xcode-select -s "$x"
           swift --version
 
-      - name: Install MoonBit
+      - name: Cache pion toolchain
+        id: pion-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            pion/out/pionc2
+            pion/out/qbe
+            pion/out/libpionrt.a
+          key: pion-macos-arm64-6ffebebfb4b134bf89028758593326626c766af2
+
+      - name: Bootstrap pionc2
+        if: steps.pion-cache.outputs.cache-hit != 'true'
         run: |
           set -eu
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
-          "$HOME/.moon/bin/moon" version --all
+          OUT_DIR="$PWD/pion/out"
+          COMPILER_DIR="$PWD/pion/compiler"
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          mkdir -p "$OUT_DIR"
+          export PION_QBE="$OUT_DIR/qbe"
+          export PION_RT_LIB="$OUT_DIR/libpionrt.a"
+          PION_RT_CLI_LIB="$OUT_DIR/libpionrt_cli.a"
+          sh pion/scripts/build-qbe.sh "$PION_QBE"
+          cc -std=c11 -O2 -fno-asynchronous-unwind-tables -Wall -Wextra -Werror \
+            -c pion/runtime/pion_rt.c -o "$OUT_DIR/pion_rt.o"
+          ar rcs "$PION_RT_LIB" "$OUT_DIR/pion_rt.o"
+          cc -std=c11 -O2 -fno-asynchronous-unwind-tables -Wall -Wextra -Werror \
+            -c pion/runtime/pion_cli.c -o "$OUT_DIR/pion_cli.o"
+          ar rcs "$PION_RT_CLI_LIB" "$OUT_DIR/pion_rt.o" "$OUT_DIR/pion_cli.o"
+          gzip -dc pion/bootstrap/pionc-seed.ssa.gz > "$TMP_DIR/pionc-seed.ssa"
+          "$PION_QBE" -t arm64_apple -o "$TMP_DIR/pionc0.s" "$TMP_DIR/pionc-seed.ssa"
+          cc "$TMP_DIR/pionc0.s" "$PION_RT_CLI_LIB" -lm -lpthread -o "$OUT_DIR/pionc0"
+          mkdir -p "$TMP_DIR/cas_s1" "$TMP_DIR/cas_s2"
+          PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s1" "$OUT_DIR/pionc0" build -o "$OUT_DIR/pionc1" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
+          PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s2" "$OUT_DIR/pionc1" build -o "$OUT_DIR/pionc2" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
 
       - name: Build ScreenReplay.app
-        run: bash scripts/build-mac.sh
+        env:
+          PIONC: ${{ github.workspace }}/pion/out/pionc2
+          PION_QBE: ${{ github.workspace }}/pion/out/qbe
+          PION_RT_LIB: ${{ github.workspace }}/pion/out/libpionrt.a
+        run: bash screenreplay/scripts/build-mac.sh
 
       # (a fork's run, without the secrets, fails here rather than put out an ad hoc build)
       - name: Sign and notarize ScreenReplay.app
@@ -47,9 +100,9 @@ jobs:
           MACOS_DEVELOPER_ID_KEYCHAIN_B64_1: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_1 }}
           MACOS_DEVELOPER_ID_KEYCHAIN_B64_2: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_2 }}
           KEYCHAIN_PASSWORD_AFK: ${{ secrets.KEYCHAIN_PASSWORD_AFK }}
-        run: bash scripts/sign-mac.sh out/mac/ScreenReplay.app
+        run: bash screenreplay/scripts/sign-mac.sh screenreplay/out/mac/ScreenReplay.app
 
       - uses: actions/upload-artifact@v4
         with:
           name: ScreenReplay-mac
-          path: out/mac/ScreenReplay-mac.zip
+          path: screenreplay/out/mac/ScreenReplay-mac.zip

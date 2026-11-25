@@ -1,0 +1,191 @@
+import "signals"
+import "ui"
+import "view"
+
+// The tray's panel (the user, 2026-11-14: 「为啥我们的tray 菜单这么丑」, then B: drawn as the replay window is): the
+// same program run by the recorder with REPLAY_TRAY=1, hidden, kept; the recorder shows it by its icon when the icon
+// is pressed with the right button, beside it. It hides itself when it loses the focus, when a press lands outside it,
+// on Esc, or when something in it is chosen. What is chosen is told to the recorder (its window, REPLAY_RECORDER_HWND,
+// a message: rp_tray_tell), which does it as its own menu did. How the recorder stands it reads from its state.json, as
+// the replay window's chip does. Drawn as the replay window's own menus are (overlay.mbt's menu_layer: s2, 4 in, items
+// 32 high, radius 6, s3 under the pointer, keys in chips, hairlines between groups), so it is one of them (the user:
+// 「感觉跟主题好像不太搭」).
+
+
+fn tray_mode() -> Bool {
+  ui::env("REPLAY_TRAY") == "1"}
+
+/// The panel's width and height, in points (its window's, fixed): 4 in, a head of 36, nine items of 32 and three
+/// hairlines of 9 at most.
+
+
+fn tray_height_for(code : String) -> Double {
+  if code == "paused" {
+    336.0
+  } else if code == "disabled" {
+    304.0
+  } else {
+    368.0
+  }}
+
+/// What is chosen told to the recorder, and the panel hidden.
+fn tray_do(command : Int) -> Unit {
+  rp_tray_tell(command) |> ignore
+  rp_tray_hide()}
+
+/// An item, as the replay window's menus have them: its words, its keys in a chip after them.
+fn tray_item(parent : view::View, label : () -> String, keys : String, press : () -> Unit, strong? : Bool) -> Unit {
+  let strong = match strong { Some(__mbt_v) => __mbt_v, None => false }
+
+  pressable(parent, label, press, fn(b) {
+    b
+    .row(view::Live::Is(true))
+    .height(view::Live::Is(Some(32.0)))
+    .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+    .gap(view::Live::Is(10.0))
+    .radius(view::Live::Is(6.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .cursor(view::Live::Is(Some(view::Cursor::Arrow)))
+    .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+    .ground(view::Live::By(fn() { if b.pointed() || b.focus_shown() { c_s3() } else { 0L } }))
+    |> ignore
+    b.box(fn(l) {
+      l.grow(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))) |> ignore
+      words(l, label, 13.0, ui_text, weight=if strong { 600 } else { 400 }).min_width(view::Live::Is(Some(0.0))).allow_ellipsis(view::Live::Is(true)) |> ignore
+    })
+    |> ignore
+    if keys != "" {
+      kbd(b, keys)
+    }
+  })
+  |> ignore}
+
+/// A hairline between groups, as the menus' (4 over and under it).
+fn tray_rule(parent : view::View) -> Unit {
+  parent.box(fn(r) {
+    r.padding(view::Live::Is((0.0, 4.0, 0.0, 4.0))) |> ignore
+    rule(r, hair)
+  })
+  |> ignore}
+
+/// The panel's interior, shared by the standalone REPLAY_TRAY=1 process and the in-process secondary tray window.
+fn tray_content(root : view::View, do_cmd : (Int) -> Unit) -> Unit {
+  // the head: the mark and the name; how the recorder stands at the right, its dot red while it records
+  root.box(fn(head) {
+    head.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).padding(view::Live::Is((10.0, 0.0, 10.0, 0.0))).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    app_logo(head, 16.0)
+    words(head, fn() { "ScreenReplay" }, 13.0, ui_text, weight=600) |> ignore
+    spring(head)
+    head.box(fn(s) {
+      s.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))) |> ignore
+      s.box(fn(dot) {
+        dot
+        .width(view::Live::Is(Some(7.0)))
+        .height(view::Live::Is(Some(7.0)))
+        .radius(view::Live::Is(3.5))
+        .ground(view::Live::By(fn() {
+          if recorder_status().1 {
+            rec_red()
+          } else if recorder_code() == "disabled" {
+            ui_subtle()
+          } else {
+            warn()
+          }
+        }))
+        |> ignore
+      })
+      |> ignore
+      // (a word or two: the panel is narrow; what more there is the replay window's chip says)
+      words(s, fn() {
+          match recorder_code() {
+            "recording" => t("录制中")
+            "paused" => t("已暂停")
+            "disabled" => t("已关闭")
+            _ => recorder_status().0
+          }
+        }, 12.0, ui_muted)
+      .shrink(view::Live::Is(1.0))
+      .min_width(view::Live::Is(Some(0.0)))
+      .allow_ellipsis(view::Live::Is(true))
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore
+  tray_rule(root)
+  // what it is for, first: the last moments saved
+  let mac = is_mac()
+  tray_item(root, fn() { tf("保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, if mac { "⌃⌥S" } else { "Ctrl+Alt+S" }, fn() { do_cmd(5) }, strong=true)
+  tray_item(root, fn() { t("打开回放") }, if mac { "⌃⌥R" } else { "Ctrl+Alt+R" }, fn() { do_cmd(1) })
+  tray_item(root, fn() { t("标记此刻") }, if mac { "⌃⌥M" } else { "Ctrl+Alt+M" }, fn() { do_cmd(4) })
+  tray_item(root, fn() { t("打开已保存片段文件夹") }, "", fn() { do_cmd(3) })
+  tray_rule(root)
+  // recording held or let go, as it stands now
+  root.pick(fn() { recorder_code() }, fn(b, code) {
+    if code == "paused" {
+      tray_item(b, fn() { t("继续录制") }, "", fn() {
+        asked_recorder("recording", t("录制中"))
+        do_cmd(8)
+      })
+      tray_item(b, fn() { t("关闭后台录制") }, "", fn() { do_cmd(9) })
+    } else if code == "disabled" {
+      tray_item(b, fn() { t("开启后台录制") }, "", fn() { do_cmd(10) })
+    } else {
+      tray_item(b, fn() { t("暂停 15 分钟") }, "", fn() { do_cmd(6) })
+      tray_item(b, fn() { t("暂停 1 小时") }, "", fn() { do_cmd(7) })
+      tray_item(b, fn() { t("关闭后台录制") }, "", fn() { do_cmd(9) })
+    }
+  }, at_once=true)
+  tray_rule(root)
+  tray_item(root, fn() { t("设置…") }, "", fn() { do_cmd(2) })
+  tray_rule(root)
+  tray_item(root, fn() { t("退出") }, "", fn() { do_cmd(11) })}
+
+/// The panel hosted as a secondary window inside the single resident ScreenReplayViewer process.
+fn tray_popup_window(wid : Int, root : view::View) -> Unit {
+  root.tree.hand_over_presses(false)
+  ui::set_tree_theme(sf_ui_theme_now)
+  root.ground(view::Live::By(c_s2)).pad(view::Live::Is(4.0)) |> ignore
+  root.reacts(recorder_code, fn(code) {
+    let (px, py) = inproc_tray_pos.v
+    rp_style_tray_win(wid, tray_w, tray_height_for(code), px, py) |> ignore
+  })
+  let look = fn() -> Unit { __mbt_local_tray_popup_window_look_13(root, wid) }
+  again(root, 1000.0, look)
+  tray_content(root, fn(cmd) {
+    rp_tray_tell(cmd) |> ignore
+    ui::window_close_here(wid)
+  })}
+
+/// The panel as made once (standalone REPLAY_TRAY=1 fallback / macOS).
+fn tray_window(root : view::View) -> Unit {
+  the_root.v = Some(root)
+  root.tree.hand_over_presses(false)
+  ui::set_tree_theme(sf_ui_theme_now)
+  load_prefs()
+  ask_system(root)
+  keep_theme(root)
+  load_settings()
+  root.ground(view::Live::By(c_s2)).pad(view::Live::Is(4.0)) |> ignore
+  // (its window made a panel once it is up; while it shows, the recorder's word read every second)
+  // (and drawn once unseen, its device made, before anyone presses for it: rp_tray_window, rp_tray_primed)
+  root.at_moment(now() + 1.0, fn() { rp_tray_window(tray_w, tray_height_for(signals::untracked(recorder_code))) |> ignore }) |> ignore
+  root.reacts(recorder_code, fn(code) { rp_tray_window(tray_w, tray_height_for(code)) |> ignore })
+  let look = fn() -> Unit { __mbt_local_tray_window_look_14(root) }
+  __mbt_local_tray_window_look_14(root)
+  tray_content(root, tray_do)}
+fn __mbt_local_tray_popup_window_look_13(root : view::View, wid : Int) -> Unit {
+    if inproc_tray_wid.v == wid {
+      status_rev.set(status_rev.untracked() + 1)
+      again(root, 1000.0, fn() { __mbt_local_tray_popup_window_look_13(root, wid) })
+    }
+  }
+
+fn __mbt_local_tray_window_look_14(root : view::View) -> Unit {
+    if rp_window_shown() == 1 {
+      status_rev.set(status_rev.untracked() + 1)
+    }
+    again(root, 1000.0, fn() { __mbt_local_tray_window_look_14(root) })
+  }
+
+

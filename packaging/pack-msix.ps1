@@ -1,5 +1,5 @@
 param(
-  # the replay window built (scripts/build-app.sh): the folder holding ScreenReplayViewer.exe
+  # the replay window built (scripts/build-viewer.ps1): the folder holding ScreenReplayViewer.exe
   [Parameter(Mandatory)][string]$Viewer,
   # Partner Center's Product identity of the reserved name (Store ID 9PCZQK5BVPC6, reserved 2026-11-14)
   [string]$Name = "pengx17.ScreenReplay",

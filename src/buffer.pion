@@ -1,0 +1,452 @@
+import "mbt_compat"
+import "ui"
+import "hostapi"
+
+// What the recorder left in REPLAY_ROOT: the buffer's segments (`Buffer\<yyyyMMdd-HHmmss-fff>-<id>.mp4`, each with a
+// `.json` beside it saying its `durationMs`: recording/SegmentStore.cs), the markers (`markers.jsonl`, `{"at"}`)
+// and the app in front as it changed (`apps.jsonl`, `{"at","app"}`), times in ms since the epoch (UTC).
+
+
+/// How far local time is ahead of UTC (minutes), asked of Windows at most once a second: the title bar's moment
+/// and the axis asked it three times a frame while playing, each a walk of the time zone's rules.
+
+
+fn rp_local_offset() -> Int {
+  let t = rp_now()
+  let (at, v) = local_offset_read.v
+  if t - at < 1000.0 && t >= at {
+    return v
+  }
+  let v = rp_local_offset_now()
+  local_offset_read.v = (t, v)
+  v}
+
+
+fn cstr(s : String) -> Bytes {
+  mbt_compat::utf8_encode(s + "\u{0}")}
+
+fn env_or(name : String, fallback : String) -> String {
+  let v = ui::env(name)
+  if v != "" {
+    v
+  } else {
+    fallback
+  }}
+
+fn root_dir() -> String {
+  env_or("REPLAY_ROOT", if is_mac() {
+      pjoin(ui::env("HOME"), "Library/Application Support/ScreenReplay")
+    } else {
+      ui::env("LOCALAPPDATA") + "\\Replay"
+    })}
+
+fn buffer_dir() -> String {
+  env_or("REPLAY_DIR", pjoin(root_dir(), "Buffer"))}
+
+/// The folders segments are in: the recorder's buffers.json (where it writes now, then those it wrote into before,
+/// till what is there expires), else buffer_dir().
+fn buffer_dirs() -> Array[String] {
+  match parse(read_text(pjoin(root_dir(), "buffers.json"))) {
+    Option::Some(Object(o)) => {
+      let out : Array[String] = []
+      match o.get("current") {
+        Option::Some(String(v)) if v != "" => out.push(v)
+        _ => ()
+      }
+      match o.get("old") {
+        Option::Some(Array(a)) =>
+          { for x in a {
+            match x {
+              String(v) if v != "" && !out.contains(v) => out.push(v)
+              _ => ()
+            }
+          } }
+        _ => ()
+      }
+      if out.is_empty() { [buffer_dir()] } else { out }
+    }
+    _ => [buffer_dir()]
+  }}
+
+pub struct Seg {
+  path : String
+  start : Double
+  dur : Double
+  size : Double
+  fps : Int
+}
+
+
+/// When 删除全部录像 was last asked (ms since the epoch): what began before it is no longer read.
+
+
+/// 删除全部录像 asked: what is shown of the recordings gone at once, not left till the recorder has deleted them (the
+/// reviewer's 88th): playing stopped, the segments, markers and apps let go, each segment's index, levels and input with them;
+/// the window shows it has nothing; what the recorder writes after it comes as ever.
+fn purge_now() -> Unit {
+  purged_before.v = rp_now()
+  set_playing(false)
+  for seg in segs {
+    rp_idx_drop(cstr(seg.path))
+    sidecars_drop(seg.path)
+  }
+  segs.clear()
+  marks.clear()
+  marks_read.v = 0.0
+  marks_tail.v = ""
+  marks_head.v = ""
+  apps.clear()
+  apps_read.v = 0.0
+  apps_tail.v = ""
+  apps_head.v = ""
+  clear_windows()
+  current.v = -1
+  data_changed()}
+
+/// The markers, ms since the epoch.
+
+
+/// The app in front from each time on: (ms since the epoch, its process name).
+
+
+fn digits(s : String, from : Int, n : Int) -> Option[Int] {
+  let mut v = 0
+  for i in from..<(from + n) {
+    if i >= s.length() {
+      return Option::None
+    }
+    let ch = s[i].to_int()
+    if ch < '0'.to_int() || ch > '9'.to_int() {
+      return Option::None
+    }
+    v = v * 10 + (ch - '0'.to_int())
+  }
+  Option::Some(v)}
+
+/// Days since 1970-01-01 of a civil date (Howard Hinnant's days_from_civil).
+fn days_from_civil(y0 : Int, m : Int, d : Int) -> Int {
+  let y = if m <= 2 { y0 - 1 } else { y0 }
+  let era = (if y >= 0 { y } else { y - 399 }) / 400
+  let yoe = y - era * 400
+  let mp = if m > 2 { m - 3 } else { m + 9 }
+  let doy = (153 * mp + 2) / 5 + d - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  era * 146097 + doe - 719468}
+
+/// The civil date of a day since 1970-01-01 (Howard Hinnant's civil_from_days).
+fn civil_from_days(z0 : Int) -> (Int, Int, Int) {
+  let z = z0 + 719468
+  let era = (if z >= 0 { z } else { z - 146096 }) / 146097
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let y = yoe + era * 400
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m = if mp < 10 { mp + 3 } else { mp - 9 }
+  ((if m <= 2 { y + 1 } else { y }), m, d)}
+
+/// A segment's start by its name, `yyyyMMdd-HHmmss-fff-…`.
+fn start_of(name : String) -> Option[Double] {
+  match
+    (
+      digits(name, 0, 4),
+      digits(name, 4, 2),
+      digits(name, 6, 2),
+      digits(name, 9, 2),
+      digits(name, 11, 2),
+      digits(name, 13, 2),
+      digits(name, 16, 3),
+    ) {
+    (Some(y), Some(mo), Some(d), Some(h), Some(mi), Some(s), Some(ms)) => {
+      let days = days_from_civil(y, mo, d).to_double()
+      Option::Some(
+        days * 86400000.0 +
+        (h * 3600 + mi * 60 + s).to_double() * 1000.0 +
+        ms.to_double(),
+      )
+    }
+    _ => Option::None
+  }}
+
+fn read_text(path : String) -> String {
+  // (opened once: its size and its bytes from the one handle, rp_read reading no more than the file holds)
+  let bytes = rp_read(cstr(path), 0.0, 256 * 1024 * 1024)
+  if bytes.length() == 0 {
+    return ""
+  }
+  let text = text_of(bytes)
+  if text.starts_with("\u{FEFF}") {
+    text.slice(3, text.length())
+  } else {
+    text
+  }}
+
+fn parse(text : String) -> Option[mbt_compat::MbtJson] {
+  match mbt_compat::mbt_json_parse(text) { Ok(__mbt_ok_4) => Some(__mbt_ok_4), Err(_) => Option::None }}
+
+fn duration_of(json_path : String) -> Option[(Double, Int)] {
+  match parse(read_text(json_path)) {
+    Option::Some(Object(o)) =>
+      match o.get("durationMs") {
+        Option::Some(Number(v, _)) =>
+          Option::Some(
+            (
+              v,
+              match o.get("fps") {
+                Option::Some(Number(f, _)) => f.to_int()
+                _ => 0
+              },
+            ),
+          )
+        _ => Option::None
+      }
+    _ => Option::None
+  }}
+
+/// What the folder holds now: its segments (in order), the markers, the apps.
+fn load() -> Unit {
+  index_start()
+  let old_base = t0()
+  let current_path = if current.v >= 0 && current.v < segs.length() { segs[current.v].path } else { "" }
+  let known : mbt_compat::OrderedMap[String, Seg] = mbt_compat::ordered_map_new()
+  for seg in segs { known.set(seg.path, seg) }
+  let found : Array[Seg] = []
+  for dir in buffer_dirs() {
+  let names = text_of(rp_list(cstr(dir)))
+  for name in names.split("\n") {
+    let name = name
+    if name.length() < 5 {
+      continue
+    }
+    let path = pjoin(dir, name)
+    match known.get(path) {
+      Option::Some(seg) => { found.push(seg); continue }
+      Option::None => ()
+    }
+    let stem = name.slice(0, name.length() - 4)
+    match (start_of(name), duration_of(pjoin(dir, stem + ".json"))) {
+      (Some(start), Some(dur)) if start >= purged_before.v => {
+        found.push(Seg::{ path: path, start: start, dur: dur.0, size: rp_size(cstr(path)), fps: dur.1 })
+        rp_idx_add(cstr(path), dur.0)
+      }
+      _ => ()
+    }
+  }
+  }
+  arr_sort_by(found, fn(a, b) { if a.start < b.start { -1 } else if a.start > b.start { 1 } else { 0 } })
+  let mut changed = found.length() != segs.length()
+  if !changed {
+    for i, seg in found { if seg.path != segs[i].path { changed = true; break } }
+  }
+  if changed {
+    let kept : mbt_compat::OrderedMap[String, Bool] = mbt_compat::ordered_map_new()
+    for seg in found {
+      kept.set(seg.path, true)
+    }
+    for seg in segs {
+      if !kept.contains(seg.path) {
+        rp_idx_drop(cstr(seg.path))
+        sidecars_drop(seg.path)
+        seg_images_forget(seg.path)
+        seg_codecs.remove(seg.path)
+      }
+    }
+    segs.clear()
+    arr_append(segs, found)
+    // Keep all coordinates at their absolute times when old segments expire.
+    let shift = if old_base > 0.0 { old_base - t0() } else { 0.0 }
+    if shift != 0.0 {
+      let p = play.untracked()
+      play.set(Play::{ ..p, pos: p.pos + shift })
+      match native_made.v {
+        Some(d) => d.shifted(shift)
+        None => ()
+      }
+      view_from.set(view_from.untracked() + shift)
+      clip_a.set(clip_a.untracked() + shift)
+      clip_b.set(clip_b.untracked() + shift)
+    }
+    if current_path != "" {
+      current.v = -1
+      for i, seg in segs { if seg.path == current_path { current.v = i; break } }
+      if current.v < 0 && !segs.is_empty() {
+        // (the segment shown expired: to the oldest kept)
+        seek_to(0.0)
+      }
+    }
+    if ui::env("REPLAY_TRACE") == "1" {
+      hostapi::log("REPLAY_REFRESH segments=\{segs.length()} from=\{view_from.untracked()} current=\{current.v}")
+    }
+  }
+  if load_marks_incremental() {
+    changed = true
+  }
+  if load_apps_incremental() {
+    changed = true
+  }
+  if changed {
+    data_changed()
+  }}
+
+/// Incrementally reads appended lines from `markers.jsonl` (re-reading from scratch if pruned/rewritten).
+fn load_marks_incremental() -> Bool {
+  let path = pjoin(root_dir(), "markers.jsonl")
+  let size = rp_size(cstr(path))
+  if size <= 0.0 {
+    let had = !marks.is_empty()
+    marks.clear()
+    marks_read.v = 0.0
+    marks_tail.v = ""
+    marks_head.v = ""
+    return had
+  }
+  let head = text_of(rp_read(cstr(path), 0.0, imin(48, size.to_int())))
+  let mut reset = false
+  if size < marks_read.v || (marks_head.v != "" && head != marks_head.v) {
+    marks.clear()
+    marks_read.v = 0.0
+    marks_tail.v = ""
+    reset = true
+  }
+  marks_head.v = head
+  if size <= marks_read.v {
+    return reset
+  }
+  let n = (size - marks_read.v).to_int()
+  let text = marks_tail.v + text_of(rp_read(cstr(path), marks_read.v, n))
+  marks_read.v = size
+  let lines : Array[String] = []
+  for l in text.split("\n") {
+    lines.push(l)
+  }
+  marks_tail.v = lines[lines.length() - 1]
+  let had = marks.length()
+  for i in 0..<(lines.length() - 1) {
+    match parse(lines[i]) {
+      Option::Some(mbt_compat::MbtJson::Object(o)) => {
+        match o.get("at") {
+          Some(mbt_compat::MbtJson::Number(at, _)) if at >= purged_before.v => marks.push(at)
+          _ => ()
+        }
+      }
+      _ => ()
+    }
+  }
+  if marks.length() != had || reset {
+    arr_sort_double(marks)
+    true
+  } else {
+    false
+  }}
+
+/// Incrementally reads appended lines from `apps.jsonl` (re-reading from scratch if pruned/rewritten).
+fn load_apps_incremental() -> Bool {
+  let path = pjoin(root_dir(), "apps.jsonl")
+  let size = rp_size(cstr(path))
+  if size <= 0.0 {
+    let had = !apps.is_empty()
+    apps.clear()
+    apps_read.v = 0.0
+    apps_tail.v = ""
+    apps_head.v = ""
+    return had
+  }
+  let head = text_of(rp_read(cstr(path), 0.0, imin(48, size.to_int())))
+  let mut reset = false
+  if size < apps_read.v || (apps_head.v != "" && head != apps_head.v) {
+    apps.clear()
+    apps_read.v = 0.0
+    apps_tail.v = ""
+    reset = true
+  }
+  apps_head.v = head
+  if size <= apps_read.v {
+    return reset
+  }
+  let n = (size - apps_read.v).to_int()
+  let text = apps_tail.v + text_of(rp_read(cstr(path), apps_read.v, n))
+  apps_read.v = size
+  let lines : Array[String] = []
+  for l in text.split("\n") {
+    lines.push(l)
+  }
+  apps_tail.v = lines[lines.length() - 1]
+  let had = apps.length()
+  for i in 0..<(lines.length() - 1) {
+    match parse(lines[i]) {
+      Option::Some(mbt_compat::MbtJson::Object(o)) => {
+        match (o.get("at"), o.get("app")) {
+          (Some(mbt_compat::MbtJson::Number(at, _)), Some(mbt_compat::MbtJson::String(app))) if at >= purged_before.v => apps.push((at, app))
+          _ => ()
+        }
+      }
+      _ => ()
+    }
+  }
+  apps.length() != had || reset}
+
+fn ask_flush() -> Unit {
+  rp_write(cstr(pjoin(root_dir(), "flush.request")), "1".to_bytes()) |> ignore}
+
+fn t0() -> Double {
+  if segs.is_empty() {
+    0.0
+  } else {
+    segs[0].start
+  }}
+
+fn span() -> Double {
+  if segs.is_empty() {
+    1.0
+  } else {
+    let last = segs[segs.length() - 1]
+    dmax(1.0, last.start + last.dur - t0())
+  }}
+
+fn two(n : Int) -> String {
+  if n < 10 {
+    "0\{n}"
+  } else {
+    n.to_string()
+  }}
+
+/// `m:ss` or `h:mm:ss` of a length.
+fn clock(ms : Double) -> String {
+  // (a length: rounded, 29.97 s is 0:30; moments of the day are cut to their second: wall)
+  let total = (dmax(0.0, ms) / 1000.0).round().to_int()
+  let h = total / 3600
+  let m = total % 3600 / 60
+  let s = total % 60
+  if h > 0 {
+    "\{h}:\{two(m)}:\{two(s)}"
+  } else {
+    "\{m}:\{two(s)}"
+  }}
+
+/// The milliseconds of `at` (.mmm), to follow `wall`'s HH:MM:SS.
+fn ms_words(at : Double) -> String {
+  let ms = (at - (at / 1000.0).floor() * 1000.0).floor().to_int()
+  let m = if ms < 10 { "00\{ms}" } else if ms < 100 { "0\{ms}" } else { ms.to_string() }
+  "." + m}
+
+/// The local time of day of a moment (ms since the epoch), `HH:mm:ss` (`HH:mm` with `short`).
+fn wall(at : Double, short? : Bool) -> String {
+  let short = match short { Some(__mbt_v) => __mbt_v, None => false }
+
+  let here = at + rp_local_offset().to_double() * 60000.0
+  let day_ms = here - (here / 86400000.0).floor() * 86400000.0
+  let s = (day_ms / 1000.0).floor().to_int()
+  if short {
+    "\{two(s / 3600)}:\{two(s % 3600 / 60)}"
+  } else {
+    "\{two(s / 3600)}:\{two(s % 3600 / 60)}:\{two(s % 60)}"
+  }}
+
+/// A local `yyyy-MM-dd HH-mm-ss` for file names.
+fn stamp(at : Double) -> String {
+  let here = at + rp_local_offset().to_double() * 60000.0
+  let days = (here / 86400000.0).floor()
+  let (y, m, d) = civil_from_days(days.to_int())
+  let s = ((here - days * 86400000.0) / 1000.0).floor().to_int()
+  "\{y}-\{two(m)}-\{two(d)} \{two(s / 3600)}-\{two(s % 3600 / 60)}-\{two(s % 60)}"}
