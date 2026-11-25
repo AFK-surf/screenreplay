@@ -94,8 +94,8 @@ jobs:
           PION_RT_LIB: ${{ github.workspace }}/pion/out/libpionrt.a
         run: bash screenreplay/scripts/build-mac.sh
 
-      # (a fork's run, without the secrets, fails here rather than put out an ad hoc build)
       - name: Sign and notarize ScreenReplay.app
+        if: github.event_name != 'pull_request'
         env:
           MACOS_DEVELOPER_ID_KEYCHAIN_B64_1: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_1 }}
           MACOS_DEVELOPER_ID_KEYCHAIN_B64_2: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_2 }}
