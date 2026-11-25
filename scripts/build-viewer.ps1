@@ -69,6 +69,22 @@ $clangxxEsc = $clangxxBin -replace '\\', '\\'
 #include <process.h>
 #include <stdlib.h>
 #include <string.h>
+static const char *quote_arg(const char *s) {
+  if (!strchr(s, ' ') && !strchr(s, '\t') && !strchr(s, '"')) return s;
+  size_t n = strlen(s);
+  char *out = (char *)malloc(n * 2 + 3);
+  if (!out) return s;
+  char *p = out;
+  *p++ = '"';
+  for (size_t i = 0; i < n; i++) {
+    if (s[i] == '"') *p++ = '\\';
+    *p++ = s[i];
+  }
+  if (n > 0 && s[n - 1] == '\\') *p++ = '\\';
+  *p++ = '"';
+  *p = '\0';
+  return out;
+}
 int main(int argc, char **argv) {
   const char **args = (const char **)malloc((size_t)(argc + 4) * sizeof(char *));
   if (!args) return 1;
@@ -78,11 +94,11 @@ int main(int argc, char **argv) {
   const char *exe = "$clangEsc";
 #endif
   int k = 0;
-  args[k++] = exe;
+  args[k++] = quote_arg(exe);
   args[k++] = "--target=x86_64-pc-windows-msvc";
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-fuse-ld=lld") == 0) continue;
-    args[k++] = argv[i];
+    args[k++] = quote_arg(argv[i]);
   }
   args[k] = NULL;
   return (int)_spawnv(_P_WAIT, exe, args);
