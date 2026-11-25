@@ -60,3 +60,51 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes \
               "$setup" assets/ScreenReplay-mac.zip
           fi
+
+  # The download site and the updates: latest.json signed with the release key, the installer and the Mac build put in
+  # the R2 bucket, the site deployed (packaging/publish-setup.ps1). The key and Cloudflare's token are the `release`
+  # environment's alone: a v* tag's run, once its reviewer has approved it.
+  publish:
+    needs: release
+    runs-on: windows-2022
+    timeout-minutes: 30
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ScreenReplay-windows
+          path: out/setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: ScreenReplay-mac
+          path: out/mac
+      - name: Sign, put in R2, deploy the site
+        shell: pwsh
+        env:
+          SIGN_KEY: ${{ secrets.SCREENREPLAY_SIGN_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if (-not $env:SIGN_KEY -or -not $env:CLOUDFLARE_API_TOKEN) { throw "the release environment has no SCREENREPLAY_SIGN_KEY or CLOUDFLARE_API_TOKEN" }
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $env:SCREENREPLAY_SIGN_KEY = Join-Path $env:RUNNER_TEMP "release-key.pem"
+          [IO.File]::WriteAllText($env:SCREENREPLAY_SIGN_KEY, $env:SIGN_KEY)
+          try {
+            ./packaging/publish-setup.ps1 -Version $version -MacZip out/mac/ScreenReplay-mac.zip
+          } finally {
+            Remove-Item -Force $env:SCREENREPLAY_SIGN_KEY
+          }
+          npx --yes wrangler pages deploy --project-name screenreplay --branch main --commit-dirty=true
+          if ($LASTEXITCODE) { throw "pages deploy failed" }
+      - name: The site says the new version
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          for i in 1 2 3 4 5 6; do
+            got=$(curl -fsS "https://screenreplay.pages.dev/dl/latest.json?t=$RANDOM" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)
+            [ "$got" = "$want" ] && { echo "latest.json: $got"; exit 0; }
+            sleep 10
+          done
+          echo "::error::screenreplay.pages.dev/dl/latest.json says '$got', not $want"
+          exit 1

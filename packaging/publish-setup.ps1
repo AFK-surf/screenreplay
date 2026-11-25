@@ -1,13 +1,15 @@
 ﻿param(
   [Parameter(Mandatory = $true)][string]$Version,
-  [switch]$NoMac
+  [switch]$NoMac,
+  [string]$MacZip = ""
 )
 # Signs and uploads ScreenReplay-Setup-<Version>.exe + signed latest.json to Cloudflare R2 bucket `screenreplay`.
 # Requires $env:SCREENREPLAY_SIGN_KEY (from still.fail vault 「ScreenReplay 更新签名私钥（ECDSA P-256）」).
 # The macOS build is this commit's: ScreenReplay-mac.zip, signed with AFK AI's Developer ID and notarized by the macOS
 # package workflow (.github/workflows/macos.yml; started here on the current branch when this commit has no run, gh
 # logged in), put as ScreenReplay-mac.zip and signed in latest.json as mac_sha256 / mac_signature for
-# mac/Sources/ScreenReplayKit/Updater.swift (-NoMac: Windows alone).
+# mac/Sources/ScreenReplayKit/Updater.swift (-NoMac: Windows alone; -MacZip <file>: that build, already at hand, as
+# the release workflow has it from the tag's own macOS package run).
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
 $setup = Join-Path $repo "out\setup\ScreenReplay-Setup-$Version.exe"
@@ -15,7 +17,10 @@ if (-not (Test-Path $setup)) {
   throw "Setup installer not found: $setup (run packaging\pack-setup.ps1 -Version $Version first)"
 }
 $mac = $null
-if (-not $NoMac) {
+if ($MacZip) {
+  if (-not (Test-Path $MacZip)) { throw "no macOS build at $MacZip" }
+  $mac = (Resolve-Path $MacZip).Path
+} elseif (-not $NoMac) {
   $gh = "AFK-surf/screenreplay"
   $commit = (git -C $repo rev-parse HEAD).Trim()
   $branch = (git -C $repo rev-parse --abbrev-ref HEAD).Trim()
