@@ -1,10 +1,23 @@
 import AppKit
 import CryptoKit
 import Foundation
+import Security
 
 /// ECDSA P-256 release verification and `update.json` state manager matching `recorder/Updater.cs` and `app/about.mbt`.
+/// On a copy signed by AFK AI's Developer ID in Applications it updates itself as the Windows build does: latest.json's
+/// `mac_sha256` / `mac_signature` (the release key's signature of the zip's SHA-256, `packaging/publish-setup.ps1`),
+/// `ScreenReplay-mac.zip` fetched and checked, installed once the replay window is closed and the Mac idle for two minutes
+/// (or at once when asked): opened next to the app, its code signature checked for that team, the apps swapped, and the
+/// new one started with --updated once this run has ended.
 public final class Updater: @unchecked Sendable {
-  public static let appVersion = "0.1.22"
+  public static let appVersion: String = {
+    let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+    return isPlainVersion(v) ? v : "0.1.24"
+  }()
+
+  /// The Team ID of "Developer ID Application: AFK AI, Inc. (D9AAN3VJK8)", what scripts/sign-mac.sh signs with.
+  static let team = "D9AAN3VJK8"
+  static let zipName = "ScreenReplay-mac.zip"
 
   // ECDSA P-256 public key matching `recorder/Updater.cs` (`ScreenReplay 更新签名私钥（ECDSA P-256）`).
   private static let keyX: [UInt8] = [
@@ -30,6 +43,18 @@ public final class Updater: @unchecked Sendable {
   private var lastCheckedEpoch: Int64 = 0
   private var lastTried = Date.distantPast
   private var busy = false
+  private var askedByUser = false
+  private var downloadedFile = ""
+  private var readyAt = Date.distantPast
+  private var readyNoted = false
+  private var progressWatch: NSKeyValueObservation?
+
+  /// Whether the replay window is open (no update under it), set by the host.
+  public var isReplayShown: () -> Bool = { false }
+  /// Ends everything this run started (the helper, the replay window) before the new app takes its place.
+  public var beforeQuit: () -> Void = {}
+  /// Tells the user something (the ready-for-a-day note).
+  public var notify: (String, String) -> Void = { _, _ in }
 
   public init(paths: RecorderPaths, logger: RecorderLogger? = nil, headlessTest: Bool = false) {
     self.paths = paths
@@ -37,14 +62,56 @@ public final class Updater: @unchecked Sendable {
     self.installKind = headlessTest ? 0 : Self.detectInstallKind()
     readPersistedChecked()
     writeState()
+    if CommandLine.arguments.contains("--updated") {
+      logger?.log("update: now \(Self.appVersion)")
+    }
   }
 
+  static func testMode(_ env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+    !(env["REPLAY_TEST_UPDATE"] ?? "").isEmpty
+  }
+
+  static func updateNowTest(_ env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+    testMode(env) && !(env["REPLAY_TEST_UPDATE_NOW"] ?? "").isEmpty
+  }
+
+  /// 1 a copy in Applications (or, in a test run, anywhere) that updates itself; 0 one that does not: a dev build, or one
+  /// not signed by AFK AI's Developer ID (what it would be replaced with is not what it is).
   public static func detectInstallKind() -> Int {
     let bundlePath = Bundle.main.bundlePath
-    if bundlePath.hasPrefix("/Applications/") || bundlePath.hasPrefix((NSHomeDirectory() as NSString).appendingPathComponent("Applications")) {
-      return 1
+    guard bundlePath.hasSuffix(".app") else { return 0 }
+    if testMode() { return 1 }
+    let inApplications = bundlePath.hasPrefix("/Applications/") ||
+      bundlePath.hasPrefix((NSHomeDirectory() as NSString).appendingPathComponent("Applications") + "/")
+    return inApplications && selfSignedByUs() ? 1 : 0
+  }
+
+  static func signerRequirement() -> SecRequirement? {
+    let text = "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] and "
+      + "certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = \"\(team)\""
+    var req: SecRequirement?
+    return SecRequirementCreateWithString(text as CFString, [], &req) == errSecSuccess ? req : nil
+  }
+
+  static func selfSignedByUs() -> Bool {
+    var me: SecCode?
+    guard let req = signerRequirement(), SecCodeCopySelf([], &me) == errSecSuccess, let me else { return false }
+    return SecCodeCheckValidity(me, [], req) == errSecSuccess
+  }
+
+  /// The app at `path`, all of it (nested code too), signed by AFK AI's Developer ID; in a test run with
+  /// REPLAY_TEST_ANY_SIGNER, by anyone (tests sign ad hoc).
+  static func signedByUs(_ path: String) -> Bool {
+    let env = ProcessInfo.processInfo.environment
+    let anySigner = testMode(env) && !(env["REPLAY_TEST_ANY_SIGNER"] ?? "").isEmpty
+    let req = anySigner ? nil : signerRequirement()
+    if !anySigner && req == nil { return false }
+    var code: SecStaticCode?
+    guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess, let code else {
+      return false
     }
-    return 0
+    let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
+    return SecStaticCodeCheckValidity(code, flags, req) == errSecSuccess
   }
 
   public static func downloadBase(env: [String: String] = ProcessInfo.processInfo.environment) -> String {
@@ -56,6 +123,11 @@ public final class Updater: @unchecked Sendable {
     return "https://screenreplay.pages.dev/dl/"
   }
 
+  public static func idleSeconds() -> Double {
+    let s = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+    return s.isFinite && s >= 0 ? s : 0
+  }
+
   public func poll(autoUpdateEnabled: Bool, startedOverMinuteAgo: Bool, headlessTest: Bool = false) {
     let reqPath = paths.requestPath("update.request")
     if FileManager.default.fileExists(atPath: reqPath) {
@@ -65,34 +137,76 @@ public final class Updater: @unchecked Sendable {
         checkNow(userAsked: true)
         return
       } else if req == "update" {
-        if !headlessTest, let url = URL(string: "https://screenreplay.pages.dev") {
+        lock.lock()
+        let st = state
+        let hand = byHand
+        lock.unlock()
+        if st == "ready" {
+          installNow()
+        } else if st == "found" && !hand {
+          lock.lock()
+          askedByUser = true
+          lock.unlock()
+          download()
+        } else if st == "fetching" {
+          lock.lock()
+          askedByUser = true
+          lock.unlock()
+        } else if !headlessTest, let url = URL(string: "https://screenreplay.pages.dev") {
           NSWorkspace.shared.open(url)
         }
         return
       }
     }
 
-    guard !headlessTest, installKind == 1, autoUpdateEnabled, startedOverMinuteAgo else { return }
-    let nowEpoch = Int64(Date().timeIntervalSince1970)
+    lock.lock()
+    let readyAsked = state == "ready" && askedByUser && !busy
+    lock.unlock()
+    if readyAsked {
+      installNow()
+      return
+    }
+
+    let nowTest = Self.updateNowTest()
+    guard !headlessTest, installKind == 1, autoUpdateEnabled || nowTest, startedOverMinuteAgo || nowTest else { return }
     lock.lock()
     let isBusy = busy
     let checked = lastCheckedEpoch
     let tried = lastTried
+    let st = state
+    let hand = byHand
     lock.unlock()
     guard !isBusy else { return }
+    if st == "ready" {
+      tryInstallWhenIdle()
+      return
+    }
+    if st == "found" && !hand {
+      lock.lock()
+      askedByUser = false
+      lock.unlock()
+      download()
+      return
+    }
+    if st == "installing" { return }
 
-    if (nowEpoch - checked >= 86_400 || checked > nowEpoch + 60) && Date().timeIntervalSince(tried) >= 3600 {
+    let nowEpoch = Int64(Date().timeIntervalSince1970)
+    let due = nowTest
+      ? tried == Date.distantPast
+      : (nowEpoch - checked >= 86_400 || checked > nowEpoch + 60) && Date().timeIntervalSince(tried) >= 3600
+    if due {
       checkNow(userAsked: false)
     }
   }
 
   public func checkNow(userAsked: Bool = true) {
     lock.lock()
-    if busy {
+    if busy || state == "ready" || state == "installing" {
       lock.unlock()
       return
     }
     busy = true
+    askedByUser = userAsked
     lastTried = Date()
     state = "checking"
     errorCode = ""
@@ -110,11 +224,6 @@ public final class Updater: @unchecked Sendable {
 
     URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
       guard let self else { return }
-      defer {
-        self.lock.lock()
-        self.busy = false
-        self.lock.unlock()
-      }
       if let error {
         self.logger?.log("update: check failed: \(error.localizedDescription)")
         self.fail("network")
@@ -141,28 +250,249 @@ public final class Updater: @unchecked Sendable {
         self.lastCheckedEpoch = nowEpoch
         self.state = "latest"
         self.foundVersion = ""
+        self.busy = false
         self.lock.unlock()
+        self.logger?.log("update: \(Self.appVersion) is up to date")
         self.writeState()
         return
       }
 
-      let sha = ((obj["mac_sha256"] as? String) ?? (obj["setup_sha256"] as? String) ?? "")
-        .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-      let sig = ((obj["mac_signature"] as? String) ?? (obj["signature"] as? String) ?? "")
-        .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-      let signedOK = Self.isPlainSHA256(sha) && Self.verifyReleaseSignature(version: ver, sha256Hex: sha, signatureHex: sig)
+      // (the Mac's own: the zip's, signed as Windows' setup is; a release with no Mac build is one to fetch by hand)
+      let sha = ((obj["mac_sha256"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      let sig = ((obj["mac_signature"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      let signedOK = Self.isPlainSHA256(sha) && Self.verifyReleaseSignature(
+        version: ver, sha256Hex: sha, signatureHex: sig, publicKeyRawOverride: Self.testReleaseKey())
 
       self.lock.lock()
       self.lastCheckedEpoch = nowEpoch
       self.foundVersion = ver
       self.foundSha = sha
-      self.byHand = true // macOS opens DMG / release download when user clicks update
+      self.byHand = self.installKind != 1 || !signedOK
       self.state = "found"
       self.percent = -1
+      self.busy = false
+      let hand = self.byHand
       self.lock.unlock()
-      self.logger?.log("update: found \(ver) (signed=\(signedOK), userAsked=\(userAsked))")
+      self.logger?.log("update: found \(ver) (signed=\(signedOK), installKind=\(self.installKind), userAsked=\(userAsked))")
       self.writeState()
+      if !userAsked && !hand {
+        self.download()
+      }
     }.resume()
+  }
+
+  /// A test run's release key (REPLAY_TEST_RELEASE_KEY, hex of x || y): its runs are the tester's.
+  static func testReleaseKey() -> Data? {
+    let env = ProcessInfo.processInfo.environment
+    guard testMode(env), let hex = env["REPLAY_TEST_RELEASE_KEY"], !hex.isEmpty else { return nil }
+    return Data(hexString: hex)
+  }
+
+  private func updatesDir() -> String {
+    let dir = (paths.root as NSString).appendingPathComponent("updates")
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    return dir
+  }
+
+  private func download() {
+    lock.lock()
+    if busy || foundVersion.isEmpty || byHand {
+      lock.unlock()
+      return
+    }
+    busy = true
+    let ver = foundVersion
+    let want = foundSha
+    state = "fetching"
+    percent = -1
+    errorCode = ""
+    lock.unlock()
+    writeState()
+
+    let urlString = Self.downloadBase() + "v\(ver)/\(Self.zipName)"
+    guard let url = URL(string: urlString), Self.isURLAllowed(url) else {
+      fail("bad_url")
+      return
+    }
+    logger?.log("update: downloading \(urlString)")
+    var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+    req.setValue("ScreenReplay/\(Self.appVersion) (macOS)", forHTTPHeaderField: "User-Agent")
+    let dest = (updatesDir() as NSString).appendingPathComponent(Self.zipName)
+    let task = URLSession.shared.downloadTask(with: req) { [weak self] tmp, response, error in
+      guard let self else { return }
+      self.lock.lock()
+      self.progressWatch = nil
+      self.lock.unlock()
+      if let error {
+        self.logger?.log("update: download failed: \(error.localizedDescription)")
+        self.fail("download_network")
+        return
+      }
+      guard let http = response as? HTTPURLResponse, http.statusCode == 200, let tmp else {
+        self.fail("download_http")
+        return
+      }
+      let got = Self.sha256(ofFile: tmp.path) ?? ""
+      guard got == want else {
+        self.logger?.log("update: checksum mismatch for \(ver) (got \(got), expected \(want))")
+        self.fail("checksum")
+        return
+      }
+      try? FileManager.default.removeItem(atPath: dest)
+      do {
+        try FileManager.default.moveItem(atPath: tmp.path, toPath: dest)
+      } catch {
+        self.fail("download_network")
+        return
+      }
+      self.lock.lock()
+      self.downloadedFile = dest
+      self.readyAt = Date()
+      self.readyNoted = false
+      self.state = "ready"
+      self.percent = 100
+      self.busy = false
+      self.lock.unlock()
+      // (installed from poll, on the host's queue, where the replay window and the helper are)
+      self.logger?.log("update: \(ver) verified and ready at \(dest)")
+      self.writeState()
+    }
+    let watch = task.progress.observe(\.fractionCompleted) { [weak self] p, _ in
+      guard let self else { return }
+      let pct = Int(p.fractionCompleted * 100)
+      self.lock.lock()
+      let changed = self.state == "fetching" && pct != self.percent
+      if changed { self.percent = pct }
+      self.lock.unlock()
+      if changed { self.writeState() }
+    }
+    lock.lock()
+    progressWatch = watch
+    lock.unlock()
+    task.resume()
+  }
+
+  private func tryInstallWhenIdle() {
+    lock.lock()
+    let st = state
+    let ver = foundVersion
+    let since = readyAt
+    let noted = readyNoted
+    lock.unlock()
+    guard st == "ready" else { return }
+    if !isReplayShown() && (Self.updateNowTest() || Self.idleSeconds() >= 120) {
+      installNow()
+      return
+    }
+    if !noted && Date().timeIntervalSince(since) >= 86_400 {
+      lock.lock()
+      readyNoted = true
+      lock.unlock()
+      notify("ScreenReplay \(ver)", "空闲时将自动更新，也可在「设置 › 关于」中立即重启更新。")
+    }
+  }
+
+  /// Puts the release downloaded in this app's place and ends this run for it; a failure leaves this app as it is.
+  private func installNow() {
+    lock.lock()
+    if busy || state != "ready" {
+      lock.unlock()
+      return
+    }
+    busy = true
+    let zip = downloadedFile
+    let want = foundSha
+    let ver = foundVersion
+    state = "installing"
+    errorCode = ""
+    lock.unlock()
+    writeState()
+
+    let fm = FileManager.default
+    let app = Bundle.main.bundlePath
+    guard Self.sha256(ofFile: zip) == want else {
+      try? fm.removeItem(atPath: zip)
+      logger?.log("update: \(ver) is not the file signed")
+      fail("checksum")
+      return
+    }
+    // (opened next to the app installed: the same volume, so each move below is a rename)
+    let staging = ((app as NSString).deletingLastPathComponent as NSString).appendingPathComponent(".ScreenReplay-update")
+    let fresh = (staging as NSString).appendingPathComponent("ScreenReplay.app")
+    let old = (staging as NSString).appendingPathComponent("ScreenReplay-old.app")
+    try? fm.removeItem(atPath: staging)
+    guard (try? fm.createDirectory(atPath: staging, withIntermediateDirectories: false)) != nil,
+          Self.run("/usr/bin/ditto", ["-x", "-k", zip, staging]) == 0, fm.fileExists(atPath: fresh)
+    else {
+      try? fm.removeItem(atPath: staging)
+      logger?.log("update: could not open \(zip) next to \(app)")
+      fail("install_failed")
+      return
+    }
+    let idNow = Bundle.main.bundleIdentifier
+    let idFresh = Bundle(path: fresh)?.bundleIdentifier
+    guard Self.signedByUs(fresh), idFresh != nil, idNow == nil || idNow == idFresh else {
+      try? fm.removeItem(atPath: staging)
+      try? fm.removeItem(atPath: zip)
+      logger?.log("update: \(ver)'s app is not signed by \(Self.team)")
+      fail("checksum")
+      return
+    }
+    logger?.log("update: installing \(ver)")
+    beforeQuit()
+    guard rename(app, old) == 0 else {
+      try? fm.removeItem(atPath: staging)
+      logger?.log("update: could not move \(app) aside")
+      relaunch(app: app, staging: nil)
+      return
+    }
+    guard rename(fresh, app) == 0 else {
+      _ = rename(old, app)
+      try? fm.removeItem(atPath: staging)
+      logger?.log("update: could not put \(ver) in place")
+      relaunch(app: app, staging: nil)
+      return
+    }
+    try? fm.removeItem(atPath: zip)
+    relaunch(app: app, staging: staging)
+  }
+
+  /// The app at `app` started once this run has ended (before, it would find this run's lock and end), with --updated;
+  /// then this run ends.
+  private func relaunch(app: String, staging: String?) -> Never {
+    let test = Self.testMode()
+    let start = test
+      ? "exec \"$2/Contents/MacOS/ScreenReplay\" --updated"
+      : "/usr/bin/open -n \"$2\" --args --updated"
+    let script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; [ -n \"$3\" ] && rm -rf \"$3\"; " + start
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", script, "screenreplay-update", String(getpid()), app, staging ?? ""]
+    try? p.run()
+    exit(0)
+  }
+
+  static func run(_ tool: String, _ args: [String]) -> Int32 {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: tool)
+    p.arguments = args
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    guard (try? p.run()) != nil else { return -1 }
+    p.waitUntilExit()
+    return p.terminationStatus
+  }
+
+  static func sha256(ofFile path: String) -> String? {
+    guard let h = FileHandle(forReadingAtPath: path) else { return nil }
+    defer { try? h.close() }
+    var hasher = SHA256()
+    while true {
+      let chunk = autoreleasepool { (try? h.read(upToCount: 1 << 20)) ?? Data() }
+      if chunk.isEmpty { break }
+      hasher.update(data: chunk)
+    }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
   private func fail(_ code: String) {

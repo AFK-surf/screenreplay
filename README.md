@@ -19,6 +19,8 @@ Requires Windows 11 x64.
 
 Settings › About includes **Check for updates** and an **Automatic updates** toggle (on by default in the standalone installer). When enabled, ScreenReplay checks [screenreplay.pages.dev/dl/latest.json](https://screenreplay.pages.dev/dl/latest.json) periodically, verifies the release's ECDSA P-256 signature (against the public key built into `recorder/Updater.cs`) and SHA-256 digest, and silently installs the update once the replay window is closed and the PC has been idle for two minutes. A release whose signature does not verify is rejected before download. The Microsoft Store package is updated by the Store and never checks for updates itself.
 
+On macOS (Apple silicon, macOS 14+), `ScreenReplay-mac.zip` is signed with AFK AI's Developer ID and notarized by Apple. A copy in Applications updates itself the same way (`mac/Sources/ScreenReplayKit/Updater.swift`): it reads `mac_sha256` / `mac_signature` in `latest.json`, checks the zip's SHA-256 and the new app's code signature (Team `D9AAN3VJK8`), then swaps the app and restarts it once the replay window is closed and the Mac has been idle for two minutes.
+
 ## Use
 
 - **Global hotkeys** (configurable in Settings):
@@ -64,6 +66,10 @@ powershell -File scripts/build.ps1                     # Builds out\ScreenReplay
 powershell -File packaging/pack-setup.ps1              # Builds out\setup\ScreenReplay-Setup-<ver>.exe (Inno Setup 6)
 powershell -File packaging/pack-msix.ps1 -Viewer out   # Builds Microsoft Store MSIX package
 ```
+
+## macOS build
+
+Needs Xcode (Swift 6) and MoonBit (`moon`). `bash scripts/build-mac.sh` builds `out/mac/ScreenReplay.app` and `out/mac/ScreenReplay-mac.zip` (ad hoc signed). The **macOS package** workflow (`.github/workflows/macos.yml`, run by hand or on a `v*` tag) builds the same, then signs it with AFK AI's Developer ID and notarizes it (`scripts/sign-mac.sh`, using the `MACOS_DEVELOPER_ID_KEYCHAIN_B64_1` / `_2` and `KEYCHAIN_PASSWORD_AFK` secrets). `packaging/publish-setup.ps1` takes that build of the commit it publishes and puts it on the download site and in `latest.json` (`-NoMac`: Windows only).
 
 `scripts/fetch-stillfail.sh` (invoked automatically by the build) sparse-fetches `libs/mbui` and `libs/sf-ui` from [`AFK-surf/monoid`](https://github.com/AFK-surf/monoid) at the commit pinned in `stillfail.lock` into `deps/stillfail`.
 
