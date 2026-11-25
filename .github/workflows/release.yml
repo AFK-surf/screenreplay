@@ -26,6 +26,19 @@ jobs:
             exit 1
           fi
 
+      # (a script that does not parse stops the release here, not after the builds, at the publish step)
+      - name: The scripts parse
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem packaging, scripts -Filter *.ps1 | ForEach-Object {
+            $file = $_
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { "::error file=$($file.Name),line=$($e.Extent.StartLineNumber)::$($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+
   windows:
     needs: version
     uses: ./.github/workflows/windows.yml

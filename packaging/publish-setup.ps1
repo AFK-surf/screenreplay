@@ -32,13 +32,13 @@ if ($MacZip) {
     $done = @($runs | Where-Object { $_.conclusion -eq "success" })
     if ($done.Count) { $run = $done[0].databaseId; break }
     if (-not @($runs | Where-Object { $_.status -ne "completed" }).Count) {
-      if ($i -gt 0 -and $runs.Count) { throw "the macOS package workflow failed on $commit: see gh run list -R $gh -w macos.yml" }
+      if ($i -gt 0 -and $runs.Count) { throw "the macOS package workflow failed on ${commit}: see gh run list -R $gh -w macos.yml" }
       gh workflow run macos.yml -R $gh --ref $branch
       Write-Host "started the macOS package workflow on $branch ($commit), waiting..."
     }
     Start-Sleep 30
   }
-  if (-not $run) { throw "no macOS build of $commit: see gh run list -R $gh -w macos.yml, or -NoMac" }
+  if (-not $run) { throw "no macOS build of ${commit}: see gh run list -R $gh -w macos.yml, or -NoMac" }
   $dir = Join-Path $env:TEMP "screenreplay-mac-$Version"
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $dir
   gh run download $run -R $gh -n ScreenReplay-mac -D $dir
