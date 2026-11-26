@@ -1020,6 +1020,7 @@ fn export_dialog(root : view::View) -> Unit {
           .basis(view::Live::Is(Some(0.0)))
           .shrink(view::Live::Is(1.0))
           .min_width(view::Live::Is(Some(0.0)))
+          .clips(view::Live::Is(true))
           .height(view::Live::Is(Some(28.0)))
           .padding(view::Live::Is((4.0, 0.0, 4.0, 0.0)))
           .radius(view::Live::Is(6.0))
@@ -1043,6 +1044,7 @@ fn export_dialog(root : view::View) -> Unit {
                 ui_subtle()
               }
             })
+          .shrink(view::Live::Is(1.0))
           .min_width(view::Live::Is(Some(0.0)))
           .allow_ellipsis(view::Live::Is(true))
           |> ignore
@@ -1178,11 +1180,11 @@ fn size_slider(parent : view::View) -> Unit {
       held.box(fn(marks) {
         marks.height(view::Live::Is(Some(30.0))) |> ignore
         for i in 0..<n {
-          let i = i
+          let idx = i
           marks.box(fn(o) {
             o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
             o.box(fn(tick) {
-              tick.width(view::Live::Is(Some(1.0))).height(view::Live::Is(Some(4.0))).ground(view::Live::By(c_s4)).offset(view::Live::By(fn() { (x_of(i) - 0.5, 0.0) })) |> ignore
+              tick.width(view::Live::Is(Some(1.0))).height(view::Live::Is(Some(4.0))).ground(view::Live::By(c_s4)).offset(view::Live::By(fn() { (x_of(idx) - 0.5, 0.0) })) |> ignore
             })
             |> ignore
             o.box(fn(lab) {
@@ -1190,9 +1192,9 @@ fn size_slider(parent : view::View) -> Unit {
               .width(view::Live::Is(Some(60.0)))
               .lies_along(view::Live::Is(view::Lies::Middle))
               .row(view::Live::Is(true))
-              .offset(view::Live::By(fn() { (x_of(i) - 30.0, 10.0) }))
+              .offset(view::Live::By(fn() { (x_of(idx) - 30.0, 10.0) }))
               |> ignore
-              words(lab, fn() { size_label(size_choices[i]) }, 11.0, fn() { if export_size.get() == i { ui_text() } else { ui_subtle() } }, weight=500)
+              words(lab, fn() { size_label(size_choices[idx]) }, 11.0, fn() { if export_size.get() == idx { ui_text() } else { ui_subtle() } }, weight=500)
               |> ignore
             })
             |> ignore

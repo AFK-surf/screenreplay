@@ -191,7 +191,6 @@ fn load() -> Unit {
   for dir in buffer_dirs() {
   let names = text_of(rp_list(cstr(dir)))
   for name in names.split("\n") {
-    let name = name
     if name.length() < 5 {
       continue
     }

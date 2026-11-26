@@ -272,7 +272,6 @@ fn remove_marker(abs : Double) -> Unit {
   let path = pjoin(root_dir(), "markers.jsonl")
   let kept : Array[String] = []
   for line in read_text(path).split("\n") {
-    let line = line
     match parse(line) {
       Option::Some(mbt_compat::MbtJson::Object(o)) => {
         match o.get("at") {
