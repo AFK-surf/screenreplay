@@ -1,0 +1,120 @@
+import "mbt_compat"
+import "ui"
+import "view"
+
+#derive(Eq)
+struct PicZoom {
+  z : Double
+  dx : Double
+  dy : Double
+}
+
+fn pic_zoomed() -> Bool {
+  pic_zoom.get().z > 1.001}
+
+fn pic_kept(v : PicZoom, w : Double, h : Double) -> PicZoom {
+  let z = clamp(v.z, 1.0, pic_zoom_most)
+  if z <= 1.001 {
+    return pic_fitted
+  }
+  PicZoom::{ z: z, dx: clamp(v.dx, w * (1.0 - z), 0.0), dy: clamp(v.dy, h * (1.0 - z), 0.0) }}
+
+fn pic_zoom_about(k : Double, x : Double, y : Double, w : Double, h : Double) -> Unit {
+  if w <= 0.0 || h <= 0.0 || clipping.untracked() {
+    return
+  }
+  let v = pic_zoom.untracked()
+  let z = clamp(v.z * k, 1.0, pic_zoom_most)
+  let ux = (x - v.dx) / v.z
+  let uy = (y - v.dy) / v.z
+  pic_zoom.set(pic_kept(PicZoom::{ z: z, dx: x - z * ux, dy: y - z * uy }, w, h))}
+
+fn pic_fit() -> Unit {
+  pic_zoom.set(pic_fitted)}
+
+fn pic_wheel(e : view::Wheel) -> Bool {
+  if (e.mods & (ui::wheel_mod_ctrl | ui::wheel_mod_cmd | ui::wheel_mod_pinch)) == 0 || e.dy == 0.0 ||
+    clipping.untracked() {
+    return false
+  }
+  pic_zoom_about(mbt_compat::math_exp(-e.dy * 0.002), e.x, e.y, e.w, e.h)
+  true}
+
+struct PicDrag {
+  mut from : PicZoom
+  mut moved : Bool
+  mut wx : Double
+  mut wy : Double
+}
+
+fn pic_drag_by(d : view::Drag, w : Double, h : Double) -> Unit {
+  match d.kind {
+    Down => {
+      pic_drag.from = pic_zoom.untracked()
+      pic_drag.moved = false
+      pic_drag.wx = d.wx
+      pic_drag.wy = d.wy
+    }
+    Moved => {
+      let mx = d.wx - pic_drag.wx
+      let my = d.wy - pic_drag.wy
+      if !pic_drag.moved && (mx.abs() > 4.0 || my.abs() > 4.0) {
+        pic_drag.moved = true
+      }
+      if pic_drag.moved {
+        let f = pic_drag.from
+        pic_zoom.set(pic_kept(PicZoom::{ z: f.z, dx: f.dx + mx, dy: f.dy + my }, w, h))
+      }
+    }
+    Up =>
+      if !pic_drag.moved {
+        set_playing(!want_play.untracked())
+      }
+    Off => ()
+  }}
+
+fn pic_zoomed_node(s : view::View) -> Unit {
+  s
+  .scale(view::Live::By(fn() { pic_zoom.get().z }), about=view::Pivot::At(0.0, 0.0))
+  .offset(view::Live::By(fn() {
+    let v = pic_zoom.get()
+    (v.dx, v.dy)
+  }))
+  .presses(view::Live::By(pic_zoomed))
+  .cursor(view::Live::By(fn() { if pic_zoomed() { Some(view::Cursor::Grab) } else { None } }))
+  .on_drag(fn(d) { pic_drag_by(d, d.w, d.h) })
+  |> ignore
+  s.reacts(fn() { clipping.get() }, fn(on) { if on { pic_fit() } }) |> ignore}
+
+fn pic_zoom_pill(pic : view::View) -> Unit {
+  pic.box(fn(o) {
+    // Pass hits beside the pill through to the picture while keeping the pill pressable.
+    o
+    .over(view::Live::Is(true))
+    .lines_up(view::Live::Is(Some(view::Along::End)))
+    .lies_along(view::Live::Is(view::Lies::End))
+    .padding(view::Live::Is((0.0, 0.0, 12.0, 12.0)))
+    .takes(fn(_, _, _) { [] })
+    |> ignore
+    o.show(fn() { pic_zoomed() }, fn(b) {
+      let k = pressable(b, fn() { t("适应窗口") }, pic_fit, fn(p) {
+        let (hand, _) = answer(p)
+        p
+        .row(view::Live::Is(true))
+        .height(view::Live::Is(Some(28.0)))
+        .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+        .gap(view::Live::Is(7.0))
+        .radius(view::Live::Is(14.0))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .edge(view::Live::By(fn() { if p.focus_shown() { (1.5, 0xFFFFFFB3L) } else { (0.0, 0L) } }))
+        .ground(view::Live::By(fn() { mix(0x000000A6L, 0x000000D9L, hand.shown(p)) }))
+        |> ignore
+        words(p, fn() { (pic_zoom.get().z * 100.0).round().to_int().to_string() + "%" }, 12.0, fn() { 0xFFFFFFFFL }, weight=600) |> ignore
+        p.box(fn(l) { l.width(view::Live::Is(Some(1.0))).height(view::Live::Is(Some(12.0))).ground(view::Live::Is(0xFFFFFF40L)) |> ignore }) |> ignore
+        words(p, fn() { t("适应窗口") }, 12.0, fn() { mix(0xFFFFFFC0L, 0xFFFFFFFFL, hand.shown(p)) }, weight=500) |> ignore
+      }, keeps_region=true)
+      tip(k, fn() { t("适应窗口") }, shortcut="pic-fit")
+    }, at_once=true)
+    |> ignore
+  })
+  |> ignore}

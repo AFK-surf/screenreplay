@@ -4,7 +4,7 @@
 
 Always-on background screen recorder and instant replay viewer for Windows 11, inspired by Steam's background game recording and brought to the whole desktop. ScreenReplay keeps a rolling hardware-encoded buffer of the last stretch of your screen and audio (2 hours by default) on your PC, so a bug you cannot reproduce or a moment when OBS was not running can be rewound on a timeline, cropped to a single window, and copied to a chat in seconds.
 
-The replay window (`ScreenReplayViewer.exe`) is written in [MoonBit](https://www.moonbitlang.com) on still.fail's native UI framework [`mbui`](https://github.com/AFK-surf/monoid) (`libs/mbui` and `libs/sf-ui`) — no Electron or WebView, Direct3D 11 hardware video decoding without CPU frame copies, instant wake, ~9.3 MB standalone installer.
+The replay window (`ScreenReplayViewer.exe`) is written in [Pion](https://github.com/AFK-surf/pion) on the native UI framework [`invar`](https://github.com/AFK-surf/invar) — no Electron or WebView, Direct3D 11 hardware video decoding without CPU frame copies, instant wake, ~9.3 MB standalone installer.
 
 ![ScreenReplay](packaging/store/screenshots/en/1-replay.png)
 
@@ -50,16 +50,14 @@ All recordings, thumbnails, and window indexes stay on your PC (`%LOCALAPPDATA%\
 - **`recording/`** (C#, `Vortice.Windows` Direct3D 11 & Media Foundation):
   - Captures the display via `Windows.Graphics.Capture` straight into GPU VRAM, converts and tone-maps HDR FP16 scRGB → SDR on the GPU via `ID3D11VideoProcessor` (`DisplayColor.cs`, `HdrToSdr.cs`), and encodes H.265 (HEVC) or H.264 through hardware NVENC / AMF / QuickSync MFTs (`VideoEncoder.cs`). Unchanged frames are skipped so a still desktop writes almost nothing.
   - Mixes WASAPI system loopback audio and optional microphone input into AAC (`AudioSource.cs`, `AudioMixer.cs`).
-- **`app/`** (`ScreenReplayViewer.exe`, MoonBit + C/C++ on `mbui`):
-  - Retained-mode native UI built on `mbui`'s `@view.View` tree and Direct3D 11 renderer (`WDA_EXCLUDEFROMCAPTURE` enabled by default so reviewing past footage does not record the viewer itself).
-  - Demuxes MP4 segments directly (`mp4.mbt`, `sps.mbt`) and decodes frames on the GPU via Media Foundation's D3D11VA hardware decoder into an NV12 `ID3D11Texture2D` pool, converted to BGRA on the GPU and presented through `mbui`'s `@ui.Stream` (`native_player.mbt`, `replay_play.cpp`) synchronized against `XAudio2` output latency.
-  - Background keyframe thumbnailer (`replay_index.cpp`), lossless MP4 remuxer, GPU window/region cropper (`replay_export.cpp`), and GIF encoder (`replay_gif.cpp`).
+- **`src/` + `native/`** (`ScreenReplayViewer.exe`, Pion + C/C++/ObjC++ on `invar`):
+  - Retained-mode native UI built on `invar`'s `view::View` tree and Direct3D 11 / Metal renderer (`WDA_EXCLUDEFROMCAPTURE` enabled by default so reviewing past footage does not record the viewer itself).
+  - Demuxes MP4 segments directly (`src/mp4.pion`, `src/sps.pion`) and decodes frames on the GPU via Media Foundation's D3D11VA hardware decoder into an NV12 `ID3D11Texture2D` pool, converted to BGRA on the GPU and presented through `invar`'s `ui::Stream` (`src/native_player.pion`, `native/replay_play.cpp`) synchronized against `XAudio2` output latency.
+  - Background keyframe thumbnailer (`native/replay_index.cpp`), lossless MP4 remuxer, GPU window/region cropper (`native/replay_export.cpp`), and GIF encoder (`native/replay_gif.cpp`).
 
 ## Windows build
 
-Needs Windows 11, Visual Studio 2022 (with **Desktop development with C++**), .NET 10 SDK, Git for Windows (Git Bash), and MoonBit (`moon` on `PATH`, or `MBUI_TOOLS` pointing to a folder containing `moon/`).
-
-> **Note on Windows `MAX_PATH`**: Clone into a short path such as `C:\src\screenreplay` so MoonBit's native C build paths stay well below 260 characters.
+Needs Windows 11, Visual Studio 2022 (with **Desktop development with C++**), .NET 10 SDK, Clang/LLVM (`clang`), and `pionc` (`PIONC` env var or `pionc` on `PATH`) with sibling `invar` and `pion-packages` checkouts matching `pion.toml`.
 
 ```powershell
 powershell -File scripts/build.ps1                     # Builds out\ScreenReplay.exe + out\ScreenReplayViewer.exe
@@ -69,13 +67,11 @@ powershell -File packaging/pack-msix.ps1 -Viewer out   # Builds Microsoft Store 
 
 ## macOS build
 
-Needs Xcode (Swift 6) and MoonBit (`moon`). `bash scripts/build-mac.sh` builds `out/mac/ScreenReplay.app` and `out/mac/ScreenReplay-mac.zip` (ad hoc signed). The **macOS package** workflow (`.github/workflows/macos.yml`, run by hand or by the release workflow) builds the same, then signs it with AFK AI's Developer ID and notarizes it (`scripts/sign-mac.sh`, using the `MACOS_DEVELOPER_ID_KEYCHAIN_B64_1` / `_2` and `KEYCHAIN_PASSWORD_AFK` secrets). `packaging/publish-setup.ps1` takes that build of the commit it publishes and puts it on the download site and in `latest.json` (`-NoMac`: Windows only).
-
-`scripts/fetch-stillfail.sh` (invoked automatically by the build) sparse-fetches `libs/mbui` and `libs/sf-ui` from [`AFK-surf/monoid`](https://github.com/AFK-surf/monoid) at the commit pinned in `stillfail.lock` into `deps/stillfail`.
+Needs Xcode (Swift 6) and `pionc` (with sibling `invar` and `pion-packages` checkouts matching `pion.toml`). `bash scripts/build-mac.sh` builds `out/mac/ScreenReplay.app` and `out/mac/ScreenReplay-mac.zip` (ad hoc signed). The **macOS package** workflow (`.github/workflows/macos.yml`, run by hand or by the release workflow) builds the same, then signs it with AFK AI's Developer ID and notarizes it (`scripts/sign-mac.sh`, using the `MACOS_DEVELOPER_ID_KEYCHAIN_B64_1` / `_2` and `KEYCHAIN_PASSWORD_AFK` secrets). `packaging/publish-setup.ps1` takes that build of the commit it publishes and puts it on the download site and in `latest.json` (`-NoMac`: Windows only).
 
 ## Releases
 
-A pushed `v<version>` tag makes the release (`.github/workflows/release.yml`): the **Windows package** and **macOS package** workflows build `ScreenReplay-Setup-<version>.exe` and `ScreenReplay-mac.zip` from the tag and put them on its GitHub release; then, once approved in the `release` environment (which alone holds the update-signing key and the Cloudflare token), `packaging/publish-setup.ps1` signs `latest.json` and puts the downloads in R2, and the site is deployed. The tag must be the version in `app/about.mbt` and `recorder/Updater.cs`.
+A pushed `v<version>` tag makes the release (`.github/workflows/release.yml`): the **Windows package** and **macOS package** workflows build `ScreenReplay-Setup-<version>.exe` and `ScreenReplay-mac.zip` from the tag and put them on its GitHub release; then, once approved in the `release` environment (which alone holds the update-signing key and the Cloudflare token), `packaging/publish-setup.ps1` signs `latest.json` and puts the downloads in R2, and the site is deployed. The tag must be the version in `src/about.pion` and `recorder/Updater.cs`.
 
 ## Sponsor
 

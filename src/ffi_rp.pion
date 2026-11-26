@@ -1,0 +1,160 @@
+extern "C" fn c_mb_bytes_len(p : Ptr) -> Int = "pion_mb_bytes_len"
+extern "C" fn c_mb_decref(p : Ptr) -> Unit = "moonbit_decref"
+extern "C" fn c_rp_stdout(s : Ptr, sl : Int64) -> Unit = "pion_rp_stdout"
+
+fn take_mb_bytes(p : Ptr) -> Bytes {
+  let n = c_mb_bytes_len(p)
+  let b = if n > 0 { bytes_from_ptr(p, n) } else { "".to_bytes() }
+  c_mb_decref(p)
+  b
+}
+
+extern "C" fn rp_install_kind() -> Int = "rp_install_kind"
+extern "C" fn c_rp_copy_text(text : Ptr, text_len : Int64) -> Int = "pion_rp_copy_text"
+fn rp_copy_text(text : Bytes) -> Int { c_rp_copy_text(bytes_data_ptr(text), text.length().to_int64()) }
+extern "C" fn c_rp_windows_version() -> Ptr = "rp_windows_version"
+fn rp_windows_version() -> Bytes { take_mb_bytes(c_rp_windows_version()) }
+extern "C" fn c_rp_gpu() -> Ptr = "rp_gpu"
+fn rp_gpu() -> Bytes { take_mb_bytes(c_rp_gpu()) }
+extern "C" fn rp_packaged() -> Int = "rp_packaged"
+extern "C" fn c_rp_list(dir : Ptr, dir_len : Int64) -> Ptr = "pion_rp_list"
+fn rp_list(dir : Bytes) -> Bytes { take_mb_bytes(c_rp_list(bytes_data_ptr(dir), dir.length().to_int64())) }
+extern "C" fn c_rp_size(path : Ptr, path_len : Int64) -> Double = "pion_rp_size"
+fn rp_size(path : Bytes) -> Double { c_rp_size(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_read(path : Ptr, path_len : Int64, offset : Double, length : Int) -> Ptr = "pion_rp_read"
+fn rp_read(path : Bytes, offset : Double, length : Int) -> Bytes { take_mb_bytes(c_rp_read(bytes_data_ptr(path), path.length().to_int64(), offset, length)) }
+extern "C" fn c_rp_write(path : Ptr, path_len : Int64, data : Ptr, data_len : Int64) -> Int = "pion_rp_write"
+fn rp_write(path : Bytes, data : Bytes) -> Int { c_rp_write(bytes_data_ptr(path), path.length().to_int64(), bytes_data_ptr(data), data.length().to_int64()) }
+extern "C" fn c_rp_mkdirs(path : Ptr, path_len : Int64) -> Int = "pion_rp_mkdirs"
+fn rp_mkdirs(path : Bytes) -> Int { c_rp_mkdirs(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn rp_local_offset_now() -> Int = "rp_local_offset"
+extern "C" fn rp_now() -> Double = "rp_now"
+extern "C" fn c_rp_reveal(path : Ptr, path_len : Int64) -> Unit = "pion_rp_reveal"
+fn rp_reveal(path : Bytes) -> Unit { c_rp_reveal(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn rp_hide_cursor() -> Unit = "rp_hide_cursor"
+extern "C" fn rp_launch_recorder() -> Int = "rp_launch_recorder"
+extern "C" fn c_rp_gif_info(path : Ptr, path_len : Int64) -> Ptr = "pion_rp_gif_info"
+fn rp_gif_info(path : Bytes) -> Bytes { take_mb_bytes(c_rp_gif_info(bytes_data_ptr(path), path.length().to_int64())) }
+extern "C" fn c_rp_gif_frame(path : Ptr, path_len : Int64, k : Int, max_w : Int) -> Ptr = "pion_rp_gif_frame"
+fn rp_gif_frame(path : Bytes, k : Int, max_w : Int) -> Bytes { take_mb_bytes(c_rp_gif_frame(bytes_data_ptr(path), path.length().to_int64(), k, max_w)) }
+extern "C" fn c_rp_gif_drop(path : Ptr, path_len : Int64) -> Unit = "pion_rp_gif_drop"
+fn rp_gif_drop(path : Bytes) -> Unit { c_rp_gif_drop(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_idx_dir(dir : Ptr, dir_len : Int64) -> Unit = "pion_rp_idx_dir"
+fn rp_idx_dir(dir : Bytes) -> Unit { c_rp_idx_dir(bytes_data_ptr(dir), dir.length().to_int64()) }
+extern "C" fn c_rp_idx_add(path : Ptr, path_len : Int64, dur : Double) -> Unit = "pion_rp_idx_add"
+fn rp_idx_add(path : Bytes, dur : Double) -> Unit { c_rp_idx_add(bytes_data_ptr(path), path.length().to_int64(), dur) }
+extern "C" fn c_rp_idx_add_clip(path : Ptr, path_len : Int64, dur : Double) -> Unit = "pion_rp_idx_add_clip"
+fn rp_idx_add_clip(path : Bytes, dur : Double) -> Unit { c_rp_idx_add_clip(bytes_data_ptr(path), path.length().to_int64(), dur) }
+extern "C" fn c_rp_idx_drop(path : Ptr, path_len : Int64) -> Unit = "pion_rp_idx_drop"
+fn rp_idx_drop(path : Bytes) -> Unit { c_rp_idx_drop(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_idx_prefer(path : Ptr, path_len : Int64) -> Unit = "pion_rp_idx_prefer"
+fn rp_idx_prefer(path : Bytes) -> Unit { c_rp_idx_prefer(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_idx_at(path : Ptr, path_len : Int64, ms : Double) -> Double = "pion_rp_idx_at"
+fn rp_idx_at(path : Bytes, ms : Double) -> Double { c_rp_idx_at(bytes_data_ptr(path), path.length().to_int64(), ms) }
+extern "C" fn c_rp_idx_jpeg(path : Ptr, path_len : Int64, ms : Double) -> Ptr = "pion_rp_idx_jpeg"
+fn rp_idx_jpeg(path : Bytes, ms : Double) -> Bytes { take_mb_bytes(c_rp_idx_jpeg(bytes_data_ptr(path), path.length().to_int64(), ms)) }
+extern "C" fn rp_idx_pending() -> Int = "rp_idx_pending"
+extern "C" fn c_rp_launch(path : Ptr, path_len : Int64) -> Int = "pion_rp_launch"
+fn rp_launch(path : Bytes) -> Int { c_rp_launch(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_recycle(path : Ptr, path_len : Int64) -> Int = "pion_rp_recycle"
+fn rp_recycle(path : Bytes) -> Int { c_rp_recycle(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_list_clips(dir : Ptr, dir_len : Int64) -> Ptr = "pion_rp_list_clips"
+fn rp_list_clips(dir : Bytes) -> Bytes { take_mb_bytes(c_rp_list_clips(bytes_data_ptr(dir), dir.length().to_int64())) }
+extern "C" fn c_rp_take_request(path : Ptr, path_len : Int64) -> Int = "pion_rp_take_request"
+fn rp_take_request(path : Bytes) -> Int { c_rp_take_request(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_clip_thumb(path : Ptr, path_len : Int64, identity : Ptr, identity_len : Int64, ms : Double) -> Ptr = "pion_rp_clip_thumb"
+fn rp_clip_thumb(path : Bytes, identity : Bytes, ms : Double) -> Bytes { take_mb_bytes(c_rp_clip_thumb(bytes_data_ptr(path), path.length().to_int64(), bytes_data_ptr(identity), identity.length().to_int64(), ms)) }
+extern "C" fn c_rp_modified(path : Ptr, path_len : Int64) -> Double = "pion_rp_modified"
+fn rp_modified(path : Bytes) -> Double { c_rp_modified(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_duration(path : Ptr, path_len : Int64) -> Double = "pion_rp_duration"
+fn rp_duration(path : Bytes) -> Double { c_rp_duration(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_exe_dir() -> Ptr = "rp_exe_dir"
+fn rp_exe_dir() -> Bytes { take_mb_bytes(c_rp_exe_dir()) }
+extern "C" fn rp_system_menu(x : Double, y : Double) -> Unit = "rp_system_menu"
+extern "C" fn rp_fullscreen(on : Int) -> Int = "rp_fullscreen"
+extern "C" fn c_rp_play_read(path : Ptr, path_len : Int64, offset : Double, length : Int) -> Ptr = "pion_rp_play_read"
+fn rp_play_read(path : Bytes, offset : Double, length : Int) -> Bytes { take_mb_bytes(c_rp_play_read(bytes_data_ptr(path), path.length().to_int64(), offset, length)) }
+extern "C" fn c_rp_play_warm(path : Ptr, path_len : Int64) -> Unit = "pion_rp_play_warm"
+fn rp_play_warm(path : Bytes) -> Unit { c_rp_play_warm(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_aac_open(asc : Ptr, asc_len : Int64, rate : Int, channels : Int) -> Int = "pion_rp_aac_open"
+fn rp_aac_open(asc : Bytes, rate : Int, channels : Int) -> Int { c_rp_aac_open(bytes_data_ptr(asc), asc.length().to_int64(), rate, channels) }
+extern "C" fn c_rp_aac_decode(h : Int, data : Ptr, data_len : Int64) -> Ptr = "pion_rp_aac_decode"
+fn rp_aac_decode(h : Int, data : Bytes) -> Bytes { take_mb_bytes(c_rp_aac_decode(h, bytes_data_ptr(data), data.length().to_int64())) }
+extern "C" fn rp_aac_reset(h : Int) -> Unit = "rp_aac_reset"
+extern "C" fn rp_aac_close(h : Int) -> Unit = "rp_aac_close"
+extern "C" fn rp_ts_open(rate : Double) -> Int = "rp_ts_open"
+extern "C" fn c_rp_ts_feed(h : Int, data : Ptr, data_len : Int64, from : Int, flush : Int) -> Ptr = "pion_rp_ts_feed"
+fn rp_ts_feed(h : Int, data : Bytes, from : Int, flush : Int) -> Bytes { take_mb_bytes(c_rp_ts_feed(h, bytes_data_ptr(data), data.length().to_int64(), from, flush)) }
+extern "C" fn rp_ts_lag(h : Int) -> Double = "rp_ts_lag"
+extern "C" fn rp_ts_close(h : Int) -> Unit = "rp_ts_close"
+extern "C" fn rp_note_window(w : Double, h : Double, cloaked : Int) -> Int = "rp_note_window"
+extern "C" fn rp_note_reveal() -> Unit = "rp_note_reveal"
+extern "C" fn rp_note_hide() -> Unit = "rp_note_hide"
+extern "C" fn c_rp_frame_copy(path : Ptr, path_len : Int64, ms : Double) -> Int = "pion_rp_frame_copy"
+fn rp_frame_copy(path : Bytes, ms : Double) -> Int { c_rp_frame_copy(bytes_data_ptr(path), path.length().to_int64(), ms) }
+extern "C" fn rp_frame_copy_shown(stream : Int) -> Int = "rp_frame_copy_shown"
+extern "C" fn rp_frame_copy_state() -> Int = "rp_frame_copy_state"
+extern "C" fn rp_window_state() -> Int = "rp_window_state"
+extern "C" fn rp_is_mac() -> Int = "rp_is_mac"
+extern "C" fn rp_alt_arrows() -> Int = "rp_alt_arrows"
+extern "C" fn rp_stay_resident() -> Int = "rp_stay_resident"
+extern "C" fn rp_window_turns() -> Int = "rp_window_turns"
+extern "C" fn rp_tray_req_seq_get() -> Int = "rp_tray_req_seq_get"
+extern "C" fn rp_tray_req_x_get() -> Int = "rp_tray_req_x_get"
+extern "C" fn rp_tray_req_y_get() -> Int = "rp_tray_req_y_get"
+extern "C" fn rp_note_req_seq_get() -> Int = "rp_note_req_seq_get"
+extern "C" fn rp_prepare_popup(kind : Int) -> Unit = "rp_prepare_popup"
+extern "C" fn rp_style_tray_win(wid : Int, w_pt : Double, h_pt : Double, px : Int, py : Int) -> Int = "rp_style_tray_win"
+extern "C" fn rp_style_note_win(wid : Int, w_pt : Double, h_pt : Double) -> Int = "rp_style_note_win"
+extern "C" fn rp_play_release() -> Unit = "rp_play_release"
+extern "C" fn rp_thumb_release() -> Unit = "rp_thumb_release"
+extern "C" fn rp_frame_release() -> Unit = "rp_frame_release"
+extern "C" fn rp_start_hidden() -> Unit = "rp_start_hidden"
+extern "C" fn rp_start_resident_hidden() -> Unit = "rp_start_resident_hidden"
+extern "C" fn rp_resident_primed() -> Unit = "rp_resident_primed"
+extern "C" fn rp_resident_hidden() -> Unit = "rp_resident_hidden"
+extern "C" fn rp_set_bg_rgb(rgb : Int) -> Unit = "rp_set_bg_rgb"
+extern "C" fn c_rp_export_start(plan : Ptr, plan_len : Int64, output : Ptr, output_len : Int64, width : Int, height : Int, fps : Int, bitrate : Int, codec : Int, crops : Ptr, crops_len : Int64, scale : Double) -> Int = "pion_rp_export_start"
+fn rp_export_start(plan : Bytes, output : Bytes, width : Int, height : Int, fps : Int, bitrate : Int, codec : Int, crops : Bytes, scale : Double) -> Int { c_rp_export_start(bytes_data_ptr(plan), plan.length().to_int64(), bytes_data_ptr(output), output.length().to_int64(), width, height, fps, bitrate, codec, bytes_data_ptr(crops), crops.length().to_int64(), scale) }
+extern "C" fn rp_av1_here() -> Int = "rp_av1_here"
+extern "C" fn c_rp_gif_estimate_start(plan : Ptr, plan_len : Int64, width : Int, height : Int, fps : Int, crops : Ptr, crops_len : Int64, scale : Double) -> Unit = "pion_rp_gif_estimate_start"
+fn rp_gif_estimate_start(plan : Bytes, width : Int, height : Int, fps : Int, crops : Bytes, scale : Double) -> Unit { c_rp_gif_estimate_start(bytes_data_ptr(plan), plan.length().to_int64(), width, height, fps, bytes_data_ptr(crops), crops.length().to_int64(), scale) }
+extern "C" fn rp_gif_estimate() -> Double = "rp_gif_estimate"
+extern "C" fn rp_export_state() -> Int = "rp_export_state"
+extern "C" fn rp_export_progress() -> Double = "rp_export_progress"
+extern "C" fn rp_export_failure() -> Int = "rp_export_failure"
+extern "C" fn rp_export_cancel() -> Unit = "rp_export_cancel"
+extern "C" fn rp_export_reset() -> Unit = "rp_export_reset"
+extern "C" fn c_rp_concat_start(plan : Ptr, plan_len : Int64, output : Ptr, output_len : Int64) -> Int = "pion_rp_concat_start"
+fn rp_concat_start(plan : Bytes, output : Bytes) -> Int { c_rp_concat_start(bytes_data_ptr(plan), plan.length().to_int64(), bytes_data_ptr(output), output.length().to_int64()) }
+extern "C" fn rp_concat_state() -> Int = "rp_concat_state"
+extern "C" fn rp_concat_progress() -> Double = "rp_concat_progress"
+extern "C" fn rp_concat_take() -> Int = "rp_concat_take"
+extern "C" fn rp_concat_cancel() -> Unit = "rp_concat_cancel"
+extern "C" fn c_rp_copy_file(path : Ptr, path_len : Int64) -> Int = "pion_rp_copy_file"
+fn rp_copy_file(path : Bytes) -> Int { c_rp_copy_file(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_rename(from : Ptr, from_len : Int64, to : Ptr, to_len : Int64) -> Int = "pion_rp_rename"
+fn rp_rename(from : Bytes, to : Bytes) -> Int { c_rp_rename(bytes_data_ptr(from), from.length().to_int64(), bytes_data_ptr(to), to.length().to_int64()) }
+extern "C" fn c_rp_delete(path : Ptr, path_len : Int64) -> Unit = "pion_rp_delete"
+fn rp_delete(path : Bytes) -> Unit { c_rp_delete(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_crop_thumb(path : Ptr, path_len : Int64, identity : Ptr, identity_len : Int64, ms : Double, x : Int, y : Int, w : Int, h : Int) -> Ptr = "pion_rp_crop_thumb"
+fn rp_crop_thumb(path : Bytes, identity : Bytes, ms : Double, x : Int, y : Int, w : Int, h : Int) -> Bytes { take_mb_bytes(c_rp_crop_thumb(bytes_data_ptr(path), path.length().to_int64(), bytes_data_ptr(identity), identity.length().to_int64(), ms, x, y, w, h)) }
+extern "C" fn c_rp_dir_size(path : Ptr, path_len : Int64) -> Double = "pion_rp_dir_size"
+fn rp_dir_size(path : Bytes) -> Double { c_rp_dir_size(bytes_data_ptr(path), path.length().to_int64()) }
+extern "C" fn c_rp_can_write(dir : Ptr, dir_len : Int64) -> Int = "pion_rp_can_write"
+fn rp_can_write(dir : Bytes) -> Int { c_rp_can_write(bytes_data_ptr(dir), dir.length().to_int64()) }
+extern "C" fn c_rp_disk_free(dir : Ptr, dir_len : Int64) -> Double = "pion_rp_disk_free"
+fn rp_disk_free(dir : Bytes) -> Double { c_rp_disk_free(bytes_data_ptr(dir), dir.length().to_int64()) }
+extern "C" fn c_rp_pick_folder() -> Ptr = "rp_pick_folder"
+fn rp_pick_folder() -> Bytes { take_mb_bytes(c_rp_pick_folder()) }
+extern "C" fn rp_animations_off() -> Int = "rp_animations_off"
+extern "C" fn rp_system_light() -> Int = "rp_system_light"
+extern "C" fn rp_system_chinese() -> Int = "rp_system_chinese"
+extern "C" fn rp_window_dark(on : Int) -> Unit = "rp_window_dark"
+extern "C" fn rp_hide_from_capture(on : Int) -> Unit = "rp_hide_from_capture"
+extern "C" fn c_rp_append(path : Ptr, path_len : Int64, data : Ptr, data_len : Int64) -> Int = "pion_rp_append"
+fn rp_append(path : Bytes, data : Bytes) -> Int { c_rp_append(bytes_data_ptr(path), path.length().to_int64(), bytes_data_ptr(data), data.length().to_int64()) }
+extern "C" fn rp_tray_window(w : Double, h : Double) -> Int = "rp_tray_window"
+extern "C" fn rp_tray_hide() -> Unit = "rp_tray_hide"
+extern "C" fn rp_tray_tell(command : Int) -> Int = "rp_tray_tell"
+extern "C" fn rp_window_shown() -> Int = "rp_window_shown"

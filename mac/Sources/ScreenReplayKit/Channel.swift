@@ -1,7 +1,6 @@
 import Darwin
 import Foundation
 
-/// Constant-time string comparison for socket authentication tokens.
 public func constantTimeSame(_ a: String, _ b: String) -> Bool {
   let x = Array(a.utf8)
   let y = Array(b.utf8)
@@ -23,7 +22,6 @@ public struct HelperError: Error, CustomStringConvertible, Sendable {
   }
 }
 
-/// Unix domain socket JSON-lines & framed channel (modeled after `StillfailHelper/Channel.swift`).
 public final class Channel: @unchecked Sendable {
   public let fd: Int32
   private let lock = NSLock()
@@ -143,7 +141,6 @@ public enum UnixSocketClient {
     return fd
   }
 
-  /// Sends a single JSON-line request `{op, token, ...}` and reads its single-line JSON reply.
   public static func request(
     socketPath: String,
     token: String,

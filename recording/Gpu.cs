@@ -7,16 +7,11 @@ using WinRT;
 
 namespace Replay.Recording;
 
-/// <summary>What the recorder tells of the computer's GPU.</summary>
 public static class Graphics
 {
-    /// <summary>The default GPU shares the computer's memory: integrated graphics (<see cref="Gpu.SharedMemory"/>).</summary>
     public static bool Shared => Gpu.DefaultIsShared();
 }
 
-/// <summary>The Direct3D 11 device everything runs on: the capture's frames land in it, the video processor converts
-/// them there and the encoder reads them from it (shared with Media Foundation by a DXGI device manager), so a frame
-/// never leaves the GPU.</summary>
 internal sealed class Gpu : IDisposable
 {
     public ID3D11Device Device { get; }
@@ -58,7 +53,7 @@ internal sealed class Gpu : IDisposable
             levels, out var device, out var context).CheckError();
         Device = device!;
         Context = context!;
-        // (the encoder's threads and ours use the immediate context: D3D serialises them)
+        // Enable D3D11 multithread protection: encoder threads share the immediate context.
         using (var mt = Device.QueryInterface<ID3D11Multithread>())
         {
             mt.SetMultithreadProtected(true);
@@ -106,14 +101,10 @@ internal sealed class Gpu : IDisposable
         }
     }
 
-    /// <summary>The GPU shares the computer's memory (D3D11's UnifiedMemoryArchitecture: integrated graphics, Intel's
-    /// or AMD's in the processor). Its video engine most often both encodes and decodes, so recording and a video
-    /// playing take turns on it; the window suggests a smaller picture there (state.json's sharedGpu).</summary>
     public bool SharedMemory => Device.CheckFeatureOptions2().UnifiedMemoryArchitecture;
 
     private static int shared = -1;
 
-    /// <summary><see cref="SharedMemory"/> of the default GPU, looked at once (a device made and let go: false where none can be).</summary>
     public static bool DefaultIsShared()
     {
         if (shared < 0)
@@ -132,7 +123,6 @@ internal sealed class Gpu : IDisposable
         return shared == 1;
     }
 
-    /// <summary>The D3D11 texture behind a capture frame's surface (a new reference).</summary>
     public static unsafe ID3D11Texture2D TextureOf(Windows.Graphics.DirectX.Direct3D11.IDirect3DSurface surface)
     {
         var unknown = MarshalInterface<Windows.Graphics.DirectX.Direct3D11.IDirect3DSurface>.FromManaged(surface);

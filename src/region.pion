@@ -1,0 +1,345 @@
+import "signals"
+import "ui"
+import "view"
+
+fn set_clip_kind(k : Int) -> Unit {
+  clip_mark()
+  clip_kind.set(k)
+  if k != 1 && picked_hwnd.untracked() != 0L {
+    pick_window(Option::None)
+  }
+  if k != 2 && region.untracked() is Some(_) {
+    clear_region()
+  }}
+
+fn ratio_now() -> Double {
+  region_ratios[region_ratio.get()].1}
+
+fn region_on() -> Option[(Double, Double, Double, Double)] {
+  if clipping.get() {
+    region.get()
+  } else {
+    Option::None
+  }}
+
+fn cropping() -> Bool {
+  picked_hwnd.get() != 0L || region_on() is Some(_)}
+
+fn rec_size() -> (Double, Double) {
+  let (sw, sh, _) = source_format()
+  (sw, sh)}
+
+fn clear_region() -> Unit {
+  region.set(None)
+  region_ratio.set(0)
+  region_selected.set(false)
+  region_grab.set(0)}
+
+fn region_let_go() -> Unit {
+  if region_selected.untracked() {
+    region_selected.set(false)
+  }}
+
+fn region_export_size(r : (Double, Double, Double, Double)) -> (Int, Int) {
+  (even(r.2), even(r.3))}
+
+fn region_label() -> String {
+  match region_on() {
+    Option::Some(r) => {
+      let (w, h) = region_export_size(r)
+      let k = region_ratio.get()
+      "\{w} × \{h}" + (if k != 0 { " · " + region_ratios[k].0 } else { "" })
+    }
+    Option::None => ""
+  }}
+
+fn region_crop(r : (Double, Double, Double, Double)) -> (String, Int, Int) {
+  let (w, h) = region_export_size(r)
+  ("0\t\{r.0.to_int()}\t\{r.1.to_int()}\t\{w}\t\{h}", w, h)}
+
+fn region_fit(x0 : Double, y0 : Double, x1 : Double, y1 : Double, sw : Double, sh : Double) -> (Double, Double, Double, Double) {
+  let w = clamp((x1 - x0).round(), dmin(region_min, sw), sw)
+  let h = clamp((y1 - y0).round(), dmin(region_min, sh), sh)
+  let x = clamp(x0.round(), 0.0, sw - w)
+  let y = clamp(y0.round(), 0.0, sh - h)
+  (x, y, w, h)}
+
+fn region_resized(o : (Double, Double, Double, Double), hx : Int, hy : Int, px : Double, py : Double, r : Double, sw : Double, sh : Double) -> (Double, Double, Double, Double) {
+  let (x0, y0, x1, y1) = o
+  if r <= 0.0 {
+    let nx0 = if hx < 0 { clamp(px, 0.0, x1 - region_min) } else { x0 }
+    let nx1 = if hx > 0 { clamp(px, x0 + region_min, sw) } else { x1 }
+    let ny0 = if hy < 0 { clamp(py, 0.0, y1 - region_min) } else { y0 }
+    let ny1 = if hy > 0 { clamp(py, y0 + region_min, sh) } else { y1 }
+    return region_fit(nx0, ny0, nx1, ny1, sw, sh)
+  }
+  let min_w = dmax(region_min, region_min * r)
+  if hx != 0 && hy != 0 {
+    let ax = if hx > 0 { x0 } else { x1 }
+    let ay = if hy > 0 { y0 } else { y1 }
+    let want = dmax(dmax(0.0, hx.to_double() * (px - ax)), dmax(0.0, hy.to_double() * (py - ay)) * r)
+    let room_w = if hx > 0 { sw - ax } else { ax }
+    let room_h = if hy > 0 { sh - ay } else { ay }
+    let w = dmin(dmax(want, min_w), dmin(room_w, room_h * r))
+    let h = w / r
+    let nx0 = if hx > 0 { ax } else { ax - w }
+    let ny0 = if hy > 0 { ay } else { ay - h }
+    return region_fit(nx0, ny0, nx0 + w, ny0 + h, sw, sh)
+  }
+  if hx != 0 {
+    let ax = if hx > 0 { x0 } else { x1 }
+    let cy = (y0 + y1) / 2.0
+    let room_w = if hx > 0 { sw - ax } else { ax }
+    let w = dmin(dmax(hx.to_double() * (px - ax), min_w), dmin(room_w, sh * r))
+    let h = w / r
+    let nx0 = if hx > 0 { ax } else { ax - w }
+    let ny0 = clamp(cy - h / 2.0, 0.0, sh - h)
+    return region_fit(nx0, ny0, nx0 + w, ny0 + h, sw, sh)
+  }
+  let ay = if hy > 0 { y0 } else { y1 }
+  let cx = (x0 + x1) / 2.0
+  let min_h = min_w / r
+  let room_h = if hy > 0 { sh - ay } else { ay }
+  let h = dmin(dmax(hy.to_double() * (py - ay), min_h), dmin(room_h, sw / r))
+  let w = h * r
+  let ny0 = if hy > 0 { ay } else { ay - h }
+  let nx0 = clamp(cx - w / 2.0, 0.0, sw - w)
+  region_fit(nx0, ny0, nx0 + w, ny0 + h, sw, sh)}
+
+fn set_region_ratio(k : Int) -> Unit {
+  clip_mark()
+  region_ratio.set(k)
+  let r = region_ratios[k].1
+  guard region.untracked() is Some((x, y, w, h)) else { return }
+  if r <= 0.0 {
+    return
+  }
+  let (sw, sh) = signals::untracked(rec_size)
+  let cx = x + w / 2.0
+  let cy = y + h / 2.0
+  let mut nw = (w * h * r).sqrt()
+  let mut nh = nw / r
+  let s = dmin(1.0, dmin(sw / nw, sh / nh))
+  nw = nw * s
+  nh = nh * s
+  let nx = clamp(cx - nw / 2.0, 0.0, sw - nw)
+  let ny = clamp(cy - nh / 2.0, 0.0, sh - nh)
+  region.set(Some(region_fit(nx, ny, nx + nw, ny + nh, sw, sh)))}
+
+fn region_hit(r : (Double, Double, Double, Double), k : Double, x : Double, y : Double) -> Option[(Int, Int)] {
+  let (rx, ry, rw, rh) = (r.0 * k, r.1 * k, r.2 * k, r.3 * k)
+  let reach = 6.0
+  if x < rx - reach || x > rx + rw + reach || y < ry - reach || y > ry + rh + reach {
+    return Option::None
+  }
+  let hx = if (x - rx).abs() <= reach { -1 } else if (x - rx - rw).abs() <= reach { 1 } else { 0 }
+  let hy = if (y - ry).abs() <= reach { -1 } else if (y - ry - rh).abs() <= reach { 1 } else { 0 }
+  if hx == 0 && hy == 0 && (x < rx || x > rx + rw || y < ry || y > ry + rh) {
+    return Option::None
+  }
+  Option::Some((hx, hy))}
+
+fn region_cursor(k : Double, at : Option[(Double, Double)]) -> Option[view::Cursor] {
+  match region_grab.get() {
+    1 => return Option::Some(view::Cursor::Crosshair)
+    2 => return Option::Some(view::Cursor::Arrow)
+    3 => return Option::Some(side_cursor(region_grab_side.get()))
+    _ => ()
+  }
+  match (region_on(), at) {
+    (Some(r), Some((x, y))) =>
+      match region_hit(r, k, x, y) {
+        Option::Some((0, 0)) => Option::Some(view::Cursor::Arrow)
+        Option::Some(side) => Option::Some(side_cursor(side))
+        Option::None => Option::None
+      }
+    _ => Option::None
+  }}
+
+fn side_cursor(side : (Int, Int)) -> view::Cursor {
+  match side {
+    (0, _) => view::Cursor::ResizeY
+    (_, 0) => view::Cursor::ResizeX
+    (-1, -1) | (1, 1) => view::Cursor::ResizeNWSE
+    _ => view::Cursor::ResizeNESW
+  }}
+
+fn region_drag(d : view::Drag, w : Double, click : (Double, Double) -> Unit, draws : Bool) -> Unit {
+  let (sw, sh) = signals::untracked(rec_size)
+  if w <= 0.0 || sw <= 0.0 {
+    return
+  }
+  let k = w / sw
+  match d.kind {
+    Down => {
+      clip_mark()
+      let r = region.untracked()
+      let hit = match r {
+        Some(r) => region_hit(r, k, d.x, d.y)
+        None => None
+      }
+      let o = match r {
+        Some((x, y, rw, rh)) => (x, y, x + rw, y + rh)
+        None => (0.0, 0.0, 0.0, 0.0)
+      }
+      region_down.v = (d.x, d.y, hit, o, k, false)
+    }
+    Moved => {
+      let (x0, y0, hit, o, k0, dragged) = region_down.v
+      if !dragged {
+        if !draws || ((d.x - x0).abs() < 4.0 && (d.y - y0).abs() < 4.0) {
+          return
+        }
+        region_down.v = (x0, y0, hit, o, k0, true)
+        match hit {
+          Some((0, 0)) => region_grab.set(2)
+          Some(side) => {
+            region_grab_side.set(side)
+            region_grab.set(3)
+          }
+          None => {
+            region_ratio.set(0)
+            region_grab.set(1)
+          }
+        }
+        region_selected.set(true)
+      }
+      let px = clamp(d.x / k0, 0.0, sw)
+      let py = clamp(d.y / k0, 0.0, sh)
+      let dx = (d.x - x0) / k0
+      let dy = (d.y - y0) / k0
+      let r = signals::untracked(fn() { region_ratios[region_ratio.get()].1 })
+      match region_grab.untracked() {
+        1 => {
+          let ax = clamp(x0 / k0, 0.0, sw)
+          let ay = clamp(y0 / k0, 0.0, sh)
+          let hx = if px >= ax { 1 } else { -1 }
+          let hy = if py >= ay { 1 } else { -1 }
+          region.set(Some(region_resized((ax, ay, ax, ay), hx, hy, px, py, r, sw, sh)))
+        }
+        2 => {
+          let (ox0, oy0, ox1, oy1) = o
+          let rw = ox1 - ox0
+          let rh = oy1 - oy0
+          let nx = clamp((ox0 + dx).round(), 0.0, sw - rw)
+          let ny = clamp((oy0 + dy).round(), 0.0, sh - rh)
+          region.set(Some((nx, ny, rw, rh)))
+        }
+        3 => {
+          let (hx, hy) = region_grab_side.untracked()
+          let (ox0, oy0, ox1, oy1) = o
+          let ex = (if hx < 0 { ox0 } else { ox1 }) + dx
+          let ey = (if hy < 0 { oy0 } else { oy1 }) + dy
+          region.set(Some(region_resized(o, hx, hy, ex, ey, r, sw, sh)))
+        }
+        _ => ()
+      }
+    }
+    Up | Off => {
+      let (x0, y0, hit, _, _, dragged) = region_down.v
+      region_down.v = (0.0, 0.0, None, (0.0, 0.0, 0.0, 0.0), 1.0, false)
+      if region_grab.untracked() != 0 {
+        region_grab.set(0)
+        return
+      }
+      if d.kind == view::DragIs::Off || dragged {
+        return
+      }
+      match hit {
+        Some(_) => region_selected.set(true)
+        None => if draws { region_let_go() } else { click(x0, y0) }
+      }
+    }
+  }}
+
+fn region_nudge(dx : Double, dy : Double) -> Bool {
+  guard clipping.untracked() && region_selected.untracked() else { return false }
+  guard region.untracked() is Some((x, y, w, h)) else { return false }
+  let (sw, sh) = signals::untracked(rec_size)
+  region.set(Some((clamp(x + dx, 0.0, sw - w), clamp(y + dy, 0.0, sh - h), w, h)))
+  true}
+
+fn region_grow(dw : Double, dh : Double) -> Bool {
+  guard clipping.untracked() && region_selected.untracked() else { return false }
+  guard region.untracked() is Some((x, y, w, h)) else { return false }
+  let (sw, sh) = signals::untracked(rec_size)
+  let r = signals::untracked(ratio_now)
+  let next = if r > 0.0 {
+    let want = if dw != 0.0 { w + dw } else { (h + dh) * r }
+    let nw = clamp(want, dmax(region_min, region_min * r), dmin(sw - x, (sh - y) * r))
+    region_fit(x, y, x + nw, y + nw / r, sw, sh)
+  } else {
+    region_resized((x, y, x + w, y + h), if dw != 0.0 { 1 } else { 0 }, if dh != 0.0 { 1 } else { 0 }, x + w + dw, y + h + dh, r, sw, sh)
+  }
+  region.set(Some(next))
+  true}
+
+fn region_keys(root : view::View) -> Unit {
+  let act = fn(name : String, f : () -> Bool) {
+    root.on_action(name, fn(_) {
+      if segs.is_empty() || library_open.untracked() {
+        return false
+      }
+      clip_mark()
+      f()
+    })
+    |> ignore
+  }
+  for step in [(1.0, ""), (10.0, "10")] {
+    let (n, s) = step
+    act("rgn-up" + s, fn() { region_nudge(0.0, -n) })
+    act("rgn-down" + s, fn() { region_nudge(0.0, n) })
+    act("rgn-wider" + s, fn() { region_grow(n, 0.0) })
+    act("rgn-narrower" + s, fn() { region_grow(-n, 0.0) })
+    act("rgn-taller" + s, fn() { region_grow(0.0, n) })
+    act("rgn-shorter" + s, fn() { region_grow(0.0, -n) })
+  }
+  act("rgn-delete", fn() {
+    if clipping.untracked() && region_selected.untracked() && region.untracked() is Some(_) {
+      clear_region()
+      true
+    } else {
+      false
+    }
+  })
+  act("clip-undo", clip_undo)
+  act("clip-redo", clip_redo)
+  // Return false so Tab still advances focus.
+  act("rgn-tab", fn() {
+    region_let_go()
+    false
+  })}
+
+fn region_bindings() -> Array[view::Binding] {
+  let k = fn(code : Int, action : String, mods : Int) -> view::Binding {
+    view::Binding::{ keys: [view::Stroke::{ code: code, mods: mods }], action: action, when: view::KeyWhen::Always }
+  }
+  let shift = ui::mod_shift_key
+  let alt = ui::mod_alt
+  let out = [
+    k(ui::key_code_up, "rgn-up", 0),
+    k(ui::key_code_down, "rgn-down", 0),
+    k(ui::key_code_up, "rgn-up10", shift),
+    k(ui::key_code_down, "rgn-down10", shift),
+    k(ui::key_code_right, "rgn-wider", alt),
+    k(ui::key_code_left, "rgn-narrower", alt),
+    k(ui::key_code_down, "rgn-taller", alt),
+    k(ui::key_code_up, "rgn-shorter", alt),
+    k(ui::key_code_right, "rgn-wider10", alt | shift),
+    k(ui::key_code_left, "rgn-narrower10", alt | shift),
+    k(ui::key_code_down, "rgn-taller10", alt | shift),
+    k(ui::key_code_up, "rgn-shorter10", alt | shift),
+    k(ui::key_code_delete, "rgn-delete", 0),
+    k(ui::key_code_backspace, "rgn-delete", 0),
+    k(ui::key_tab, "rgn-tab", 0),
+    k(ui::key_tab, "rgn-tab", shift),
+    k(ui::key_of_char('z'), "clip-undo", ui::mod_ctrl),
+    k(ui::key_of_char('y'), "clip-redo", ui::mod_ctrl),
+    k(ui::key_of_char('z'), "clip-redo", ui::mod_ctrl | shift),
+  ]
+  if is_mac() {
+    out.push(k(ui::key_of_char('z'), "clip-undo", ui::mod_cmd))
+    out.push(k(ui::key_of_char('y'), "clip-redo", ui::mod_cmd))
+    out.push(k(ui::key_of_char('z'), "clip-redo", ui::mod_cmd | shift))
+  }
+  out}

@@ -1,0 +1,402 @@
+import "mbt_compat"
+import "ui"
+
+pub struct Mp4Sample {
+  pts : Int64
+  dts : Int64
+  at : Double
+  size : Int
+  key : Bool
+}
+
+pub struct Mp4Track {
+  kind : String
+  codec : String
+  timescale : Int
+  width : Int
+  height : Int
+  shown_w : Int
+  shown_h : Int
+  config : Bytes
+  channels : Int
+  rate : Int
+  samples : Array[Mp4Sample]
+}
+
+fn be16(b : Bytes, i : Int) -> Int {
+  (b[i].to_int() << 8) | b[i + 1].to_int()}
+
+fn be32(b : Bytes, i : Int) -> Int64 {
+  (b[i].to_int().to_int64() << 24) |
+  (b[i + 1].to_int().to_int64() << 16) |
+  (b[i + 2].to_int().to_int64() << 8) |
+  b[i + 3].to_int().to_int64()}
+
+fn be32s(b : Bytes, i : Int) -> Int64 {
+  let v = be32(b, i)
+  if v >= 0x80000000L {
+    v - 0x100000000L
+  } else {
+    v
+  }}
+
+fn be64(b : Bytes, i : Int) -> Int64 {
+  (be32(b, i) << 32) | be32(b, i + 4)}
+
+fn four(b : Bytes, i : Int) -> String {
+  let s = StringBuilder()
+  for k in 0..<4 {
+    s.write_char(mbt_compat::int_unsafe_to_char(b[i + k].to_int()))
+  }
+  s.to_string()}
+
+fn mp4_boxes(b : Bytes, start : Int, end : Int) -> Array[(String, Int, Int)] {
+  let out = []
+  let mut i = start
+  while i + 8 <= end {
+    let size = be32(b, i)
+    let kind = four(b, i + 4)
+    let (head, whole) = if size == 1L && i + 16 <= end {
+      (16, be64(b, i + 8))
+    } else if size == 0L {
+      (8, (end - i).to_int64())
+    } else {
+      (8, size)
+    }
+    if whole < head.to_int64() || i.to_int64() + whole > end.to_int64() {
+      break
+    }
+    out.push((kind, i + head, i + whole.to_int()))
+    i = i + whole.to_int()
+  }
+  out}
+
+fn mp4_find(b : Bytes, start : Int, end : Int, path : Array[String]) -> Option[(Int, Int)] {
+  for box in mp4_boxes(b, start, end) {
+    let (kind, s, e) = box
+    if kind == path[0] {
+      if path.length() == 1 {
+        return Option::Some((s, e))
+      }
+      match mp4_find(b, s, e, mbt_compat::array_slice_clamp(path, 1, path.length())) {
+        Option::Some(r) => return Option::Some(r)
+        Option::None => ()
+      }
+    }
+  }
+  Option::None}
+
+fn mp4_moov(path : String) -> Option[Bytes] {
+  let p = cstr(path)
+  let total = rp_size(p)
+  let mut at = 0.0
+  while at + 8.0 <= total {
+    let h = rp_play_read(p, at, 16)
+    if h.length() < 8 {
+      return Option::None
+    }
+    let size = be32(h, 0)
+    let kind = four(h, 4)
+    let (head, whole) = if size == 1L && h.length() >= 16 {
+      (16.0, be64(h, 8).to_double())
+    } else if size == 0L {
+      (8.0, total - at)
+    } else {
+      (8.0, size.to_double())
+    }
+    if whole < head || at + whole > total {
+      return Option::None
+    }
+    if kind == "moov" {
+      let b = rp_play_read(p, at + head, (whole - head).to_int())
+      return if b.length().to_double() == whole - head { Option::Some(b) } else { Option::None }
+    }
+    at = at + whole
+  }
+  Option::None}
+
+fn mp4_tracks(path : String) -> Array[Mp4Track] {
+  let b = match mp4_moov(path) {
+    Option::Some(b) => b
+    Option::None => return []
+  }
+  let n = b.length()
+  let movie_scale = match mp4_find(b, 0, n, ["mvhd"]) {
+    Option::Some((s, _)) => (if b[s].to_int() == 1 { be32(b, s + 20) } else { be32(b, s + 12) }).to_int()
+    Option::None => 1000
+  }
+  let out = []
+  for box in mp4_boxes(b, 0, n) {
+    let (kind, s, e) = box
+    if kind == "trak" {
+      match mp4_trak(b, s, e, movie_scale) {
+        Option::Some(t) => out.push(t)
+        Option::None => ()
+      }
+    }
+  }
+  out}
+
+fn mp4_video_codec(path : String) -> String {
+  guard mp4_moov(path) is Some(b) else { return "" }
+  for box in mp4_boxes(b, 0, b.length()) {
+    let (kind, s, e) = box
+    if kind == "trak" &&
+      mp4_find(b, s, e, ["mdia", "hdlr"]) is Some((hs, _)) &&
+      four(b, hs + 8) == "vide" &&
+      mp4_find(b, s, e, ["mdia", "minf", "stbl", "stsd"]) is Some((ds, de)) &&
+      ds + 16 <= de {
+      return four(b, ds + 12)
+    }
+  }
+  ""}
+
+fn codec_name(entry : String) -> String {
+  if entry.starts_with("avc") {
+    "H.264"
+  } else if entry.starts_with("hv") || entry.starts_with("he") {
+    "H.265"
+  } else if entry == "av01" {
+    "AV1"
+  } else {
+    ""
+  }}
+
+fn mp4_trak(b : Bytes, s : Int, e : Int, movie_scale : Int) -> Option[Mp4Track] {
+  guard mp4_find(b, s, e, ["mdia", "mdhd"]) is Option::Some((ms, _)) else { return Option::None }
+  let timescale = (if b[ms].to_int() == 1 { be32(b, ms + 20) } else { be32(b, ms + 12) }).to_int()
+  guard timescale > 0 else { return Option::None }
+  let kind = match mp4_find(b, s, e, ["mdia", "hdlr"]) {
+    Option::Some((hs, _)) => four(b, hs + 8)
+    Option::None => ""
+  }
+  guard mp4_find(b, s, e, ["mdia", "minf", "stbl"]) is Option::Some((ts, te)) else { return Option::None }
+  guard mp4_find(b, ts, te, ["stsd"]) is Option::Some((ds, de)) else { return Option::None }
+  let entry = ds + 8
+  guard entry + 8 <= de else { return Option::None }
+  let entry_end = entry + be32(b, entry).to_int()
+  let codec = four(b, entry + 4)
+  let mut width = 0
+  let mut height = 0
+  let mut config = "".to_bytes()
+  let mut channels = 0
+  let mut rate = 0
+  if kind == "soun" && codec == "mp4a" && entry + 36 <= entry_end {
+    channels = be16(b, entry + 24)
+    rate = be16(b, entry + 32)
+    if rate == 0 {
+      rate = timescale
+    }
+    match mp4_find(b, entry + 36, entry_end, ["esds"]) {
+      Option::Some((cs, ce)) => config = esds_config(b, cs + 4, ce)
+      Option::None => ()
+    }
+  }
+  if kind == "vide" && entry + 8 + 78 <= entry_end {
+    width = be16(b, entry + 8 + 24)
+    height = be16(b, entry + 8 + 26)
+    // Pass av1C verbatim; AV1 has no SPS crop so shown size equals sample entry size.
+    let rec = if codec.starts_with("hv") || codec.starts_with("he") {
+      "hvcC"
+    } else if codec == "av01" {
+      "av1C"
+    } else {
+      "avcC"
+    }
+    match mp4_find(b, entry + 8 + 78, entry_end, [rec]) {
+      Option::Some((cs, ce)) => config = bytes_slice(b, cs, ce)
+      Option::None => ()
+    }
+  }
+  guard mp4_find(b, ts, te, ["stsz"]) is Option::Some((zs, _)) else { return Option::None }
+  let fixed = be32(b, zs + 4).to_int()
+  let count = be32(b, zs + 8).to_int()
+  let size_of = fn(i : Int) { if fixed != 0 { fixed } else { be32(b, zs + 12 + i * 4).to_int() } }
+  let dts = Array::make(count, 0L)
+  match mp4_find(b, ts, te, ["stts"]) {
+    Option::Some((ss, _)) => {
+      let entries = be32(b, ss + 4).to_int()
+      let mut i = 0
+      let mut t = 0L
+      for k in 0..<entries {
+        let c = be32(b, ss + 8 + k * 8).to_int()
+        let d = be32(b, ss + 12 + k * 8)
+        for _ in 0..<c {
+          if i < count {
+            dts[i] = t
+            i = i + 1
+          }
+          t = t + d
+        }
+      }
+    }
+    Option::None => return Option::None
+  }
+  let pts = dts.copy()
+  match mp4_find(b, ts, te, ["ctts"]) {
+    Option::Some((cs, _)) => {
+      let signed = b[cs].to_int() == 1
+      let entries = be32(b, cs + 4).to_int()
+      let mut i = 0
+      for k in 0..<entries {
+        let c = be32(b, cs + 8 + k * 8).to_int()
+        let o = if signed { be32s(b, cs + 12 + k * 8) } else { be32(b, cs + 12 + k * 8) }
+        for _ in 0..<c {
+          if i < count {
+            pts[i] = dts[i] + o
+            i = i + 1
+          }
+        }
+      }
+    }
+    Option::None => ()
+  }
+  // Per MP4 spec, absent stss means all samples are keyframes.
+  let key = Array::make(count, true)
+  match mp4_find(b, ts, te, ["stss"]) {
+    Option::Some((ks, _)) => {
+      for fi in 0..<key.length() { key[fi] = false }
+      let entries = be32(b, ks + 4).to_int()
+      for k in 0..<entries {
+        let at = be32(b, ks + 8 + k * 4).to_int() - 1
+        if at >= 0 && at < count {
+          key[at] = true
+        }
+      }
+    }
+    Option::None => ()
+  }
+  let chunks : Array[Double] = []
+  match mp4_find(b, ts, te, ["stco"]) {
+    Option::Some((cs, _)) =>
+      { for k in 0..<be32(b, cs + 4).to_int() {
+        chunks.push(be32(b, cs + 8 + k * 4).to_double())
+      } }
+    Option::None =>
+      match mp4_find(b, ts, te, ["co64"]) {
+        Option::Some((cs, _)) =>
+          { for k in 0..<be32(b, cs + 4).to_int() {
+            chunks.push(be64(b, cs + 8 + k * 8).to_double())
+          } }
+        Option::None => return Option::None
+      }
+  }
+  guard mp4_find(b, ts, te, ["stsc"]) is Option::Some((sc, _)) else { return Option::None }
+  let runs = be32(b, sc + 4).to_int()
+  let at = Array::make(count, 0.0)
+  let mut i = 0
+  for r in 0..<runs {
+    let first = be32(b, sc + 8 + r * 12).to_int() - 1
+    let per = be32(b, sc + 12 + r * 12).to_int()
+    let last = if r + 1 < runs {
+      be32(b, sc + 8 + (r + 1) * 12).to_int() - 1
+    } else {
+      chunks.length()
+    }
+    for c in first..<imin(last, chunks.length()) {
+      let mut place = chunks[c]
+      for _ in 0..<per {
+        if i < count {
+          at[i] = place
+          place = place + size_of(i).to_double()
+          i = i + 1
+        }
+      }
+    }
+  }
+  // Apply edit list (empty edit media=-1 delays track; positive media skips priming like AAC).
+  let mut shift = 0L
+  match mp4_find(b, s, e, ["edts", "elst"]) {
+    Option::Some((es, _)) => {
+      let v1 = b[es].to_int() == 1
+      let entries = be32(b, es + 4).to_int()
+      let step = if v1 { 20 } else { 12 }
+      let mut k = 0
+      let mut done = false
+      while k < entries && !done {
+        let o = es + 8 + k * step
+        let dur = if v1 { be64(b, o) } else { be32(b, o) }
+        let media = if v1 { be64(b, o + 8) } else { be32s(b, o + 4) }
+        if media == -1L {
+          shift = shift + dur * timescale.to_int64() / movie_scale.to_int64()
+        } else {
+          shift = shift - media
+          done = true
+        }
+        k = k + 1
+      }
+    }
+    Option::None => ()
+  }
+  let samples = mbt_compat::arr_makei(count, fn(k) {
+    Mp4Sample::{ pts: pts[k] + shift, dts: dts[k] + shift, at: at[k], size: size_of(k), key: key[k] }
+  })
+  let (shown_w, shown_h) = match sps_shown(codec, config) {
+    Option::Some(wh) => wh
+    Option::None => (width, height)
+  }
+  Option::Some(Mp4Track::{ kind: kind, codec: codec, timescale: timescale, width: width, height: height, shown_w: shown_w, shown_h: shown_h, config: config, channels: channels, rate: rate, samples: samples })}
+
+// Extract DecoderSpecificInfo (tag 5) from ES_Descriptor (tag 3) -> DecoderConfigDescriptor (tag 4).
+fn esds_config(b : Bytes, s : Int, e : Int) -> Bytes {
+  let mut i = s
+  while i + 2 <= e {
+    let tag = b[i].to_int()
+    i = i + 1
+    // 7-bit varint length (MSB = continuation).
+    let mut len = 0
+    let mut more = true
+    let mut n = 0
+    while more && i < e && n < 4 {
+      let v = b[i].to_int()
+      len = (len << 7) | (v & 0x7F)
+      more = (v & 0x80) != 0
+      i = i + 1
+      n = n + 1
+    }
+    match tag {
+      3 => {
+        if i + 3 > e {
+          return "".to_bytes()
+        }
+        let flags = b[i + 2].to_int()
+        i = i + 3
+        if (flags & 0x80) != 0 {
+          i = i + 2
+        }
+        if (flags & 0x40) != 0 && i < e {
+          i = i + 1 + b[i].to_int()
+        }
+        if (flags & 0x20) != 0 {
+          i = i + 2
+        }
+      }
+      // Skip 13-byte DecoderConfigDescriptor header.
+      4 => i = i + 13
+      5 => return if i + len <= e { bytes_slice(b, i, i + len) } else { "".to_bytes() }
+      _ => i = i + len
+    }
+  }
+  "".to_bytes()}
+
+fn demux_dump() -> Bool {
+  let path = ui::env("REPLAY_DEMUX")
+  if path == "" {
+    return false
+  }
+  let s = StringBuilder()
+  let tracks = mp4_tracks(path)
+  for ti, t in tracks {
+    s.write_string(
+      "# \{ti} \{t.kind} \{t.codec} \{t.timescale} \{t.width}x\{t.height} shown=\{t.shown_w}x\{t.shown_h} config=\{t.config.length()} samples=\{t.samples.length()}\n",
+    )
+  }
+  for ti, t in tracks {
+    for x in t.samples {
+      s.write_string(
+        "\{ti},\{x.pts},\{x.dts},\{x.size},\{x.at.to_int64()},\{if x.key { "K" } else { "_" }}\n",
+      )
+    }
+  }
+  rp_write(cstr(ui::env("REPLAY_DEMUX_OUT")), mbt_compat::utf8_encode(s.to_string())) |> ignore
+  true}

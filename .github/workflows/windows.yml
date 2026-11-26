@@ -1,46 +1,115 @@
 name: Windows package
-# ScreenReplay-Setup-<version>.exe (the standalone installer): the recorder and the replay window built
-# (scripts/build.ps1), staged self-contained and packed with Inno Setup (packaging/pack-setup.ps1), kept as the run's
-# artifact. The release workflow calls it for a tag.
 on:
   workflow_dispatch:
   workflow_call:
-  # (a change to what the Windows build is made of, built and packed before it is merged)
   pull_request:
     paths:
-      - 'app/**'
+      - 'src/**'
+      - 'native/**'
+      - 'pion.toml'
       - 'recorder/**'
       - 'recording/**'
       - 'assets/**'
       - 'scripts/build.ps1'
-      - 'scripts/build-app.sh'
-      - 'scripts/fetch-stillfail.sh'
+      - 'scripts/build-viewer.ps1'
       - 'packaging/pack-setup.ps1'
       - 'packaging/ScreenReplay.iss'
-      - 'stillfail.lock'
       - '.github/workflows/windows.yml'
 permissions:
   contents: read
 jobs:
   package:
-    # (Visual Studio 2022, as the releases made by hand were built with: windows-latest's 2026 has MSVC 14.52.37025,
-    # whose /O2 miscompiles mbui's @dmath.sin/cos, and its clang-cl, which mbui would take in its place, does not take
-    # the replay window's C++ as cl does)
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout ScreenReplay
+        uses: actions/checkout@v4
+        with:
+          path: screenreplay
+
+      - name: Checkout invar
+        uses: actions/checkout@v4
+        with:
+          repository: AFK-surf/invar
+          ref: 1dfb93f6d552ee199d27156e71a7abce00877948
+          path: invar
+
+      - name: Checkout pion-packages
+        uses: actions/checkout@v4
+        with:
+          repository: AFK-surf/pion-packages
+          ref: 8014f92596624ab01af599b03851c7d3ad1f9701
+          path: pion-packages
+
+      - name: Checkout pion
+        uses: actions/checkout@v4
+        with:
+          repository: AFK-surf/pion
+          ref: 6ffebebfb4b134bf89028758593326626c766af2
+          path: pion
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
-      - name: Install MoonBit
-        shell: pwsh
+      - name: Cache pion toolchain
+        id: pion-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            pion/out/pionc_release.exe
+            pion/out/qbe.exe
+          key: pion-win-x64-6ffebebfb4b134bf89028758593326626c766af2
+
+      - name: Setup MSYS2 for pion bootstrap
+        if: steps.pion-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            gzip
+
+      - name: Bootstrap pionc (Windows x64)
+        if: steps.pion-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
         run: |
-          irm https://cli.moonbitlang.com/install/powershell.ps1 | iex
-          "$HOME\.moon\bin" >> $env:GITHUB_PATH
-          & "$HOME\.moon\bin\moon.exe" version --all
+          set -eu
+          cd pion
+          OUT_DIR="$PWD/out"
+          TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          mkdir -p "$OUT_DIR" "$TMP_DIR/qbe/amd64" "$TMP_DIR/qbe/arm64" "$TMP_DIR/qbe/rv64"
+          printf '#define Deftgt T_amd64_win\n' > "$TMP_DIR/qbe/config.h"
+          QBE_SRCS="main util parse abi cfg mem ssa alias load copy fold gvn gcm simpl ifopt live spill rega emit amd64/targ amd64/sysv amd64/isel amd64/emit amd64/winabi amd64/elf arm64/targ arm64/abi arm64/isel arm64/emit arm64/macho rv64/targ rv64/abi rv64/isel rv64/emit"
+          QBE_OBJS=""
+          QBE_PIDS=""
+          for s in $QBE_SRCS; do
+            obj="$TMP_DIR/qbe/$s.o"
+            QBE_OBJS="$QBE_OBJS $obj"
+            gcc -std=c99 -O2 -I"$TMP_DIR/qbe" -Ivendor/qbe -c "vendor/qbe/$s.c" -o "$obj" &
+            QBE_PIDS="$QBE_PIDS $!"
+          done
+          for pid in $QBE_PIDS; do wait "$pid"; done
+          gcc -O2 $QBE_OBJS -o "$OUT_DIR/qbe.exe"
+          gcc -std=c11 -O2 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
+            -Wall -Wextra -Werror -c runtime/pion_rt.c -o "$TMP_DIR/pion_rt.o"
+          gcc -std=c11 -O2 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
+            -Wall -Wextra -Werror -c runtime/pion_cli.c -o "$TMP_DIR/pion_cli.o"
+          ar rcs "$TMP_DIR/libpionrt_cli.a" "$TMP_DIR/pion_rt.o" "$TMP_DIR/pion_cli.o"
+          gzip -dc bootstrap/pionc-seed.ssa.gz > "$TMP_DIR/seed.ssa"
+          "$OUT_DIR/qbe.exe" -t amd64_win -o "$TMP_DIR/pionc0.s" "$TMP_DIR/seed.ssa"
+          gcc -Wa,-mbig-obj -c "$TMP_DIR/pionc0.s" -o "$TMP_DIR/pionc0.o"
+          gcc "$TMP_DIR/pionc0.o" "$TMP_DIR/libpionrt_cli.a" -lm -lws2_32 -Wl,--stack,16777216 -o "$TMP_DIR/pionc0.exe"
+          mkdir -p "$TMP_DIR/cas_s1"
+          CC="$(cygpath -w "$(command -v gcc)")" PION_QBE="$(cygpath -w "$OUT_DIR/qbe.exe")" \
+            PION_RT_LIB="$(cygpath -w "$TMP_DIR/libpionrt_cli.a")" \
+            PION_TARGET=amd64_win PION_CACHE_DIR="$(cygpath -w "$TMP_DIR/cas_s1")" \
+            "$TMP_DIR/pionc0.exe" build --release --emit-obj "$(cygpath -w "$TMP_DIR/pionc1.o")" \
+            compiler/src/core compiler/src/cli/main.pion
+          gcc "$TMP_DIR/pionc1.o" "$TMP_DIR/libpionrt_cli.a" -lm -lws2_32 -Wl,--stack,16777216 -o "$OUT_DIR/pionc_release.exe"
+          "$OUT_DIR/pionc_release.exe" --version
 
       - name: Install Inno Setup
         shell: pwsh
@@ -50,30 +119,34 @@ jobs:
             if ($LASTEXITCODE) { throw "Inno Setup did not install" }
           }
 
-      # (MBC_REAL_CC: MSVC's cl named, so that mbui does not take Visual Studio's clang-cl where it is installed)
       - name: Build ScreenReplay
         shell: pwsh
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $msvc = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
-          $env:MBC_REAL_CC = "$vs\VC\Tools\MSVC\$msvc\bin\Hostx64\x64\cl.exe"
-          if (-not (Test-Path $env:MBC_REAL_CC)) { throw "no cl.exe at $env:MBC_REAL_CC" }
-          .\scripts\build.ps1
+        env:
+          PIONC: ${{ github.workspace }}\pion\out\pionc_release.exe
+          PION_QBE: ${{ github.workspace }}\pion\out\qbe.exe
+        run: .\screenreplay\scripts\build.ps1
+
+      - name: Run viewer regression tests
+        shell: pwsh
+        env:
+          PIONC: ${{ github.workspace }}\pion\out\pionc_release.exe
+          PION_QBE: ${{ github.workspace }}\pion\out\qbe.exe
+        run: .\screenreplay\scripts\build-viewer.ps1 -Test
 
       - name: The replay window's build log
         if: failure()
         shell: pwsh
-        run: if (Test-Path out\build-app.log) { Get-Content out\build-app.log -Tail 200 }
+        run: if (Test-Path screenreplay\out\build-app.log) { Get-Content screenreplay\out\build-app.log -Tail 200 }
 
       - name: Pack the installer
         shell: pwsh
         run: |
-          $ver = (Select-String -Path app\about.mbt -Pattern '^let app_version : String = "([^"]+)"').Matches[0].Groups[1].Value
-          $setup = .\packaging\pack-setup.ps1 -Version $ver | Select-Object -Last 1
+          $ver = (Select-String -Path screenreplay\src\about.pion -Pattern '^let app_version : String = "([^"]+)"').Matches[0].Groups[1].Value
+          $setup = .\screenreplay\packaging\pack-setup.ps1 -Version $ver | Select-Object -Last 1
           "$($setup.Name): $($setup.Length) bytes, sha256 $((Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower())"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ScreenReplay-windows
-          path: out/setup/ScreenReplay-Setup-*.exe
+          path: screenreplay/out/setup/ScreenReplay-Setup-*.exe
           if-no-files-found: error

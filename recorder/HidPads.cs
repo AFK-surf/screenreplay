@@ -3,15 +3,6 @@ using Replay.Recording;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// Game controllers that are not XInput's (a DualSense or DualShock, a joystick), from their HID reports as Raw Input
-/// brings them to the recorder's window (Generic Desktop's gamepad and joystick, RIDEV_INPUTSINK: in the background, a
-/// game in front). Each device's reports read by hid.dll from its preparsed data (<see cref="HidLayout"/>: buttons,
-/// axes, hats; never compared byte by byte, a DualSense's motion sensors and timestamps changing in every report), what
-/// changed going to <see cref="InputActivity"/> as counts. A device whose name says it is an XInput one ("IG_") is
-/// passed over: <see cref="XInputPads"/> counts it. What a device needs is made as its first report comes, nothing as
-/// the rest do.
-/// </summary>
 internal sealed class HidPads(InputActivity activity, Action<string> log)
 {
     private const uint RidiPreparsedData = 0x20000005;
@@ -39,7 +30,6 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
     [DllImport("hid.dll")]
     private static extern int HidP_GetData(int type, ref byte data, ref uint length, ref byte preparsed, ref byte report, uint reportLength);
 
-    /// <summary>A device's reports and how to read them; null for one passed over.</summary>
     private sealed class Device(byte[] preparsed, HidLayout layout, byte[] data)
     {
         public readonly byte[] Preparsed = preparsed;
@@ -57,12 +47,10 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
 
     private readonly Dictionary<IntPtr, Device?> devices = [];
 
-    // the devices listed, each whether it is a gamepad or joystick not XInput's, and the last look it was seen in
     private readonly Dictionary<IntPtr, (bool Read, int Seen)> listed = [];
     private byte[] list = new byte[64 * 16];
     private int look;
 
-    /// <summary>Whether a gamepad or joystick that is not XInput's is there now (each device asked about once).</summary>
     public bool AnyToRead()
     {
         var count = 0u;
@@ -103,7 +91,6 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
             any |= known.Read;
         }
 
-        // (those no longer listed forgotten)
         foreach (var (device, entry) in listed)
         {
             if (entry.Seen != look)
@@ -115,7 +102,6 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
         return any;
     }
 
-    /// <summary>A gamepad (1/5) or joystick (1/4) whose name does not say XInput's ("IG_").</summary>
     private static bool IsPad(IntPtr device)
     {
         // RID_DEVICE_INFO: cbSize, dwType, then the HID's vendor, product, version, usUsagePage, usUsage
@@ -141,11 +127,8 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
             System.Text.Encoding.Unicode.GetString(name).Contains("IG_", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Each device made again as it next reports (recording held: its readings before it are not compared with
-    /// those after).</summary>
     public void Forget() => devices.Clear();
 
-    /// <summary>A device came (WM_INPUT_DEVICE_CHANGE's GIDC_ARRIVAL) or went.</summary>
     public void Changed(bool arrived, IntPtr device)
     {
         if (!arrived)
@@ -161,8 +144,6 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
         Get(device);
     }
 
-    /// <summary>A WM_INPUT of a gamepad or joystick: its RAWHID (<paramref name="hid"/>: the size of a report, how many,
-    /// the reports one after another).</summary>
     public void Report(IntPtr device, ReadOnlySpan<byte> hid, int lag)
     {
         if (hid.Length < 8 || Get(device) is not { } d)
@@ -224,7 +205,6 @@ internal sealed class HidPads(InputActivity activity, Action<string> log)
 
     private Device? Make(IntPtr device)
     {
-        // (an XInput pad's name says IG_, and XInput counts it)
         if (IsXInput(device))
         {
             return null;

@@ -1,0 +1,672 @@
+import "mbt_compat"
+import "motion"
+import "pixels"
+import "signals"
+import "view"
+
+fn hover_now() -> Option[Double] {
+  guard band_node.v is Option::Some(band) else { return Option::None }
+  if view_dragging.get() {
+    return Option::None
+  }
+  let b = match hover_node.v {
+    Some(h) => h
+    None => band
+  }
+  if !b.pointer_within() && grabbed.get() != 3 {
+    return Option::None
+  }
+  let q = b.pointer_piece(fn(x, _) { (dmax(0.0, x) * 4.0).round().to_int() })
+  if q < 0 {
+    Option::None
+  } else {
+    Option::Some(q.to_double() / 4.0)
+  }}
+
+fn index_watch(root : view::View) -> Unit {
+  if rp_idx_pending() > 0 {
+    idx_tick.set(idx_tick.untracked() + 1)
+  }
+  again(root, 400.0, fn() { index_watch(root) })}
+
+fn at_x(x : Double, w : Double) -> Double {
+  let (from, len) = shown_now()
+  let vlen = signals::untracked(view_len)
+  if w <= 0.0 {
+    ax_b(from, vlen)
+  } else {
+    ax_b(from + clamp(x / w, 0.0, 1.0) * len, vlen)
+  }}
+
+fn at_x_drawn(v : view::View, x : Double, w : Double) -> Double {
+  let (from, len) = shown(v)
+  ax_b(from + clamp(x / dmax(1.0, w), 0.0, 1.0) * len, view_len())}
+
+fn x_drawn_of(v : view::View, at : Double, w : Double) -> Double {
+  let (from, len) = shown(v)
+  (ax_d(at, view_len()) - from) / len * w}
+
+fn current_piece(parent : view::View, w : () -> Double) -> Unit {
+  parent.box(fn(o) {
+    o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    o.box(fn(b) {
+      let rect = fn() -> Option[(Double, Double)] {
+        let p = pos_drawn(b)
+        for pc in pieces_now.get() {
+          if p >= pc.0 && p < pc.1 {
+            let a = clamp(x_drawn_of(b, pc.0, w()), 0.0, w())
+            let z = clamp(x_drawn_of(b, pc.1, w()), 0.0, w())
+            return if z - a >= 2.0 { Some((a, z - a - 1.0)) } else { None }
+          }
+        }
+        None
+      }
+      b
+      .height(view::Live::Is(Some(strip_h)))
+      .ground(view::Live::By(c_s4))
+      .laid_nowhere(view::Live::By(fn() { rect() is None }))
+      .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
+      .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), 0.0) }))
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn app_icon_path(process : String) -> String {
+  if process == "" {
+    return ""
+  }
+  let key = str_to_ascii_lower(process)
+  match app_icons_found.get(key) {
+    Option::Some(p) => p
+    Option::None => {
+      let path = pjoin(pjoin(root_dir(), "AppIcons"), key + ".png")
+      let found = if rp_size(cstr(path)) > 0.0 { path } else { "" }
+      app_icons_found.set(key, found)
+      found
+    }
+  }}
+
+fn app_icon(parent : view::View, process : String, size? : Double) -> Unit {
+  let size = match size { Some(__mbt_v) => __mbt_v, None => 16.0 }
+
+  let path = app_icon_path(process)
+  if path != "" {
+    parent.box(fn(i) {
+      i.width(view::Live::Is(Some(size))).height(view::Live::Is(Some(size))).image(view::Live::Is(Some((path, "", 64)))).image_contains(view::Live::Is(true)) |> ignore
+    })
+    |> ignore
+  } else {
+    let name = app_name(process)
+    let letter = if name.length() > 0 { str_to_ascii_upper(name.slice(0, 1)) } else { "·" }
+    parent.box(fn(i) {
+      i
+      .width(view::Live::Is(Some(size)))
+      .height(view::Live::Is(Some(size)))
+      .radius(view::Live::Is(size * 0.22))
+      .ground(view::Live::By(c_s4))
+      .lines_up(view::Live::Is(Some(view::Along::Middle)))
+      .lies_along(view::Live::Is(view::Lies::Middle))
+      |> ignore
+      words(i, fn() { letter }, 9.0, ui_text, weight=600) |> ignore
+    })
+    |> ignore
+  }}
+
+fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
+  parent.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
+    // Quantize visible range and 1.5x zoom buckets so overview drag/resize does not rebuild label nodes every frame.
+    let reach_held : mbt_compat::Ref[Option[(Double, Double, Double)]] = mbt_compat::ref_new(None)
+    let reach = signals::computed_by(fn(_) {
+      let (from, len) = shown(o)
+      let width = dmax(1.0, w())
+      if view_resizing.get() {
+        let q_len = min_view * mbt_compat::math_pow(1.5, (mbt_compat::math_ln(dmax(1.0, len / min_view)) / mbt_compat::math_ln(1.5)).floor())
+        let at = (from / q_len).floor() * q_len
+        let min_dur = 30.0 / width * q_len
+        let r = (at - q_len, at + 3.0 * q_len, min_dur)
+        reach_held.v = Some(r)
+        return r
+      }
+      let at = (from / len).floor() * len
+      let min_dur = 30.0 / width * len
+      let c = (at - len, at + 2.0 * len, min_dur)
+      match (view_dragging.get(), reach_held.v) {
+        (true, Some(h)) if h.2 == min_dur && from >= h.0 && from + len <= h.1 => h
+        _ => {
+          reach_held.v = Some(c)
+          c
+        }
+      }
+    }, fn(a, b) { a == b })
+    o.each(fn() {
+      let (a, z, min_dur) = reach.get()
+      let vl = view_len()
+      arr_filter(pieces_now.get(), fn(p) {
+        if p.2 == "" || p.1 - p.0 < min_dur {
+          return false
+        }
+        let d0 = ax_d(p.0, vl)
+        let d1 = ax_d(p.1, vl)
+        d1 - d0 >= min_dur && d1 > a && d0 < z
+      })
+    }, fn(p : (Double, Double, String)) -> String { "\{p.0}/\{p.2}" }, fn(row, p) {
+      let app = signals::untracked(fn() { p.get().2 })
+      row.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+      row.box(fn(b) {
+        let span = fn() {
+          let (a0, z0, _) = p.get()
+          let a = clamp(x_drawn_of(b, a0, w()), 0.0, w())
+          let z = clamp(x_drawn_of(b, z0, w()), 0.0, w())
+          (a, z - a - 1.0)
+        }
+        b
+        .row(view::Live::Is(true))
+        .height(view::Live::Is(Some(strip_h)))
+        .padding(view::Live::Is((9.0, 0.0, 6.0, 0.0)))
+        .gap(view::Live::Is(7.0))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .clips(view::Live::Is(true))
+        .laid_nowhere(view::Live::By(fn() { span().1 < 30.0 }))
+        .width(view::Live::By(fn() { Some(dmax(0.0, span().1)) }))
+        .offset(view::Live::By(fn() { (span().0, 0.0) }))
+        |> ignore
+        b.box(fn(lab) {
+          lab.row(view::Live::Is(true)).gap(view::Live::Is(7.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))) |> ignore
+          app_icon(lab, app, size=14.0)
+          lab.box(fn(n) {
+            // Override default text min-width so short stretches can shrink and ellipsize.
+            n.laid_nowhere(view::Live::By(fn() { span().1 < 52.0 })).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
+            words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { (name_halo, c_s2()) })) |> ignore
+          })
+          |> ignore
+        })
+        |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+  })
+  |> ignore}
+
+fn gap_labels(parent : view::View, w : () -> Double) -> Unit {
+  parent.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
+    o.each(fn() {
+      gaps_now.get()
+    }, fn(g : (Double, Double)) -> Int64 { g.0.to_int64() }, fn(row, g) {
+      row.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+      row.box(fn(b) {
+        let span = fn() {
+          let (a0, z0) = g.get()
+          let a = clamp(x_drawn_of(b, a0, w()), 0.0, w())
+          let z = clamp(x_drawn_of(b, z0, w()), 0.0, w())
+          (a, z - a - 1.0)
+        }
+        b
+        .height(view::Live::Is(Some(strip_h)))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .lies_along(view::Live::Is(view::Lies::Middle))
+        .laid_nowhere(view::Live::By(fn() { span().1 < 72.0 }))
+        .width(view::Live::By(fn() { Some(dmax(0.0, span().1)) }))
+        .offset(view::Live::By(fn() { (span().0, 0.0) }))
+        |> ignore
+        words(b, fn() { t("未录制") }, 11.0, ui_subtle) |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+  })
+  |> ignore}
+
+fn pin_picture(fill : Int64, ground : Int64) -> pixels::Vector {
+  {
+    w: 16.0,
+    h: 21.0,
+    layers: [
+      // Fake drop shadow via offset strokes because Vector paths have no blur.
+      { ..layer(pin_d, 0L, stroke=0x0000001AL, width=2.5), ty: 1.0 },
+      { ..layer(pin_d, 0x00000040L, stroke=0x00000033L, width=1.25), ty: 1.0 },
+      layer(pin_d, ground, stroke=ground, width=1.25),
+      layer(pin_d, fill),
+      layer(pin_hole_d, ground),
+    ],
+  }}
+
+fn pin_covered() -> Int64 {
+  tone(0x484A51FFL, 0xAEB3BBFFL)}
+
+fn mark_after(abs : Double) -> Option[Double] {
+  data()
+  let mut next : Option[Double] = Option::None
+  for m in marks {
+    let better = match next {
+      None => true
+      Some(nv) => m < nv
+    }
+    if m > abs && better {
+      next = Option::Some(m)
+    }
+  }
+  next}
+
+fn marks_layer(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)) |> ignore
+    o.each(fn() {
+      data()
+      let all = marks.copy()
+      arr_sort_double(all)
+      all
+    }, fn(m : Double) -> Int64 { m.to_int64() }, fn(row, m) {
+      let abs = m.untracked()
+      row.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+      pressable(row, fn() { wall(abs) }, fn() { seek_to(abs - t0()) }, fn(b) {
+        let grow : Option[motion::NodeWay] = if abs == just_marked.v && !motion_off() {
+          just_marked.v = -1.0
+          let way = motion::NodeWay::new(0.3)
+          way.go_ms(b, 1.0, 220.0)
+          Option::Some(way)
+        } else {
+          Option::None
+        }
+        let x = fn() { x_drawn_of(b, abs - t0(), w()) }
+        let shows = fn() {
+          match mark_after(abs) {
+            Option::Some(n) => clamp(x_drawn_of(b, n - t0(), w()) - x(), 4.0, 16.0)
+            Option::None => 16.0
+          }
+        }
+        let covered = fn() { shows() < 16.0 }
+        b.reacts(fn() { b.pointed() }, fn(on) {
+          if on {
+            mark_pointed.set(Some(abs))
+          } else if mark_pointed.untracked() == Some(abs) {
+            mark_pointed.set(None)
+          }
+        })
+        b
+        .width(view::Live::By(fn() { Some(shows()) }))
+        .height(view::Live::Is(Some(21.0)))
+        .laid_nowhere(view::Live::By(fn() { x() < 0.0 || x() > w() }))
+        .offset(view::Live::By(fn() { (x() - 8.0, -21.5) }))
+        .on_menu(fn(m) {
+          let at = abs - t0()
+          open_menu(m.wx, m.wy, [
+            Some(MenuEntry::{
+              label: t("移除这里的标记"),
+              key: "",
+              act: fn() {
+                remove_marker(abs)
+                tell(tf("已移除 {0} 的标记", [wall(abs)]), icon="bookmark")
+              },
+            }),
+            None,
+            Some(MenuEntry::{
+              label: t("从这里开始剪辑"),
+              key: "",
+              act: fn() {
+                let fresh = !clipping.untracked()
+                set_clip_start(at)
+                if fresh {
+                  clip_b.set(dmin(span(), clip_a.untracked() + 30000.0))
+                }
+                show_clip()
+              },
+            }),
+            Some(MenuEntry::{
+              label: t("剪辑到这里结束"),
+              key: "",
+              act: fn() {
+                let fresh = !clipping.untracked()
+                set_clip_end(at)
+                if fresh {
+                  clip_a.set(dmax(0.0, clip_b.untracked() - 30000.0))
+                }
+                show_clip()
+              },
+            }),
+          ])
+        })
+        |> ignore
+        b.box(fn(g) {
+          g
+          .width(view::Live::Is(Some(16.0)))
+          .height(view::Live::Is(Some(21.0)))
+          .picture(view::Live::By(fn() { Some(pin_picture(if covered() { pin_covered() } else { ui_text() }, c_bg())) }))
+          |> ignore
+          match grow {
+            Option::Some(way) => g.scale(view::Live::By(fn() { way.shown(g) }), about=view::Pivot::At(0.5, 0.976)) |> ignore
+            Option::None => ()
+          }
+        })
+        |> ignore
+        tip(b, fn() { wall(abs) })
+      })
+      |> ignore
+    }, at_once=true)
+    o.box(fn(f) {
+      f.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+      f.box(fn(g) {
+        let x = fn() {
+          match mark_pointed.get() {
+            Option::Some(abs) => x_drawn_of(g, abs - t0(), w())
+            Option::None => -100.0
+          }
+        }
+        g
+        .width(view::Live::Is(Some(16.0)))
+        .height(view::Live::Is(Some(21.0)))
+        .laid_nowhere(view::Live::By(fn() { mark_pointed.get() is None || x() < 0.0 || x() > w() }))
+        .offset(view::Live::By(fn() { (x() - 8.0, -21.5) }))
+        .picture(view::Live::By(fn() { Some(pin_picture(ui_text(), c_bg())) }))
+        |> ignore
+      })
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn clip_layer(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
+    o.show(fn() { clipping.get() }, fn(c) {
+      let come = motion::NodeWay::new(0.0)
+      come.go_ms(c, 1.0, if motion_off() { 1.0 } else { 160.0 })
+      c.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))).alpha(view::Live::By(fn() { come.shown(c) })) |> ignore
+      let ax = fn() { x_drawn_of(c, clip_a.get(), w()) }
+      let bx = fn() { x_drawn_of(c, clip_b.get(), w()) }
+      c.box(fn(f) {
+        f
+        .height(view::Live::Is(Some(strip_h)))
+        .ground(view::Live::By(fn() { tone(0xEDEEF033L, 0x17181B1FL) }))
+        .width(view::Live::By(fn() { Some(dmax(1.0, clamp(bx(), 0.0, w()) - clamp(ax(), 0.0, w()))) }))
+        .offset(view::Live::By(fn() { (clamp(ax(), 0.0, w()), 0.0) }))
+        |> ignore
+      })
+      |> ignore
+      // Negative y-offsets compensate for vertical column stacking of prior siblings.
+      for end in [0, 1] {
+        let x = fn() { if end == 0 { ax() } else { bx() } }
+        let seen = fn() { if x() < -4.0 || x() > w() + 4.0 { 0.0 } else { 1.0 } }
+        c.box(fn(l) {
+          l
+          .width(view::Live::Is(Some(2.0)))
+          .height(view::Live::Is(Some(strip_h)))
+          .ground(view::Live::By(ui_accent))
+          .alpha(view::Live::By(seen))
+          .offset(view::Live::By(fn() { (x() - 1.0, -(if end == 0 { strip_h } else { 2.0 * strip_h + 22.0 })) }))
+          |> ignore
+        })
+        |> ignore
+        c.box(fn(g) {
+          g
+          .width(view::Live::Is(Some(8.0)))
+          .height(view::Live::Is(Some(22.0)))
+          .radius(view::Live::Is(4.0))
+          .ground(view::Live::By(ui_accent))
+          .edge(view::Live::By(fn() { (1.0, tone(0x00000066L, 0xFFFFFF99L)) }))
+          .alpha(view::Live::By(seen))
+          .offset(view::Live::By(fn() { (x() - 4.0, (strip_h - 22.0) / 2.0 - (if end == 0 { 2.0 * strip_h } else { 3.0 * strip_h + 22.0 })) }))
+          |> ignore
+        })
+        |> ignore
+      }
+    }, at_once=true)
+  })
+  |> ignore}
+
+fn hover_line(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    o.box(fn(l) {
+      l
+      .width(view::Live::Is(Some(1.0)))
+      .height(view::Live::Is(Some(strip_h)))
+      .ground(view::Live::By(fn() { tone(0xA0A4AB99L, 0x4A4E5599L) }))
+      .laid_nowhere(view::Live::By(fn() { hover_now() is None || grabbed.get() != 0 || layer_over() }))
+      .offset(view::Live::By(fn() { (clamp(hover_now().unwrap_or(0.0), 0.0, w()) - 0.5, 0.0) }))
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn away_chip(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    let side = fn(v : view::View) {
+      let (from, len) = shown(v)
+      let p = ax_d(pos_drawn(v), view_len())
+      if p < from {
+        -1
+      } else if p > from + len {
+        1
+      } else {
+        0
+      }
+    }
+    o.box(fn(slot) {
+      slot
+      .width(view::Live::Is(Some(92.0)))
+      .row(view::Live::Is(true))
+      .laid_nowhere(view::Live::By(fn() { side(slot) == 0 }))
+      .lies_along(view::Live::By(fn() { if side(slot) < 0 { view::Lies::Start } else { view::Lies::End } }))
+      .offset(view::Live::By(fn() { (if side(slot) < 0 { 0.0 } else { w() - 92.0 }, -23.0) }))
+      |> ignore
+      pressable(slot, fn() { t("回到播放头") }, fn() { reveal(pos_now()) }, fn(b) {
+        let (hand, _) = answer(b)
+        b
+        .row(view::Live::Is(true))
+        .height(view::Live::Is(Some(19.0)))
+        .padding(view::Live::Is((7.0, 0.0, 7.0, 0.5)))
+        .gap(view::Live::Is(4.0))
+        .radius(view::Live::Is(6.0))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .ground(view::Live::By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
+        |> ignore
+        words(b, fn() { if side(b) < 0 { "‹" } else { "" } }, 12.0, ui_on_accent, weight=600) |> ignore
+        words(b, fn() { wall(t0() + pos_drawn(b)) }, 11.0, ui_on_accent, weight=600) |> ignore
+        words(b, fn() { if side(b) > 0 { "›" } else { "" } }, 12.0, ui_on_accent, weight=600) |> ignore
+      })
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn hover_card(band : view::View, w : () -> Double) -> Unit {
+  let card_w = 288.0
+  let pic_h = (card_w - 8.0) * 9.0 / 16.0
+  let card_h = pic_h + 40.0
+  let last_key : mbt_compat::Ref[String] = mbt_compat::ref_new("")
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    // Hold hover 120 ms on leave to prevent card flicker during transient pointer-leave events.
+    let (left, left_lately) = o.holds_for(120.0)
+    o.reacts(fn() { hover_now() is Some(_) }, fn(over) { if !over { left() } })
+    let shown_now = fn() {
+      (hover_now() is Some(_) || left_lately()) && (grabbed.get() == 0 || grabbed.get() == 3) && !layer_over() &&
+      seam_hovered(o) is None
+    }
+    let fade = motion::NodeWay::new(0.0)
+    // Pin horizontal position on first hover; only the frame updates as the pointer moves.
+    let placed : mbt_compat::Ref[Option[Double]] = mbt_compat::ref_new(None)
+    o.reacts(shown_now, fn(on) {
+      if !on {
+        placed.v = None
+      }
+      fade.go_ms(o, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 100.0 })
+    })
+    let at = fn() {
+      match hover_now() {
+        Option::Some(x) => at_x_drawn(o, x, w())
+        Option::None => signals::untracked(fn() { shown_now_at.v })
+      }
+    }
+    o.box(fn(card) {
+      card
+      .width(view::Live::Is(Some(card_w)))
+      .height(view::Live::Is(Some(card_h)))
+      .radius(view::Live::Is(10.0))
+      .pad(view::Live::Is(4.0))
+      .ground(view::Live::By(c_s1))
+      .edge(view::Live::By(fn() { (1.0, hair2()) }))
+      .shadow(view::Live::By(fn() { (30.0, 8.0, sheet_shadow()) }))
+      .alpha(view::Live::By(fn() { fade.shown(card) }))
+      .laid_nowhere(view::Live::By(fn() { fade.shown(card) <= 0.0 }))
+      .offset(view::Live::By(fn() {
+        let a = at()
+        shown_now_at.v = a
+        let left = match placed.v {
+          Some(x) => x
+          None => {
+            let x = clamp(x_drawn_of(card, a, w()) - card_w / 2.0, 0.0, dmax(0.0, w() - card_w))
+            placed.v = Some(x)
+            x
+          }
+        }
+        // Keep 6 pt clearance above playhead capsule (top at -23).
+        (left, -card_h - 29.0)
+      }))
+      |> ignore
+      card.box(fn(pic) {
+        pic
+        .height(view::Live::Is(Some(pic_h)))
+        .radius(view::Live::Is(6.0))
+        .clips(view::Live::Is(true))
+        .ground(view::Live::Is(picture_ground))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .lies_along(view::Live::Is(view::Lies::Middle))
+        .image(view::Live::By(fn() {
+          data()
+          idx_tick.get() |> ignore
+          let a = at()
+          if seg_at(t0() + a) is None {
+            last_key.v = ""
+            return None
+          }
+          let want = thumb_key(a)
+          // Prefetch nearby 500 ms index thumbs while hovering; skip while scrubbing to avoid decode contention.
+          if grabbed.get() == 0 {
+            let sec = (a / 500.0).floor().to_int()
+            if sec != last_prefetch_sec.v {
+              last_prefetch_sec.v = sec
+              for d in [500.0, -500.0, 1000.0, -1000.0, 1500.0, -1500.0, 2000.0, -2000.0, 3000.0, -3000.0] {
+                let k = thumb_key(a + d)
+                if k != "" {
+                  pic.image_ask(k, card_px)
+                }
+              }
+            }
+          }
+          if want == "" {
+            if missing_long.get() {
+              last_key.v = ""
+            }
+            return if last_key.v == "" { None } else { Some((last_key.v, "", card_px.to_int())) }
+          }
+          let ready = pic.image_ready(want, card_px)
+          let stand_in = last_key.v
+          if ready {
+            last_key.v = want
+          }
+          Some((want, if ready { "" } else { stand_in }, card_px.to_int()))
+        }))
+        .image_contains(view::Live::Is(true))
+        |> ignore
+        let missing_due : mbt_compat::Ref[() -> Unit] = mbt_compat::ref_new(fn() {  })
+        pic.reacts(fn() {
+          data()
+          idx_tick.get() |> ignore
+          let a = at()
+          seg_at(t0() + a) is Some(_) && thumb_key(a) == ""
+        }, fn(missing) {
+          (missing_due.v)()
+          missing_long.set(false)
+          if missing {
+            missing_due.v = pic.at_moment(now() + 300.0, fn() { missing_long.set(true) })
+          } else {
+            missing_due.v = fn() {  }
+          }
+        })
+        words(pic, fn() {
+            data()
+            idx_tick.get() |> ignore
+            if seg_at(t0() + at()) is None {
+              t("这段时间没有录制")
+            } else if missing_long.get() {
+              if thumb_failed(at()) {
+                t("这一段没法生成预览")
+              } else {
+                t("正在生成预览…")
+              }
+            } else {
+              ""
+            }
+          }, 12.0, fn() { 0x8C9199FFL })
+        |> ignore
+      })
+      |> ignore
+      card.box(fn(foot) {
+        foot.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).padding(view::Live::Is((6.0, 0.0, 6.0, 0.0))).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        words(foot, fn() { wall(t0() + picture_time(last_key.v, at())) }, 12.0, ui_text, weight=500) |> ignore
+        words(foot, fn() { ago(t0() + at()) }, 12.0, ui_subtle) |> ignore
+        spring(foot)
+        foot.box(fn(app) {
+          app.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+          app.pick(fn() {
+            data()
+            app_at(at())
+          }, fn(b, name) {
+            b.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+            if name != "" {
+              app_icon(b, name)
+              b.box(fn(n) {
+                n.shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)) |> ignore
+                words(n, fn() { app_name(name) }, 12.0, ui_muted) |> ignore
+              })
+              |> ignore
+              words(b, fn() {
+                match stretch_at(at()) {
+                  Option::Some((a, z)) => clock(z - a)
+                  Option::None => ""
+                }
+              }, 12.0, ui_subtle)
+              |> ignore
+            }
+          }, at_once=true)
+        })
+        |> ignore
+      })
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn layer_over() -> Bool {
+  menu_up.get() ||
+  settings_open.get() ||
+  export_open.get() ||
+  library_open.get() ||
+  clip_playing.get() != "" ||
+  window_options_open.get()}
+
+fn picture_time(key : String, at : Double) -> Double {
+  if !key.starts_with("ix:") {
+    return at
+  }
+  let parts = key.split(":")
+  let ms = match parse(parts[parts.length() - 1]) {
+    Option::Some(Number(v, _)) => v
+    _ => return at
+  }
+  let path = key.slice(3, key.length() - parts[parts.length() - 1].length() - 1)
+  for s in segs {
+    if s.path == path {
+      return s.start - t0() + ms
+    }
+  }
+  at}

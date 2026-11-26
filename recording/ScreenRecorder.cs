@@ -4,51 +4,23 @@ using Vortice.MediaFoundation;
 
 namespace Replay.Recording;
 
-/// <summary>How a recorder records.</summary>
-/// <param name="Folder">Where its segments go.</param>
-/// <param name="Keep">How long segments are kept (older ones deleted as each new one is closed).</param>
-/// <param name="FrameRate">30 or 60: the most frames a second (fewer, none, while the screen changes less).</param>
-/// <param name="MaxHeight">The picture brought down to this height at most (0: the source's own).</param>
-/// <param name="Codec">"HEVC" (H.264 where it cannot be made) or "H264".</param>
-/// <param name="Quality">low, medium, high or ultra (see <see cref="Bitrate"/>).</param>
 public sealed record RecorderOptions(string Folder, TimeSpan Keep, int FrameRate, int MaxHeight, string Codec, string Quality)
 {
     public TimeSpan SegmentLength { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>The default playback device's sound (for a window's recording: only that window's process's sound).</summary>
     public bool SystemAudio { get; init; } = true;
 
-    /// <summary>The default microphone, mixed in (never for a window's recording).</summary>
     public bool Microphone { get; init; }
 
-    /// <summary>How busy the mouse, the keyboard and game controllers were: each segment's <c>.input</c> written of it (none: no file).</summary>
     public InputActivity? Activity { get; init; }
 
-    /// <summary>Tests only: frames taken as FP16 and made SDR as on an HDR desktop, whatever the display is.</summary>
     public bool ForceHdr { get; init; }
 
-    /// <summary>Whether unrecorded gaps (app closed, sleep, paused) do not count toward <see cref="Keep"/>:
-    /// true keeps cumulative recorded duration up to <see cref="Keep"/>, false prunes by wall-clock time.</summary>
     public bool SkipUnrecorded { get; init; } = true;
 }
 
-/// <summary>Something the recorder reports: its level ("info", "warning", "error"), a code and words.</summary>
 public sealed record RecorderEvent(string Level, string Code, string Message);
 
-/// <summary>
-/// Records a monitor or a window into the buffer's folder as segments of <see cref="RecorderOptions.SegmentLength"/>,
-/// each an MP4 of its own starting on a keyframe, the end of one the start of the next.
-/// <para>A clock thread looks at each tick of the frame rate whether a new picture was captured (one comes only when the
-/// screen changed) and, if so, converts and scales it on the GPU and hands it to the hardware encoder, stamped with
-/// the moment it was composed (a variable frame rate, capped at the one asked for: a still screen writes nothing);
-/// an audio thread reads the sound's sources, mixes them on the same timeline (<see cref="AudioMixer"/>) and writes
-/// the mix into the segment its moment belongs to. A segment is closed once its sound is all in; the next one's
-/// writer is made ahead, so the switch takes no time.</para>
-/// <para>A source thread looks every 2 s and on a display change whether the display is in HDR, which the capture is
-/// taken in (FP16 while it is). When that changes it starts the new capture
-/// beside the one in use and hands it to the clock once its first frame is in, which takes it from its next tick on
-/// (the old one let go then): the encoder and the segment go on, the picture fitted into the same size, with no gap.</para>
-/// </summary>
 public sealed class ScreenRecorder : IAsyncDisposable
 {
     private const int MF_E_SAMPLEALLOCATOR_EMPTY = unchecked((int)0xC00D4A3E);
@@ -61,10 +33,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
     private readonly List<Task> closing = new();
 
     private Gpu? gpu;
-    /// <summary>The capture the clock encodes from (changed only by the clock's thread).</summary>
+    // Owned exclusively by ClockLoop thread.
     private ScreenCapture? capture;
 
-    /// <summary>A capture the source thread has ready for the clock to take in the current one's stead.</summary>
     private ScreenCapture? ready;
 
     private Thread? sourceThread;
@@ -84,7 +55,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
     private long qpcAtUtc;
     private DateTimeOffset utcAtQpc;
 
-    /// <summary>A segment being written or waiting for the rest of its sound.</summary>
     private sealed class Open
     {
         public required SegmentWriter Writer;
@@ -112,34 +82,24 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
     public CaptureTarget? Target { get; private set; }
 
-    /// <summary>The recording's picture size (null before it first started).</summary>
     public VideoSize? OutputSize { get; private set; }
 
-    /// <summary>The codec it records with: "HEVC" or "H264" ("" before it first started).</summary>
     public string ActualCodec { get; private set; } = "";
 
-    /// <summary>HEVC was asked for and could not be made: H.264 instead.</summary>
     public bool FellBack { get; private set; }
 
-    /// <summary>The frame rate asked for (90 or 120) the encoder would not take: recording at 60 instead.</summary>
     public bool FrameRateFellBack { get; private set; }
 
-    /// <summary>The frame rate it records at (60 where 90 or 120 was asked and refused).</summary>
     public int ActualFrameRate => options.FrameRate;
 
     public int ActualBitrate { get; private set; }
 
-    /// <summary>Of the last 10 s: the frames encoded and those left out because the encoder was still busy (it fell
-    /// behind), (0, 0) before the first 10 s.</summary>
     public (int Encoded, int Skipped) Pace { get; private set; }
 
-    /// <summary>Recording stopped by itself on an error (it may be started again).</summary>
     public event EventHandler<Exception>? Faulted;
 
-    /// <summary>HEVC could not be made; recording goes on in H.264.</summary>
     public event EventHandler<Exception>? CodecFallback;
 
-    /// <summary>A segment was completed and is in the folder.</summary>
     public event EventHandler<Segment>? SegmentClosed;
 
     private void Report(string level, string code, string message)
@@ -203,7 +163,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
         catch (Exception ex) when (options.FrameRate > 60)
         {
-            // (90 or 120 frames a second the encoder refuses at this size, an older GPU's: 60, and that said)
             Report("warning", "video.frameRateUnavailable", $"{options.FrameRate} fps could not be encoded: " + ex.Message);
             FrameRateFellBack = true;
             options = options with { FrameRate = 60 };
@@ -237,7 +196,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // (no thumbnails of its own: the replay window makes them from the segments' key frames, as before)
             Report("warning", "thumbnails.unavailable", ex.Message);
         }
 
@@ -262,8 +220,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         => (display.Hdr ? $"HDR, SDR white {display.SdrWhiteNits:0} nits, peak {display.PeakNits:0} nits" : "SDR")
            + (options.ForceHdr && !display.Hdr ? " (FP16 capture forced)" : "");
 
-    /// <summary>A capture of <paramref name="target"/> (FP16 on an HDR display), which stops the recording when it is
-    /// gone.</summary>
     private ScreenCapture MakeCapture(CaptureTarget target, DisplayColor display)
     {
         var made = new ScreenCapture(gpu!, target, options.FrameRate, display.Hdr || options.ForceHdr, display,
@@ -282,25 +238,16 @@ public sealed class ScreenRecorder : IAsyncDisposable
         return made;
     }
 
-    /// <summary>The display's settings changed (WM_DISPLAYCHANGE): its HDR looked at again at once, not at the next 2 s.</summary>
     public void DisplayChanged() => displayChanged = true;
 
     private volatile string? renewAsked;
     private long changedAt;
 
-    /// <summary>A new capture started beside the one in use (the screen woke: a capture made before the screen went
-    /// off gave no new frame after it came on, 2026-11-21, ten minutes of a still picture over the apps in use).</summary>
+    // WGC captures created before display sleep can stop producing frames after wake; renew alongside the active one.
     public void RenewCapture(string why) => renewAsked = why;
 
-    /// <summary>Something on the screen surely changed (another window came to the front): the capture is expected to
-    /// give a frame soon after.</summary>
     public void ScreenChanged() => Volatile.Write(ref changedAt, Native.NowHns());
 
-    /// <summary>
-    /// Whether the display is in HDR, looked at every 2 s and on a display change: the capture taken as FP16 while it
-    /// is. When that changes a new capture is started beside the one in use and handed to the clock once its first
-    /// frame is in; one that gives none in 1.5 s is dropped and tried again at the next look.
-    /// </summary>
     private void SourceLoop()
     {
         const long GiveUp = 15_000_000, DisplayEvery = 20_000_000;
@@ -311,12 +258,9 @@ public sealed class ScreenRecorder : IAsyncDisposable
             var display = capture!.Display;
             var lastDisplay = Native.NowHns();
             var intendedHdr = capture.Hdr;
-            // (the capture last handed to the clock)
             var published = capture;
             ScreenCapture? pending = null;
             long pendingSince = 0;
-            // (the capture's newest frame as last seen, and when it came; delegated to StallWatcher so continuous
-            // gameplay input cannot starve the 2 s timer and repeated failed renewals escalate to a full GPU restart)
             var stall = new StallWatcher(published.Frames, Native.NowHns());
             var pendingFromStall = false;
             var stallTest = Environment.GetEnvironmentVariable("REPLAY_TEST_STALL") is not null;
@@ -341,8 +285,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     }
                     else if (pending is null)
                     {
-                        // (a monitor only while the screen is on: input and the window in front say nothing of whether
-                        // a window recorded changed; tests only: REPLAY_TEST_STALL)
                         var action = stall.Evaluate(now, (!primary.IsWindow && DisplayMemory.ScreenIsOn) || stallTest);
                         if (action == StallAction.Restart)
                         {
@@ -452,7 +394,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    /// <summary>The recording's one encoder (made with its first segment's writer, kept till it stops).</summary>
     private VideoEncoder? encoder;
 
     private SegmentWriter MakeWriter(VideoSize size, bool hevc)
@@ -474,7 +415,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
         var allocator = new IMFVideoSampleAllocatorEx(MediaFactory.MFCreateVideoSampleAllocatorEx(typeof(IMFVideoSampleAllocatorEx).GUID));
         allocator.SetDirectXManager(gpu.Manager);
         using var attrs = MediaFactory.MFCreateAttributes(1);
-        // D3D11_BIND_RENDER_TARGET: the video processor writes into them
+        // D3D11_BIND_RENDER_TARGET
         attrs.Set(Native.SA_D3D11_BINDFLAGS, 0x20u);
         using var type = MediaFactory.MFCreateMediaType();
         type.Set(Native.MT_MAJOR_TYPE, Native.MediaType_Video);
@@ -482,30 +423,17 @@ public sealed class ScreenRecorder : IAsyncDisposable
         type.Set(Native.MT_FRAME_SIZE, Native.Pack((uint)size.Width, (uint)size.Height));
         type.Set(Native.MT_INTERLACE_MODE, 2u);
         type.Set(Native.MT_PIXEL_ASPECT_RATIO, Native.Pack(1, 1));
-        // (2 initial, 6 max: no B-frames and ClockLoop gates via Ready(encoder); starting at 2 and capping at 6 keeps
-        // 4K NV12 pool at ~24-71 MiB instead of 48-285 MiB)
+        // 2 initial, 6 max (no B-frames; ClockLoop gates via Ready): caps 4K NV12 pool at ~24-71 MiB.
         allocator.InitializeSampleAllocatorEx(2, 6, attrs, type);
         return allocator;
     }
 
-    /// <summary>The shortest time between two frames: the frame rate asked for, as a cap.</summary>
     private long Period => (long)Math.Round(10_000_000.0 / options.FrameRate);
 
-    /// <summary>Where moment <paramref name="hns"/> is on the sound's timeline (48 kHz frames from the start).</summary>
     private long AudioFrameOf(long hns) => (long)Math.Round((hns - t0) * (double)AudioMixer.Rate / 10_000_000.0);
 
     private DateTimeOffset UtcOf(long hns) => utcAtQpc + TimeSpan.FromTicks(hns - qpcAtUtc);
 
-    /// <summary>
-    /// The picture's clock: at most once a period it looks whether the capture has a new frame (Windows.Graphics.Capture
-    /// gives one only when something on the screen changed) and encodes it, stamped with the moment it was composed;
-    /// while nothing changes nothing is written. A segment is a stretch of time: it ends at its length (or at a flush)
-    /// whatever was drawn, and the next begins there with the picture as it is then, a keyframe at its 0. Within a
-    /// segment a frame is a keyframe when 2 s have passed since the last one and either 30 frames came since (the
-    /// screen moving, at 15 fps or more: one every 2 s) or the screen was still for 2 s before it. A screen that changes
-    /// only a little now and then (a caret blinking, a clock's seconds) so gets none but its segment's first: a 4K
-    /// keyframe is some 200 KB, the frames between it a few KB.
-    /// </summary>
     private void ClockLoop(SegmentWriter first)
     {
         var mmcssTask = 0u;
@@ -517,19 +445,13 @@ public sealed class ScreenRecorder : IAsyncDisposable
         Task<SegmentWriter>? next = null;
         var length = options.SegmentLength.Ticks;
         const long KeyEvery = 20_000_000;
-        // (2 s at 15 fps: a screen that moves at least that much is moving; video at 24-60 fps among it)
         const long KeyFrames = 30;
         long segmentStart = 0, lastTime = 0, lastKey = 0, seen = 0, sinceKey = 0;
         const long PaceEvery = 100_000_000;
         long paceStart = 0;
-        // (an encoder that keeps up is waited for up to 4 frames' time before a frame is left out: one frame now and then
-        // takes it longer than a frame's time, a 4K keyframe (each segment's first, every 2 s of a moving screen), the
-        // GPU waking from idle; an RTX 5080 so lost 1 frame in 30 s at a whole frame's wait, 1 or 2 in 10 s at half.
-        // Late twice running is it falling behind)
+        // Tolerate a single late frame (up to 4 periods, e.g. 4K keyframe or GPU wake); skip only on consecutive late frames.
         const long Patience = 4;
         var late = false;
-        // whether the encoder takes a frame in now: within a frame's time (it keeps up); else, the frame before taken
-        // in on time, within 4 frames' (late once: a keyframe, the GPU waking); late twice running, it falls behind
         bool Ready(VideoEncoder encoder)
         {
             if (encoder.ReadyWithin(TimeSpan.FromTicks(Period)))
@@ -566,11 +488,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
             next = Task.Run(() => MakeWriter(OutputSize!.Value, encode!.Hevc));
             var tick = t0 + Period;
             paceStart = t0;
-            // (a frame is taken as it comes (the capture's event wakes the clock), where a period's credit has come since
-            // the last: up to one frame's worth kept, one taken at 3/4 of it, so a frame that comes a hair early is not
-            // put off a whole period, nor do more than the rate's frames a second go in. Taken only at the clock's ticks
-            // before, a frame that came just after a tick waited for the next, and on a 240 Hz screen a third of a 60 fps
-            // recording's frames were 33 ms apart (the user, 2026-11-21: 「帧数也不够满」))
+            // Credit-based pacing (trigger at 0.75 period) avoids 33 ms cadence drops on 240 Hz displays while capping average FPS.
             var credit = 0.0;
             var creditAt = t0;
             double Credit(long at)
@@ -580,7 +498,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
                 return credit;
             }
 
-            // (a frame waiting for its credit: woken as it has come, not at the next tick)
             var creditDue = long.MaxValue;
             while (!stopAsked)
             {
@@ -597,15 +514,12 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     tick += Period;
                     if (tick < now - Period)
                     {
-                        // (the clock fell behind (the computer stalled): on from now, not a run of ticks to catch up)
                         tick = now + Period;
                     }
                 }
 
                 if (Interlocked.Exchange(ref ready, null) is { } swapped)
                 {
-                    // another capture (HDR on or off): its picture from now on,
-                    // the first of it at this tick
                     var old = capture;
                     segCaptured += Math.Max(0, old.Frames - segCapBase);
                     capture = swapped;
@@ -618,8 +532,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
                 var flush = Interlocked.Exchange(ref flushAsked, null);
                 if (now >= segmentStart + length || flush is not null)
                 {
-                    // the boundary: the segment's length, or now for a flush; where the clock stalled for longer than a
-                    // segment, the next one starts now, the stretch between a gap like any other
                     var boundary = flush is null ? segmentStart + length : now;
                     var segDur = boundary - segmentStart;
                     var segCapTotal = segCaptured + Math.Max(0, capture.Frames - segCapBase);
@@ -652,15 +564,10 @@ public sealed class ScreenRecorder : IAsyncDisposable
                 }
                 else if (capture.Frames != seen && Credit(now) < 0.75)
                 {
-                    // (a frame come before a period's credit: taken as the credit has come, the newest then)
                     creditDue = now + (long)((0.75 - credit) * Period) + 1;
                 }
                 else if (capture.Frames != seen && !Ready(encoder!))
                 {
-                    // the encoder still busy with the frames it has (a GPU too slow for this size and rate, or its
-                    // video engine shared with a video being played): this tick's frame left out, not waited for, so
-                    // the clock keeps time and the encoder is given no more than it can do; the next tick takes the
-                    // newest picture (seen left as it is)
                     skipped++;
                     segSkipped++;
                 }
@@ -670,7 +577,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     segEncoded++;
                     seen = capture.Frames;
                     credit -= 1.0;
-                    // its own moment (when it was composed), after the frame before it and not after now
                     var at = Math.Clamp(capture.LatestTime - segmentStart, lastTime + 10_000, Math.Max(lastTime + 10_000, now - segmentStart));
                     var key = at - lastKey >= KeyEvery && (sinceKey >= KeyFrames || at - lastTime >= KeyEvery);
                     EncodeFrame(current.Writer, at, key);
@@ -683,14 +589,12 @@ public sealed class ScreenRecorder : IAsyncDisposable
                 }
                 else
                 {
-                    // (nothing new on the screen: the thumbnails' read-backs taken all the same, not only as the next
-                    // frame is encoded; a still screen left them waiting, and the segment was written without them)
+                    // Collect pending GPU thumbnail read-backs even on idle screens so segments do not close without thumbnails.
                     CollectThumbs();
                 }
 
                 if (now - paceStart >= PaceEvery)
                 {
-                    // (said as it starts and as it ends, not every 10 s it lasts)
                     if ((skipped > 0) != (Pace.Skipped > 0))
                     {
                         Report("info", "video.behind", skipped > 0
@@ -717,7 +621,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
             Report("error", "video.failed", ex.ToString());
             if (current is not null)
             {
-                // (what was written of it kept where it can be)
                 try
                 {
                     var end = Native.NowHns();
@@ -730,8 +633,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
         finally
         {
-            // (the last thumbnails' read-backs taken here, on the thread that began them, before the segments are
-            // completed)
+            // Drain final thumbnail read-backs on ClockLoop (the owning D3D11 thread) before completing segments.
             try
             {
                 thumbnailer?.Collect(all: true);
@@ -749,8 +651,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
             if (next is not null)
             {
-                // (the writer made ahead let go of before what it was made on is torn down: waited for with the segments
-                // still completing, below)
                 var aborting = next.ContinueWith(t =>
                 {
                     if (t.IsCompletedSuccessfully)
@@ -765,9 +665,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
             }
         }
 
-        // the sound's thread finishes the segments still open, then everything is let go
         audioThread?.Join(TimeSpan.FromSeconds(5));
-        // (the source thread stopped too, where the clock ended on an error)
         stopAsked = true;
         sourceThread?.Join(TimeSpan.FromSeconds(5));
         CloseDue(long.MaxValue);
@@ -799,8 +697,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
     private volatile bool stopRequestedByCaller;
 
-    /// <summary>Till <paramref name="dueHns"/>, or a frame comes (<paramref name="frame"/>, the capture's event), the
-    /// sooner.</summary>
     private static unsafe void Wait(IntPtr timer, long dueHns, IntPtr frame)
     {
         var left = dueHns - Native.NowHns();
@@ -844,8 +740,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         return open;
     }
 
-    /// <summary>The segment ends <paramref name="durationHns"/> after its start; it is completed once the sound up to
-    /// <paramref name="audioEnd"/> is in it.</summary>
     private void Close(Open open, long durationHns, long audioEnd, TaskCompletionSource? flushed)
     {
         lock (segmentsGate)
@@ -857,7 +751,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    /// <summary>The closed segments whose sound is all in (or that waited too long for it) completed, each on a task.</summary>
     private void CloseDue(long nowHns)
     {
         lock (segmentsGate)
@@ -876,10 +769,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
                     continue;
                 }
 
-                // (the sound's thread held up (a system device going away as the screen turned off blocked it a
-                // minute, 2026-11-21): the rest of its sound silence, not a track 20 s shorter than its picture. Written
-                // with the rest of its completing, on its own task: written here, under the segments' lock on the clock's
-                // thread, up to a segment's silence encoded held up the frames and the sound's thread meanwhile)
+                // Pad missing audio with silence on the completion task (never under segments lock on ClockLoop) if the audio thread stalled.
                 var lateBy = audioSources > 0 && (mixer?.Emitted ?? 0) < open.AudioEnd
                     ? open.AudioEnd - Math.Max(open.AudioStart, mixer?.Emitted ?? 0)
                     : 0;
@@ -910,7 +800,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
     {
         try
         {
-            // (the input's activity over the segment's time, each of its 100 ms as its levels are)
             var input = options.Activity?.Read(open.StartHns, SegmentWriter.Buckets(open.DurationHns));
             var segment = open.Writer.Finish(open.DurationHns, input);
             if (segment is not null)
@@ -949,7 +838,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
             }
             catch (SharpGen.Runtime.SharpGenException ex) when (ex.HResult == MF_E_SAMPLEALLOCATOR_EMPTY && tries < 50)
             {
-                // (every texture still with the encoder: it catches up in a moment)
                 Thread.Sleep(2);
             }
         }
@@ -961,7 +849,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
             var resource = dxgi.GetResource(Native.IID_ID3D11Texture2D);
             using var texture = new ID3D11Texture2D(resource);
             var slice = dxgi.SubresourceIndex;
-            // (a texture's buffer says no length till it is given one, and the sink writer refuses an empty sample)
+            // D3D11 texture media buffers report 0 length until set; SinkWriter rejects empty samples.
             using (var surface = buffer.QueryInterface<IMF2DBuffer>())
             {
                 buffer.CurrentLength = surface.ContiguousLength;
@@ -980,7 +868,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    /// <summary>The read-backs of thumbnails the GPU has done taken (on the clock's thread, as all of the thumbnails').</summary>
+    // Must run on ClockLoop thread (all Thumbnailer GPU calls are affine to it).
     private void CollectThumbs()
     {
         if (thumbnailer is null)
@@ -1000,7 +888,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    /// <summary>The read-backs of thumbnails the GPU has done taken, and this frame's begun where one is due.</summary>
     private void Thumbs(SegmentWriter writer, ID3D11Texture2D sdrBgra, int srcW, int srcH, long time)
     {
         if (thumbnailer is null)
@@ -1052,9 +939,7 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
         var sources = new AudioSource?[kinds.Count];
         var retryAt = new long[kinds.Count];
-        // (a source lost or not opened: said again once it is open, so the replay window's warning goes)
         var troubled = new bool[kinds.Count];
-        // (the frames are stamped with the moment they were composed, the sound with the moment it was played: one clock)
         var local = new AudioMixer(kinds.Count, t0, 0);
         mixer = local;
         long lastDeviceCheck = 0;
@@ -1102,7 +987,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
 
                 if (now - lastDeviceCheck > 30_000_000)
                 {
-                    // (headphones plugged in, another default chosen: the source moved to the device now the default)
                     lastDeviceCheck = now;
                     for (var i = 0; i < kinds.Count; i++)
                     {
@@ -1182,7 +1066,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    /// <summary>A piece of the mix written into the segments its moments belong to.</summary>
     private void Route(long at, float[] mix, float[][] each, int offset, int frames)
     {
         lock (segmentsGate)
@@ -1208,8 +1091,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         }
     }
 
-    /// <summary>The segment being written closed now (its sound waited for), so that it can be read; recording goes
-    /// on in the next.</summary>
     public Task FlushAsync(CancellationToken cancel = default)
     {
         if (!IsRunning)
@@ -1268,7 +1149,6 @@ public sealed class ScreenRecorder : IAsyncDisposable
         capture?.Dispose();
         capture = null;
         Interlocked.Exchange(ref ready, null)?.Dispose();
-        // (the segments' writers it was giving frames to are all finished or let go of by now)
         encoder?.Dispose();
         encoder = null;
         gpu?.Dispose();
@@ -1295,6 +1175,4 @@ public sealed class ScreenRecorder : IAsyncDisposable
     }
 }
 
-/// <summary>The screen capture stopped delivering frames and could not be recovered by renewing the session alone, so
-/// the host should start the recorder again with a fresh GPU device (not an encoder fault).</summary>
 public sealed class CaptureStalledException(string message) : Exception(message);

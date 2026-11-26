@@ -4,15 +4,6 @@ using System.Text;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// Where the windows were (windows.jsonl): a line each time what is on the screen changed, every visible top-level
-/// window front to back with its process, title, bounds (DWM's extended frame bounds: what is drawn, without the
-/// invisible resize border; physical pixels, the virtual screen's), state and owner, and the primary display the
-/// recording is of. The replay window finds by it the window under a point at a moment, and exports one window's part
-/// of the picture. Driven by the system's window events (foreground, moves and sizes, shown, hidden, minimized,
-/// renamed), at most ten lines a second, a line only when something differs from the last. Kept on this computer
-/// only, as the recording is.
-/// </summary>
 internal sealed class WindowTrack : IDisposable
 {
     private const uint EventSystemForeground = 0x0003;
@@ -123,9 +114,6 @@ internal sealed class WindowTrack : IDisposable
     private string last = "";
     private bool active;
 
-    /// <summary>Whether lines are written (not while recording is held: locked, paused, turned off). Held, nothing of
-    /// the desktop is watched: its six hooks let go of (each called for every window's every move and name change on the
-    /// desktop) and its 100 ms timer stopped; taken again as it goes on.</summary>
     public bool Active
     {
         get => active;
@@ -215,7 +203,6 @@ internal sealed class WindowTrack : IDisposable
             return;
         }
 
-        // (a window's own: not its caret's, a scroll bar's or a control's inside it)
         if (idObject != ObjIdWindow || idChild != 0 || hwnd == IntPtr.Zero)
         {
             return;
@@ -244,7 +231,6 @@ internal sealed class WindowTrack : IDisposable
 
     private static IntPtr GetAncestorRoot(IntPtr hwnd) => GetAncestor(hwnd, 2);
 
-    /// <summary>A line written now if what is on the screen changed (or `force`, the foreground changed).</summary>
     public void Flush(bool force)
     {
         if (!Active || (!dirty && !force))
@@ -270,7 +256,6 @@ internal sealed class WindowTrack : IDisposable
         }
     }
 
-    /// <summary>The next line written whatever the last one was (after a pause: the reader starts again from it).</summary>
     public void Restart()
     {
         last = "";
@@ -285,14 +270,12 @@ internal sealed class WindowTrack : IDisposable
             var sb = new StringBuilder();
             var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
             GetMonitorInfo(MonitorFromPoint(new Point(), 1), ref info);
-            // (the window in front as the picture shows it: under ScreenReplay where it is kept out of capture)
             var fg = ForegroundApp.Shown(GetForegroundWindow());
             sb.Append($"\"screen\":[{info.Monitor.Left},{info.Monitor.Top},{info.Monitor.Right - info.Monitor.Left},{info.Monitor.Bottom - info.Monitor.Top}],");
             sb.Append($"\"fg\":{fg.ToInt64()},\"w\":[");
             var first = true;
             EnumWindows((hwnd, _) =>
             {
-                // (one kept out of capture is not in the picture: what is under it is)
                 if (!IsWindowVisible(hwnd) || ForegroundApp.Unseen(hwnd))
                 {
                     return true;
@@ -327,7 +310,6 @@ internal sealed class WindowTrack : IDisposable
                 var cls = new StringBuilder(64);
                 GetClassName(hwnd, cls, 64);
                 var className = cls.ToString();
-                // (the desktop and the taskbar are no one's window to export)
                 if (className is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
                 {
                     return true;
@@ -416,11 +398,8 @@ internal sealed class WindowTrack : IDisposable
         return sb.Append('"').ToString();
     }
 
-    /// <summary>Lines older than `keep` dropped (the buffer's window), the newest before them kept as the start.</summary>
     private DateTimeOffset lastPrune = DateTimeOffset.MinValue;
 
-    /// <summary>Every record deleted (the replay window's 删除全部录像); the windows as they are now written again at the
-    /// next flush.</summary>
     public void Clear()
     {
         try
@@ -438,7 +417,6 @@ internal sealed class WindowTrack : IDisposable
     {
         try
         {
-            // (at most every 10 minutes: the file is rewritten whole, and the replay window then reads it again)
             if (!File.Exists(path) || new FileInfo(path).Length < 4 << 20 || DateTimeOffset.UtcNow - lastPrune < TimeSpan.FromMinutes(10))
             {
                 return;
@@ -470,7 +448,6 @@ internal sealed class WindowTrack : IDisposable
                 kept.Insert(0, before);
             }
 
-            // (nothing older than the window: nothing to rewrite)
             if (kept.Count >= lines.Length)
             {
                 return;

@@ -3,8 +3,6 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// Tracks frontmost application (`apps.jsonl` + `AppIcons/<key>.png` & `.txt`) and on-screen window geometry
-/// (`windows.jsonl`) matching `recorder/Program.cs`, `recorder/WindowTrack.cs`, `app/band_parts.mbt`, and `app/windows_data.mbt`.
 public final class WindowTracker: @unchecked Sendable {
   private static let excludedBundleIDs: Set<String> = [
     "dev.pengx17.screenreplay",

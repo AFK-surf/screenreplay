@@ -1,0 +1,40 @@
+import "mbt_compat"
+
+fn is_mac() -> Bool {
+  rp_is_mac() != 0}
+
+fn path_sep() -> String {
+  if is_mac() {
+    "/"
+  } else {
+    "\\"
+  }}
+
+fn pjoin(dir : String, name : String) -> String {
+  if dir == "" {
+    return name
+  }
+  if name == "" {
+    return dir
+  }
+  let base = str_trim_end_chars(dir, "/\\")
+  let tail = str_trim_start_chars(name, "/\\")
+  if base == "" && (dir.starts_with("/") || dir.starts_with("\\")) {
+    path_sep() + tail
+  } else {
+    base + path_sep() + tail
+  }}
+
+fn pbase(path : String) -> String {
+  let slash = str_rev_find(path, "/")
+  let bslash = str_rev_find(path, "\\")
+  let idx = match (slash, bslash) {
+    (Some(a), Some(b)) => Some(imax(a, b))
+    (Some(a), None) => Some(a)
+    (None, Some(b)) => Some(b)
+    (None, None) => None
+  }
+  match idx {
+    Some(i) => path.slice(i + 1, path.length())
+    None => path
+  }}

@@ -2,25 +2,16 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recording;
 
-/// <summary>Which sound a source takes.</summary>
 internal enum AudioKind
 {
-    /// <summary>What the default playback device plays (WASAPI loopback).</summary>
     System,
 
-    /// <summary>The default microphone.</summary>
     Microphone,
 
-    /// <summary>What one process and its children play, alone (process loopback).</summary>
     Process,
 }
 
-/// <summary>
-/// One WASAPI capture stream in shared mode, asked for as 48 kHz stereo 32-bit float (the audio engine converts the
-/// rate and the channels: AUTOCONVERTPCM), read by polling. Its packets come with the performance counter's time of
-/// their first frame, which places them on the recording's timeline. Called through the COM interfaces' tables
-/// directly (IMMDeviceEnumerator, IMMDevice, IAudioClient, IAudioCaptureClient), which trimming leaves as they are.
-/// </summary>
+// Direct COM vtable calls to remain trimming/AOT-safe.
 internal sealed unsafe class AudioSource : IDisposable
 {
     public const int Rate = 48000;
@@ -54,7 +45,6 @@ internal sealed unsafe class AudioSource : IDisposable
 
     public AudioKind Kind { get; }
 
-    /// <summary>The device's id when it was opened (system sound, microphone): reopened when the default changes.</summary>
     public string DeviceId { get; }
 
     private AudioSource(AudioKind kind, IntPtr client, bool asFloat, string deviceId)
@@ -79,7 +69,6 @@ internal sealed unsafe class AudioSource : IDisposable
         Size = 0,
     };
 
-    /// <summary>The id of the default device of <paramref name="flow"/> (0 playback, 1 capture); "" none.</summary>
     public static string DefaultDeviceId(int flow)
     {
         var device = DefaultDevice(flow);
@@ -112,8 +101,7 @@ internal sealed unsafe class AudioSource : IDisposable
         return id;
     }
 
-    /// <summary>COM started on this thread once (the sound's thread asks for the default device every 30 s, and opens
-    /// sources again after a failure: each start before counted one more, never ended).</summary>
+    // Initialize COM once per thread to avoid leaking refcounts across repeated 30 s endpoint checks.
     [ThreadStatic]
     private static bool comStarted;
 
@@ -147,7 +135,6 @@ internal sealed unsafe class AudioSource : IDisposable
         }
     }
 
-    /// <summary>The default playback device's sound, or the default microphone; null when there is no such device.</summary>
     public static AudioSource? OpenDevice(AudioKind kind)
     {
         var device = DefaultDevice(kind == AudioKind.Microphone ? 1 : 0);
@@ -183,7 +170,6 @@ internal sealed unsafe class AudioSource : IDisposable
         }
     }
 
-    /// <summary>What process <paramref name="pid"/> and the processes it started play, nothing else.</summary>
     public static AudioSource OpenProcess(uint pid)
     {
         StartCom();
@@ -205,8 +191,7 @@ internal sealed unsafe class AudioSource : IDisposable
             Native.Check(Native.ActivateAudioInterfaceAsync("VAD\\Process_Loopback", in Native.IID_IAudioClient, (IntPtr)variant, handler, out operation), "ActivateAudioInterfaceAsync");
             if (Native.WaitForSingleObject(done, 5000) != 0)
             {
-                // (its handler may still signal the event later: kept open, never closed under it (a handle closed and
-                // made again for something else would be signalled in its place))
+                // Keep event handle open on timeout; the async handler may still signal it later.
                 answered = false;
                 throw new TimeoutException("process loopback activation did not complete");
             }
@@ -253,7 +238,7 @@ internal sealed unsafe class AudioSource : IDisposable
         Native.Check(hr, "IAudioClient.Initialize");
         if ((flags & StreamEventCallback) != 0)
         {
-            // (process loopback wants an event to signal; it is polled all the same)
+            // Process loopback requires an event handle even though capture is polled.
             wake = Native.CreateEvent(IntPtr.Zero, false, false, IntPtr.Zero);
             // IAudioClient::SetEventHandle (13)
             Native.Check(((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)Slot<IntPtr>(client, 13))(client, wake), "IAudioClient.SetEventHandle");
@@ -272,8 +257,6 @@ internal sealed unsafe class AudioSource : IDisposable
         Native.Check(((delegate* unmanaged[Stdcall]<IntPtr, int>)Slot<IntPtr>(client, 10))(client), "IAudioClient.Start");
     }
 
-    /// <summary>Hands each waiting packet to <paramref name="take"/>: its time (100 ns, the performance counter's) and
-    /// its frames, stereo float at 48 kHz. Throws when the device went away.</summary>
     public void Drain(Action<long, float[], int> take)
     {
         for (var guard = 0; guard < 64; guard++)
@@ -317,7 +300,6 @@ internal sealed unsafe class AudioSource : IDisposable
                     }
                 }
 
-                // (a packet's time missing: taken as having just ended)
                 var at = qpc != 0 ? (long)qpc : Native.NowHns() - n * 10_000_000L / Rate;
                 take(at, scratch, n);
             }
@@ -348,10 +330,7 @@ internal sealed unsafe class AudioSource : IDisposable
         }
     }
 
-    /// <summary>
-    /// The IActivateAudioInterfaceCompletionHandler ActivateAudioInterfaceAsync calls back: a COM object made by hand
-    /// (its table of four functions, a reference count and the event it sets), agile, so any thread may call it.
-    /// </summary>
+    // Hand-written agile IActivateAudioInterfaceCompletionHandler COM object (any thread may invoke it).
     private static class CompletionHandler
     {
         private static readonly IntPtr Table = MakeTable();
@@ -366,7 +345,7 @@ internal sealed unsafe class AudioSource : IDisposable
             return (IntPtr)table;
         }
 
-        // the object: { table, references, event }
+        // Layout: { vtable, refCount, eventHandle }
         public static IntPtr Create(IntPtr done)
         {
             var obj = (IntPtr*)NativeMemory.Alloc((nuint)(3 * sizeof(IntPtr)));

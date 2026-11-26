@@ -1,20 +1,11 @@
 namespace Replay.Recording;
 
-/// <summary>
-/// The sources' sound put on one timeline and mixed: frame <c>p</c> of the timeline is the moment
-/// <c>T0 + p / 48 kHz</c>, T0 the recording's first video frame, so that the sound is in step with the picture by
-/// construction. Each source's packets land where their time says (within 10 ms of where the one before ended they are
-/// taken as following it without a break, so the small jitter of packet times never makes a click); what no source
-/// filled is silence. The mix is given out a little behind real time (<see cref="Latency"/>), once every source has
-/// delivered what it has of it.
-/// </summary>
 internal sealed class AudioMixer
 {
     public const int Rate = AudioSource.Rate;
     private const int Capacity = Rate * 4;
     private const int Snap = Rate / 100;
 
-    /// <summary>How far behind now the mix is given out (100 ns).</summary>
     public const long Latency = 1_200_000;
 
     private readonly float[][] rings;
@@ -40,12 +31,10 @@ internal sealed class AudioMixer
         emitted = startFrame;
     }
 
-    /// <summary>Where on the timeline the mix has been given out to.</summary>
     public long Emitted => emitted;
 
     public int Sources => rings.Length;
 
-    /// <summary>A packet of source <paramref name="source"/>: its time and its frames (stereo).</summary>
     public void Add(int source, long timeHns, float[] samples, int frames)
     {
         var at = (long)Math.Round((timeHns - t0) * (double)Rate / 10_000_000.0);
@@ -70,12 +59,9 @@ internal sealed class AudioMixer
         }
     }
 
-    /// <summary>The mix up to <paramref name="nowHns"/> less the latency given to <paramref name="sink"/> in pieces:
-    /// (their first frame on the timeline, the mix, each source's own, the offset in them, the frames).</summary>
     public void Emit(long nowHns, Action<long, float[], float[][], int, int> sink)
     {
         var until = (long)Math.Floor((nowHns - Latency - t0) * (double)Rate / 10_000_000.0);
-        // (a stall longer than the ring: what is too old is silence, given out at once)
         while (until > emitted)
         {
             var n = (int)Math.Min(until - emitted, mix.Length / 2);

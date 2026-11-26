@@ -3,9 +3,6 @@ import CoreGraphics
 import Darwin
 import Foundation
 
-/// Unix socket RPC daemon for `ScreenReplayHelper`, modeled after `StillfailHelper/Daemon.swift`.
-/// Supports: `hello`, `status`, `permissions.show`, `record.configure`, `record.start`, `record.pause`,
-/// `record.flush`, `record.stop`, `watch`, `restart`, `quit`.
 public final class HelperDaemon: @unchecked Sendable {
   public let socketPath: String
   public let token: String

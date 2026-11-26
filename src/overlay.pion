@@ -1,0 +1,310 @@
+import "mbt_compat"
+import "motion"
+import "signals"
+import "view"
+
+fn tip(anchor : view::View, label : () -> String, shortcut? : String, side? : view::Side) -> Unit {
+  let shortcut = match shortcut { Some(__mbt_v) => __mbt_v, None => "" }
+  let side = match side { Some(__mbt_v) => __mbt_v, None => view::Side::Top }
+
+  sf_tip_node(tips, anchor, label, side=side, shortcut=shortcut) |> ignore}
+
+fn shortcut_words(action : String) -> String {
+  let mac = is_mac()
+  match action {
+    "play" => "Space"
+    "full" => "F"
+    "back15" => "J"
+    "on15" => "L"
+    "clip" => "C"
+    "mark" => "M"
+    "escape" => "Esc"
+    "undo" => if mac { "⌘Z" } else { "Ctrl+Z" }
+    "redo" => if mac { "⇧⌘Z" } else { "Ctrl+Y" }
+    "clip-before" => "["
+    "clip-after" => "]"
+    "pic-fit" => "0"
+    "save" => "Enter"
+    "settings" => if mac { "⌘," } else { "Ctrl+," }
+    _ => ""
+  }}
+
+pub struct MenuEntry {
+  label : String
+  key : String
+  act : () -> Unit
+}
+
+fn open_menu(x : Double, y : Double, entries : Array[Option[MenuEntry]]) -> Unit {
+  menu_anchor.v = None
+  menu_shown.set(Some((x, y, entries)))
+  menu_up.set(true)}
+
+fn open_menu_under(anchor : view::View, entries : Array[Option[MenuEntry]], above? : Bool) -> Unit {
+  let above = match above { Some(__mbt_v) => __mbt_v, None => false }
+
+  menu_shown.set(Some((0.0, 0.0, entries)))
+  menu_anchor.v = Some(anchor.id())
+  menu_above.v = above
+  menu_up.set(true)}
+
+fn close_menu() -> Unit {
+  menu_shown.set(None)
+  menu_up.set(false)}
+
+fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> Unit {
+  if segs.is_empty() {
+    return
+  }
+  open_menu(x, y, [
+    Some(MenuEntry::{
+      label: t(if at_playhead { "在当前位置加标记" } else { "在这里加标记" }),
+      key: if at_playhead { "M" } else { "" },
+      act: fn() { add_marker(at) },
+    }),
+    Some(MenuEntry::{
+      label: t(if at_playhead { "复制当前帧" } else { "复制这一帧" }),
+      key: if at_playhead { if is_mac() { "⌘C" } else { "Ctrl+C" } } else { "" },
+      act: fn() { copy_frame(at, shown=at_playhead) },
+    }),
+    None,
+    Some(MenuEntry::{
+      label: t(if at_playhead { "从当前位置开始剪辑" } else { "从这里开始剪辑" }),
+      key: if at_playhead { "I" } else { "" },
+      act: fn() {
+        let fresh = !clipping.untracked()
+        set_clip_start(at)
+        if fresh {
+          clip_b.set(dmin(span(), clip_a.untracked() + 30000.0))
+        }
+        show_clip()
+      },
+    }),
+    Some(MenuEntry::{
+      label: t(if at_playhead { "剪辑到当前位置结束" } else { "剪辑到这里结束" }),
+      key: if at_playhead { "O" } else { "" },
+      act: fn() {
+        let fresh = !clipping.untracked()
+        set_clip_end(at)
+        if fresh {
+          clip_a.set(dmax(0.0, clip_b.untracked() - 30000.0))
+        }
+        show_clip()
+      },
+    }),
+  ])}
+
+fn kbd(parent : view::View, key : String) -> Unit {
+  parent.box(fn(k) {
+    k
+    .height(view::Live::Is(Some(20.0)))
+    .min_width(view::Live::Is(Some(20.0)))
+    .padding(view::Live::Is((6.0, 0.0, 6.0, 0.0)))
+    .radius(view::Live::Is(5.0))
+    .ground(view::Live::By(c_s3))
+    .edge(view::Live::By(fn() { (1.0, hair()) }))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    |> ignore
+    words(k, fn() { key }, 12.0, ui_muted, weight=500) |> ignore
+  })
+  |> ignore}
+
+fn menu_layer(root : view::View) -> Unit {
+  root.box(fn(o) {
+    o.over(view::Live::Is(true)).over_all(view::Live::Is(true)) |> ignore
+    o.show(fn() { menu_shown.get() is Some(_) }, fn(m) {
+      m.over(view::Live::Is(true)).modal(view::Live::Is(true)).presses(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))).on_press(close_menu) |> ignore
+      m.on_menu(fn(_) { close_menu() }) |> ignore
+      layer_keys(m, ["escape"])
+      m.box(fn(panel) {
+        let open = motion::NodeWay::new(0.0)
+        open.go_ms(panel, 1.0, if motion_off() { 1.0 } else { 120.0 })
+        panel
+        .alpha(view::Live::By(fn() { open.shown(panel) }))
+        .scale(view::Live::By(fn() { if motion_off() { 1.0 } else { 0.96 + 0.04 * open.shown(panel) } }), about=if menu_above.v { view::Pivot::At(0.5, 1.0) } else { view::Pivot::At(1.0, 0.0) })
+        .min_width(view::Live::Is(Some(200.0)))
+        .pad(view::Live::Is(4.0))
+        .ground(view::Live::By(c_s2))
+        .radius(view::Live::Is(10.0))
+        .edge(view::Live::By(fn() { (1.0, hair2()) }))
+        .shadow(view::Live::By(fn() { (32.0, 12.0, sheet_shadow()) }))
+        .presses(view::Live::Is(true))
+        |> ignore
+        match menu_anchor.v {
+          Some(a) =>
+            if menu_above.v {
+              panel.beside(a, side=view::Side::Top, along=view::Along::Middle, offset=6.0) |> ignore
+            } else {
+              panel.beside(a, side=view::Side::Bottom, along=view::Along::End, offset=6.0) |> ignore
+            }
+          None => ()
+        }
+        panel
+        .offset(view::Live::By(fn() {
+          if menu_anchor.v is Some(_) {
+            return (0.0, 0.0)
+          }
+          match menu_shown.get() {
+            Option::Some((x, y, es)) => {
+              let (ww, wh) = panel.window()
+              let mut h = 8.0
+              for e in es {
+                h += if e is Some(_) { 32.0 } else { 9.0 }
+              }
+              let x = clamp(x, 8.0, dmax(8.0, ww - 260.0))
+              let y = if y + h > wh - 8.0 { dmax(8.0, y - h) } else { y }
+              (x, y)
+            }
+            Option::None => (0.0, 0.0)
+          }
+        }))
+        |> ignore
+        panel.each(fn() {
+          match menu_shown.get() {
+            Option::Some((_, _, es)) => mbt_compat::arr_makei(es.length(), fn(i) { i })
+            Option::None => []
+          }
+        }, fn(i : Int) -> Int { i }, fn(row, i) {
+          let entry = signals::untracked(fn() {
+            match menu_shown.get() {
+              Option::Some((_, _, es)) if i.get() < es.length() => es[i.get()]
+              _ => None
+            }
+          })
+          match entry {
+            None => {
+              row.padding(view::Live::Is((0.0, 4.0, 0.0, 4.0))) |> ignore
+              rule(row, hair)
+            }
+            Some(e) =>
+              pressable(row, fn() { e.label }, fn() {
+                close_menu()
+                (e.act)()
+              }, fn(b) {
+                b
+                .row(view::Live::Is(true))
+                .height(view::Live::Is(Some(32.0)))
+                .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+                .gap(view::Live::Is(10.0))
+                .radius(view::Live::Is(6.0))
+                .lines_up(view::Live::Is(Some(view::Along::Middle)))
+                .cursor(view::Live::Is(Some(view::Cursor::Arrow)))
+                .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+                .ground(view::Live::By(fn() { if b.pointed() || b.focus_shown() { c_s3() } else { 0L } }))
+                |> ignore
+                b.box(fn(l) {
+                  l.grow(view::Live::Is(1.0)) |> ignore
+                  words(l, fn() { e.label }, 13.0, ui_text, weight=if e.key == "✓" { 500 } else { 400 }) |> ignore
+                })
+                |> ignore
+                if e.key == "✓" {
+                  b.box(fn(ck) {
+                    ck.width(view::Live::Is(Some(14.0))).height(view::Live::Is(Some(14.0))).picture(view::Live::Is(Some(vector("M2.5 7.5l3.2 3.2 5.8-6.4", 14.0, 14.0, stroke=1.7)))).tint(view::Live::By(ui_text)) |> ignore
+                  })
+                  |> ignore
+                } else if e.key != "" {
+                  kbd(b, e.key)
+                }
+              })
+              |> ignore
+          }
+        }, at_once=true)
+      })
+      |> ignore
+    }, at_once=true)
+  })
+  |> ignore
+  root.box(fn(t) {
+    t.over(view::Live::Is(true)).over_all(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
+    tips_layer.v = Some(t)
+  })
+  |> ignore}
+
+fn tell(words : String, icon? : String) -> Unit {
+  let icon = match icon { Some(__mbt_v) => __mbt_v, None => "info" }
+
+  let n = told.untracked().2 + 1
+  told.set((words, icon, n))
+  (told_until.v)()
+  match the_root.v {
+    Some(r) =>
+      told_until.v = r.at_moment(now() + 1600.0, fn() {
+        if told.untracked().2 == n {
+          told.set(("", told.untracked().1, n))
+        }
+      })
+    None => ()
+  }}
+
+fn told_layer(parent : view::View) -> Unit {
+  parent.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Middle))).padding(view::Live::Is((0.0, 16.0, 0.0, 0.0))) |> ignore
+    let way = motion::NodeWay::new(0.0)
+    let kept = mbt_compat::ref_new("")
+    o.reacts(fn() { told.get().0 != "" }, fn(on) {
+      way.go_ms(o, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else if on { 120.0 } else { 200.0 })
+    })
+    o.box(fn(c) {
+      c
+      .row(view::Live::Is(true))
+      .gap(view::Live::Is(8.0))
+      .height(view::Live::Is(Some(36.0)))
+      .padding(view::Live::Is((12.0, 0.0, 14.0, 0.0)))
+      .radius(view::Live::Is(18.0))
+      .ground(view::Live::By(c_s1))
+      .edge(view::Live::By(fn() { (1.0, hair2()) }))
+      .shadow(view::Live::By(fn() { (24.0, 6.0, sheet_shadow()) }))
+      .lines_up(view::Live::Is(Some(view::Along::Middle)))
+      .alpha(view::Live::By(fn() { way.shown(c) }))
+      .offset(view::Live::By(fn() { (0.0, if motion_off() { 0.0 } else { -6.0 * (1.0 - way.shown(c)) }) }))
+      .laid_nowhere(view::Live::By(fn() { way.shown(c) <= 0.0 && told.get().0 == "" }))
+      |> ignore
+      sf_icon_node(c, "", 16.0, view::Live::By(ui_muted), name_now=fn() { told.get().1 }) |> ignore
+      words(c, fn() {
+        let w = told.get().0
+        if w != "" {
+          kept.v = w
+        }
+        kept.v
+      }, 13.0, ui_text, weight=500)
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+// When shown=true, copy directly from the player's GPU surface to avoid re-decoding from a keyframe.
+fn copy_frame(at : Double, shown? : Bool) -> Unit {
+  let shown = match shown { Some(__mbt_v) => __mbt_v, None => false }
+
+  let from_player = shown &&
+    (match native_made.v {
+      Some(d) =>
+        match d.stream {
+          Some(st) => st.at.is_some() && rp_frame_copy_shown(st.id) == 1
+          None => false
+        }
+      None => false
+    })
+  if !from_player {
+    guard seg_at(t0() + at) is Some(i) else { return }
+    let s = segs[i]
+    if rp_frame_copy(cstr(s.path), t0() + at - s.start) == 0 {
+      return
+    }
+  }
+  __mbt_local_copy_frame_wait_10()}
+fn __mbt_local_copy_frame_wait_10() -> Unit {
+    match rp_frame_copy_state() {
+      2 => tell(t("已复制当前帧"), icon="check-circle")
+      3 => tell(t("没能复制到剪贴板"))
+      _ =>
+        match the_root.v {
+          Some(r) => r.at_moment(now() + 8.0, fn() { __mbt_local_copy_frame_wait_10() }) |> ignore
+          None => ()
+        }
+    }
+  }
+
+

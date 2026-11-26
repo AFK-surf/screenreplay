@@ -2,7 +2,6 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recorder;
 
-/// <summary>One of the tray menu's items: its words, the keys shown at its right, and what clicking it does.</summary>
 internal sealed class TrayMenuItem(string text, Action? click = null, string keys = "")
 {
     public string Text { get; set; } = text;
@@ -18,11 +17,6 @@ internal sealed class TrayMenuItem(string text, Action? click = null, string key
     public Action? Click { get; } = click;
 }
 
-/// <summary>
-/// The recorder's icon in the notification area (Shell_NotifyIconW, NOTIFYICON_VERSION_4), its tip, its balloons and
-/// its menu (a popup menu made as it opens from the items as they are then: their words, which are shown, which are
-/// greyed). Added again when Explorer starts again, so the icon is not lost with it.
-/// </summary>
 internal sealed class Tray : IDisposable
 {
     private const uint NimAdd = 0;
@@ -101,12 +95,8 @@ internal sealed class Tray : IDisposable
     private bool added;
     private bool doubleClicked;
 
-    /// <summary>What the right button opens in place of the menu (the panel drawn as the replay window is), at the
-    /// pointer; false where it could not: the menu opens then.</summary>
     public Func<int, int, bool>? Panel { get; set; }
 
-    /// <param name="menu">The menu's items in order, null for a separator.</param>
-    /// <param name="leftClick">What a click with the left button does (the menu opens with the right one).</param>
     public Tray(MessageWindow window, IReadOnlyList<TrayMenuItem?> menu, Action leftClick)
     {
         this.window = window;
@@ -121,7 +111,6 @@ internal sealed class Tray : IDisposable
         get => icon;
         set
         {
-            // (the same as it is, shown: the shell not told again; the status is set every 2 s. Not shown yet (no taskbar at sign-in): tried again, as before)
             if (value == icon && (added || !visible))
             {
                 return;
@@ -132,7 +121,6 @@ internal sealed class Tray : IDisposable
         }
     }
 
-    /// <summary>The tip shown over the icon (at most 127 characters: the rest cut off).</summary>
     public string Text
     {
         get => text;
@@ -159,7 +147,6 @@ internal sealed class Tray : IDisposable
         }
     }
 
-    /// <summary>A balloon (a notification) from the icon; a warning's sign beside it when `warning`.</summary>
     public void ShowBalloonTip(int timeoutMs, string title, string text, bool warning)
     {
         if (!added)
@@ -170,7 +157,6 @@ internal sealed class Tray : IDisposable
         var data = Data(NifInfo);
         data.InfoTitle = title.Length > 63 ? title[..63] : title;
         data.Info = text.Length > 255 ? text[..255] : text;
-        // NIIF_NONE, NIIF_WARNING
         data.InfoFlags = warning ? 2u : 0u;
         data.TimeoutOrVersion = (uint)timeoutMs;
         Shell_NotifyIconW(NimModify, ref data);
@@ -236,7 +222,6 @@ internal sealed class Tray : IDisposable
         }
         else if (ev == WmLButtonUp)
         {
-            // (the button let go after a double click is not a click again, as WinForms' NotifyIcon had it)
             if (!doubleClicked)
             {
                 leftClick();
@@ -255,8 +240,6 @@ internal sealed class Tray : IDisposable
         }
     }
 
-    /// <summary>The popup menu of the items as they are now; `shown` gets the items in it, the command of each its
-    /// place there counted from 1.</summary>
     private IntPtr BuildMenu(List<TrayMenuItem> shown)
     {
         var popup = CreatePopupMenu();
@@ -264,7 +247,6 @@ internal sealed class Tray : IDisposable
         {
             if (item is null)
             {
-                // MF_SEPARATOR
                 AppendMenuW(popup, 0x800, UIntPtr.Zero, null);
                 continue;
             }
@@ -275,7 +257,6 @@ internal sealed class Tray : IDisposable
             }
 
             shown.Add(item);
-            // MF_STRING, MF_GRAYED, MF_CHECKED; the keys right-aligned after a tab
             var flags = (item.Enabled ? 0u : 0x1u) | (item.Checked ? 0x8u : 0u);
             AppendMenuW(popup, flags, (UIntPtr)shown.Count, item.Keys.Length > 0 ? item.Text + "\t" + item.Keys : item.Text);
         }
@@ -289,10 +270,8 @@ internal sealed class Tray : IDisposable
         var popup = BuildMenu(shown);
         try
         {
-            // (in front first, or the menu does not close when the pointer clicks elsewhere; WM_NULL after it, or it
-            // opens only every other time: the tray menu's way, as the documentation of TrackPopupMenu has it)
+            // SetForegroundWindow before TrackPopupMenuEx and post WM_NULL after so the menu dismisses cleanly.
             SetForegroundWindow(window.Handle);
-            // TPM_RETURNCMD | TPM_RIGHTBUTTON, aligned as the system's menus drop (SM_MENUDROPALIGNMENT)
             var align = GetSystemMetrics(40) != 0 ? 0x8u : 0x0u;
             var chosen = TrackPopupMenuEx(popup, 0x100 | 0x2 | align, x, y, window.Handle, IntPtr.Zero);
             PostMessageW(window.Handle, 0, IntPtr.Zero, IntPtr.Zero);
@@ -307,21 +286,15 @@ internal sealed class Tray : IDisposable
         }
     }
 
-    /// <summary>An .ico beside the program at the tray's size (the small icon's, SM_CXSMICON, at the system's DPI);
-    /// the system's application icon when it cannot be read.</summary>
     public static IntPtr LoadIcon(string path)
     {
-        // IMAGE_ICON, LR_LOADFROMFILE
         var icon = LoadImageW(IntPtr.Zero, path, 1, GetSystemMetrics(49), GetSystemMetrics(50), 0x10);
-        // IDI_APPLICATION
         return icon != IntPtr.Zero ? icon : LoadIconW(IntPtr.Zero, 32512);
     }
 
     [DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr icon);
 
-    /// <summary>An icon LoadIcon gave let go of (the system's own, where it fell back to it, is shared: DestroyIcon
-    /// leaves that one be).</summary>
     public static void FreeIcon(IntPtr icon)
     {
         if (icon != IntPtr.Zero)

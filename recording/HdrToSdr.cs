@@ -7,20 +7,8 @@ using Vortice.Mathematics;
 
 namespace Replay.Recording;
 
-/// <summary>
-/// An HDR desktop's picture (the capture's FP16 scRGB: linear, BT.709 primaries, 1.0 = 80 nits, beyond 0..1 for
-/// brighter or wider colours) made SDR on the GPU, into BGRA the video processor then takes as it takes an SDR
-/// capture: brought to the display's SDR white (SDR content as bright as it shows), colours outside BT.709 moved toward
-/// the grey of their brightness (hue and brightness kept), brightness above the knee rolled off into what is left below
-/// white (a Reinhard curve on luminance, its slope matched at the knee), what is still above white desaturated into it,
-/// and the sRGB curve applied. SDR content (sRGB as Windows shows it on an HDR desktop) so comes out as it was (its
-/// white 254 of 255: the knee's room for what is brighter).
-/// <para>One full-screen triangle drawn with a pixel shader compiled when first needed (D3DCompile of the system's
-/// d3dcompiler_47.dll).</para>
-/// </summary>
 internal sealed class HdrToSdr : IDisposable
 {
-    /// <summary>Linear SDR brightness (1 = SDR white) where the roll-off of what is brighter begins.</summary>
     private const float Knee = 0.98f;
 
     private const string Source = """
@@ -96,16 +84,12 @@ internal sealed class HdrToSdr : IDisposable
         constants = gpu.Device.CreateBuffer(new BufferDescription(16, BindFlags.ConstantBuffer, ResourceUsage.Default));
     }
 
-    /// <summary>Tone-maps <paramref name="source"/> (FP16 scRGB, <paramref name="w"/> × <paramref name="h"/>) directly
-    /// into <paramref name="targetView"/> without keeping an intermediate FP16 copy or pinning <paramref name="source"/>.</summary>
     public void ConvertInto(ID3D11Texture2D source, ID3D11RenderTargetView targetView, int w, int h, DisplayColor display)
     {
         using var view = gpu.Device.CreateShaderResourceView(source);
         Draw(view, targetView, w, h, display);
     }
 
-    /// <summary><paramref name="source"/> (FP16 scRGB, <paramref name="w"/> × <paramref name="h"/>) as SDR BGRA, in a
-    /// texture of this converter's own (good till the next call).</summary>
     public ID3D11Texture2D Convert(ID3D11Texture2D source, int w, int h, DisplayColor display)
     {
         if (output is null || w != width || h != height)
@@ -133,7 +117,7 @@ internal sealed class HdrToSdr : IDisposable
             inputView?.Dispose();
             inputTexture?.Dispose();
             inputView = gpu.Device.CreateShaderResourceView(source);
-            // (held so that its pointer is not reused by another texture while the view is cached)
+            // AddRef source so its COM pointer cannot be recycled while the cached inputView holds it.
             source.AddRef();
             inputTexture = new ID3D11Texture2D(source.NativePointer);
         }
@@ -144,11 +128,10 @@ internal sealed class HdrToSdr : IDisposable
 
     private void Draw(ID3D11ShaderResourceView sourceView, ID3D11RenderTargetView targetView, int w, int h, DisplayColor display)
     {
-        // (SDR white brought to 1; the peak at least a little above the knee, so the curve has room)
         var white = Math.Max(1f, display.SdrWhiteNits);
         Span<float> tone = [DisplayColor.ScRgbNits / white, Math.Max(Knee + 0.25f, display.PeakNits / white), Knee, 0];
         var context = gpu.Context;
-        // (the draw's state and the draw kept together: the encoder's threads use the same immediate context)
+        // Guard immediate context draw sequence; encoder threads share the same D3D11 device context.
         multithread.Enter();
         try
         {
@@ -174,7 +157,6 @@ internal sealed class HdrToSdr : IDisposable
     [DllImport("d3dcompiler_47.dll")]
     private static extern unsafe int D3DCompile(byte* data, nuint size, byte* name, IntPtr defines, IntPtr include, byte* entry, byte* target, uint flags1, uint flags2, out IntPtr code, out IntPtr errors);
 
-    /// <summary>The shader's <paramref name="entry"/> compiled for <paramref name="target"/>.</summary>
     private static unsafe byte[] Compile(string entry, string target)
     {
         var source = Encoding.UTF8.GetBytes(Source);

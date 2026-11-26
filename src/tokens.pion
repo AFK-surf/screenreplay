@@ -1,0 +1,83 @@
+import "ui"
+
+fn tone(dark : Int64, light : Int64) -> Int64 {
+  if ui::current_window_id() != 0 {
+    return if is_dark() { dark } else { light }
+  }
+  match (theme_way.v, the_root.v) {
+    (Some(way), Some(root)) => mix(light, dark, way.shown(root))
+    _ => if is_dark() { dark } else { light }
+  }}
+
+// Zero alpha while preserving RGB channels for clean fade-ins.
+fn clear(color : Int64) -> Int64 {
+  color & 0xFFFFFF00L}
+
+fn c_bg() -> Int64 {
+  tone(0x1B1C1FFFL, 0xF2F3F5FFL)}
+
+fn well() -> Int64 {
+  tone(0x0F1012FFL, 0xDCDFE4FFL)}
+
+fn c_s1() -> Int64 {
+  tone(0x222327FFL, 0xFFFFFFFFL)}
+
+fn c_s2() -> Int64 {
+  tone(0x2B2D32FFL, 0xE6E8ECFFL)}
+
+fn c_s3() -> Int64 {
+  tone(0x383A40FFL, 0xDADDE2FFL)}
+
+fn c_s4() -> Int64 {
+  tone(0x484A51FFL, 0xC9CDD4FFL)}
+
+fn hair() -> Int64 {
+  tone(0xFFFFFF1AL, 0x00000014L)}
+
+fn hair2() -> Int64 {
+  tone(0xFFFFFF2BL, 0x00000026L)}
+
+fn ui_text() -> Int64 {
+  tone(0xEDEEF0FFL, 0x17181BFFL)}
+
+fn ui_muted() -> Int64 {
+  tone(0xB7BBC2FFL, 0x4A4E55FFL)}
+
+fn ui_subtle() -> Int64 {
+  tone(0x9AA0A8FFL, 0x595E66FFL)}
+
+fn ui_accent() -> Int64 {
+  tone(0xEDEEF0FFL, 0x17181BFFL)}
+
+fn ui_accent_hover() -> Int64 {
+  tone(0xFFFFFFFFL, 0x000000FFL)}
+
+fn ui_on_accent() -> Int64 {
+  tone(0x111214FFL, 0xFFFFFFFFL)}
+
+fn ui_accent_faint() -> Int64 {
+  tone(0xEDEEF017L, 0x17181B12L)}
+
+fn rec_red() -> Int64 {
+  tone(0xFF4D4DFFL, 0xE5383BFFL)}
+
+fn danger_ink() -> Int64 {
+  tone(0xFF7D7DFFL, 0xB91C1CFFL)}
+
+fn danger_ground(hover : Double) -> Int64 {
+  mix(tone(0xFF4D4D24L, 0xE5383B1AL), tone(0xFF4D4D38L, 0xE5383B2BL), hover)}
+
+fn warn() -> Int64 {
+  tone(0xE5A545FFL, 0x8F4F00FFL)}
+
+fn focus_ring() -> Int64 {
+  tone(0xFFFFFFB3L, 0x17181BB3L)}
+
+fn scrim_ground() -> Int64 {
+  tone(0x0607089EL, 0x06070861L)}
+
+fn sheet_shadow() -> Int64 {
+  tone(0x0000008CL, 0x00000047L)}
+
+fn press_ground() -> Int64 {
+  tone(0xFFFFFF14L, 0x0000000FL)}

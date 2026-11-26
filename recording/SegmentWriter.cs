@@ -4,16 +4,8 @@ using Vortice.MediaFoundation;
 
 namespace Replay.Recording;
 
-/// <summary>What a segment is encoded with.</summary>
 internal sealed record EncodeSettings(int Width, int Height, int FrameRate, int Bitrate, bool Hevc, bool Audio);
 
-/// <summary>
-/// One segment being written: an MP4 by Media Foundation's sink writer (the picture as the recording's one
-/// <see cref="VideoEncoder"/> encodes it, the AAC encoder fed 48 kHz stereo PCM) under a temporary name, renamed to its own once it is complete,
-/// with its <c>.json</c> (start, length, size), <c>.levels</c> (the sound's loudness each 100 ms) and <c>.input</c> (how
-/// busy the mouse, keyboard and game controllers were each 100 ms: <see cref="InputActivity"/>) written first.
-/// So the buffer's folder only ever shows whole segments: a crash loses the one being written.
-/// </summary>
 internal sealed class SegmentWriter : IDisposable
 {
     public const string TempExtension = ".recording";
@@ -33,7 +25,6 @@ internal sealed class SegmentWriter : IDisposable
     private string folder = "";
     private DateTimeOffset startUtc;
 
-    // the sound's levels: each 100 ms window's sum of squares per source
     private readonly List<byte> levels = new();
     private readonly double[] windowSum;
     private int windowFrames;
@@ -41,12 +32,10 @@ internal sealed class SegmentWriter : IDisposable
 
     public EncodeSettings Settings => settings;
 
-    // its thumbnails (Thumbnailer): asked and not made yet, those made (ms into the segment, JPEG), when the next is due
     private readonly object thumbsGate = new();
     private int thumbsAsked;
     private readonly List<(long Ms, byte[] Jpeg)> thumbs = new();
 
-    /// <summary>When its next thumbnail is due, in its own time (100 ns).</summary>
     internal long NextThumbHns { get; set; }
 
     internal void ThumbAsked()
@@ -57,7 +46,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>A thumbnail made (null: it could not be).</summary>
     internal void ThumbMade(long ms, byte[]? jpeg)
     {
         lock (thumbsGate)
@@ -72,9 +60,7 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>Its thumbnails as the replay window reads them (replay_index.cpp's cache): "RPT2", their count, then
-    /// each its ms (int64), its length (uint32) and its JPEG; none when it has none. Waits a moment for those still being
-    /// made (a frame or two's read-back and a JPEG: done long before a segment is completed, as its sound comes in).</summary>
+    // Binary format ("RPT2"): count, then [int64 ms, uint32 len, jpeg bytes] (read by replay_index.cpp).
     private void WriteThumbs()
     {
         List<(long Ms, byte[] Jpeg)> made;
@@ -108,7 +94,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>Video frames written.</summary>
     public long Frames { get; private set; }
 
     private SegmentWriter(VideoEncoder encoder, IMFSinkWriter writer, string tempPath, int videoStream, int audioStream, EncodeSettings settings, int sources)
@@ -123,8 +108,6 @@ internal sealed class SegmentWriter : IDisposable
         windowSum = new double[this.sources];
     }
 
-    /// <summary>A writer made ready (its sound's encoder started) in <paramref name="folder"/>, before it is known when its
-    /// segment starts: made ahead, so that switching to it takes no time.</summary>
     public static SegmentWriter Create(VideoEncoder encoder, string folder, int audioSources)
     {
         var settings = encoder.Settings;
@@ -137,7 +120,6 @@ internal sealed class SegmentWriter : IDisposable
         {
             writer = MediaFactory.MFCreateSinkWriterFromURL(temp, null, attrs);
 
-            // the picture as the recording's one encoder makes it, stored as it comes (no encoder in this writer)
             using var videoType = encoder.OutputType();
             var video = writer.AddStream(videoType);
             writer.SetInputMediaType(video, videoType, null);
@@ -151,7 +133,6 @@ internal sealed class SegmentWriter : IDisposable
                 audioOut.Set(Native.MT_AUDIO_BITS_PER_SAMPLE, 16u);
                 audioOut.Set(Native.MT_AUDIO_SAMPLES_PER_SECOND, (uint)AudioRate);
                 audioOut.Set(Native.MT_AUDIO_NUM_CHANNELS, 2u);
-                // 24 000 bytes a second: 192 kbps, the most the system's AAC encoder gives
                 audioOut.Set(Native.MT_AUDIO_AVG_BYTES_PER_SECOND, 24000u);
                 audioOut.Set(Native.MT_AAC_PAYLOAD_TYPE, 0u);
                 audioOut.Set(Native.MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29u);
@@ -194,7 +175,6 @@ internal sealed class SegmentWriter : IDisposable
         type.Set(Native.MT_VIDEO_NOMINAL_RANGE, 2u);
     }
 
-    /// <summary>The segment's start: when its first frame is (UTC), which names its file.</summary>
     public void Begin(string folder, DateTimeOffset startUtc)
     {
         this.folder = folder;
@@ -203,15 +183,12 @@ internal sealed class SegmentWriter : IDisposable
         EncoderStart = encoder.Attach(this, startUtc);
     }
 
-    /// <summary>Where the segment starts on the encoder's timeline.</summary>
     internal long EncoderStart { get; private set; } = long.MaxValue;
 
-    // frames the encoder gave back for this segment (Frames: given to it), what failed in writing them
     private long encoded;
     private Exception? videoFault;
     private bool encoderGone;
 
-    /// <summary>A frame at <paramref name="time"/> into the segment; <paramref name="key"/>: encoded as a keyframe.</summary>
     public void WriteVideo(IMFSample sample, long time, long duration, bool key)
     {
         lock (gate)
@@ -224,8 +201,7 @@ internal sealed class SegmentWriter : IDisposable
             Frames++;
         }
 
-        // (outside the gate: what the encoder gives back is written under it, while this waits for the encoder to take
-        // the frame)
+        // Must call outside gate: encoder output callback acquires gate while this waits for encoder input.
         try
         {
             encoder.Encode(sample, EncoderStart + time, duration, key);
@@ -241,7 +217,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>A frame the encoder made of this segment's, its time into the segment.</summary>
     internal void WriteEncoded(IMFSample sample)
     {
         lock (gate)
@@ -265,7 +240,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>The encoder stopped: nothing more comes from it.</summary>
     internal void EncoderGone()
     {
         lock (gate)
@@ -275,7 +249,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>Whether all the frames given to the encoder came back, waiting up to <paramref name="ms"/>.</summary>
     private bool AllEncoded(int ms)
     {
         var until = Environment.TickCount64 + ms;
@@ -296,8 +269,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>The sound from <paramref name="at"/> (frames into the segment, 48 kHz): the mix, interleaved stereo,
-    /// and each source's own (for the levels).</summary>
     public void WriteAudio(long at, ReadOnlySpan<float> mix, IReadOnlyList<float[]> each, int offset, int frames)
     {
         if (audioStream < 0 || frames <= 0)
@@ -312,9 +283,7 @@ internal sealed class SegmentWriter : IDisposable
                 return;
             }
 
-            // (written in order; what overlaps what was written already is left out, a hole is silence: all of it, up to
-            // a minute (before, 2 s of it, and what came after was written 2 s on from there, early by the rest of the
-            // hole, the sound ahead of its picture for the rest of the segment); a longer one a gap in the track)
+            // Fill audio gaps up to 60 s with silence so subsequent audio stays synced to video.
             if (at > audioWritten)
             {
                 var gap = Math.Min(at - audioWritten, AudioRate * 60L);
@@ -338,8 +307,6 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>Silence written up to <paramref name="until"/> (frames from the segment's start): the sound waited for
-    /// too long, so that the segment's sound still lasts as long as its picture.</summary>
     public void PadAudio(long until)
     {
         if (audioStream < 0)
@@ -356,8 +323,7 @@ internal sealed class SegmentWriter : IDisposable
         }
     }
 
-    /// <summary>`frames` of silence written (under the gate), 200 ms a sample, straight into each buffer's memory (an array
-    /// of floats made for it before: up to 768 KB a time on the large object heap), and its levels with it.</summary>
+    // Must hold gate. Writes 200 ms chunks directly into MF buffer memory to avoid LOH float[] allocations.
     private void WriteSilence(long frames)
     {
         while (frames > 0)
@@ -424,7 +390,6 @@ internal sealed class SegmentWriter : IDisposable
         levels.Add(LevelByte(Math.Sqrt(loudest)));
     }
 
-    /// <summary>An RMS (full scale 1) as a byte: -50 dB and under 0, 0 dB 255, linear in dB between.</summary>
     public static byte LevelByte(double rms)
     {
         if (rms <= 0)
@@ -461,12 +426,8 @@ internal sealed class SegmentWriter : IDisposable
         audioWritten += frames;
     }
 
-    /// <summary>How many 100 ms a segment <paramref name="durationHns"/> long has in its <c>.levels</c> and <c>.input</c>.</summary>
     public static int Buckets(long durationHns) => (int)Math.Ceiling(durationHns / 10_000.0 / 100.0);
 
-    /// <summary>The segment closed at <paramref name="durationHns"/>: the file completed, its sidecars written (its
-    /// <c>.input</c> of <paramref name="input"/>, where it is given), its name given. Returns the segment, or null when
-    /// nothing of it was written.</summary>
     public Segment? Finish(long durationHns, byte[]? input = null)
     {
         lock (gate)
@@ -483,8 +444,6 @@ internal sealed class SegmentWriter : IDisposable
             }
         }
 
-        // its frames all out of the encoder: usually already (the next segment's first frame went in after them), else
-        // the encoder drained
         if (!AllEncoded(250))
         {
             encoder.Drain();
@@ -510,7 +469,6 @@ internal sealed class SegmentWriter : IDisposable
 
             if (audioStream >= 0)
             {
-                // (the sound brought to the picture's end, so that each segment's two tracks are as long)
                 var want = durationHns * AudioRate / 10_000_000;
                 if (want > audioWritten)
                 {
@@ -556,7 +514,6 @@ internal sealed class SegmentWriter : IDisposable
         return new Segment(mp4, startUtc, startUtc + TimeSpan.FromTicks(durationHns), new FileInfo(mp4).Length, settings.Width, settings.Height, durationMs);
     }
 
-    /// <summary>The writer let go of with nothing kept.</summary>
     public void Abort()
     {
         lock (gate)

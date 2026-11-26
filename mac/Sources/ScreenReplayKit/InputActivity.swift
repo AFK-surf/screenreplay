@@ -3,21 +3,18 @@ import CoreGraphics
 import Foundation
 import GameController
 
-/// Monotonic clock in 100-nanosecond ticks (`hns`), matching Windows `Native.NowHns()`.
 public enum MonotonicClock {
   public static func nowHns() -> Int64 {
     Int64(DispatchTime.now().uptimeNanoseconds / 100)
   }
 }
 
-/// Exact port of `recording/InputActivity.cs`: counts input intensity in 10 ms slots over a 3-minute ring
-/// and produces 1 byte per 100 ms bucket (`0` = idle, `1...255` = active) for `<stem>.input`.
 public final class InputActivity: @unchecked Sendable {
-  private static let slotHns: Int64 = 100_000      // 10 ms
-  private static let slotsCount: Int = 18_000      // 3 minutes
-  private static let bucketHns: Int64 = 1_000_000  // 100 ms
-  private static let beforeHns: Int64 = 4_500_000  // 450 ms
-  private static let afterHns: Int64 = 5_500_000   // 550 ms
+  private static let slotHns: Int64 = 100_000
+  private static let slotsCount: Int = 18_000
+  private static let bucketHns: Int64 = 1_000_000
+  private static let beforeHns: Int64 = 4_500_000
+  private static let afterHns: Int64 = 5_500_000
 
   private let lock = NSLock()
   private var stamp = [Int64](repeating: -1, count: slotsCount)
@@ -154,12 +151,6 @@ public final class InputActivity: @unchecked Sendable {
   }
 }
 
-/// Passive macOS input activity listener for `<stem>.input`:
-/// - `GCController` gamepad button presses & stick/trigger travel (requires zero permissions).
-/// - Global mouse click & scroll wheel monitor (requires zero TCC permissions).
-/// - Keyboard key-down monitor ONLY when `CGPreflightListenEventAccess()` is already granted,
-///   so it NEVER triggers an unsolicited Input Monitoring TCC dialog.
-/// - Never attaches to desktop events in `synthetic` mode.
 public final class InputActivityMonitor: @unchecked Sendable {
   public let activity: InputActivity
   private let lock = NSLock()

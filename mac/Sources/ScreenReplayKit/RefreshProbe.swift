@@ -32,10 +32,6 @@ public struct RefreshStats: Sendable, Equatable {
   private func round3(_ v: Double) -> Double { (v * 1000.0).rounded() / 1000.0 }
 }
 
-/// Opt-in manual refresh-rate benchmark (`ScreenReplayHelper probe-refresh [--seconds 30] [--record]`).
-/// NEVER invoked during `swift test`! Opens a non-activating 64x64 corner Metal view driven by
-/// `NSView.displayLink` (`preferredFrameRateRange = 60...240`) and measures `MTLDrawable.presentedTime`
-/// deltas to prove zero ProMotion / high-refresh frame-rate drop while 60fps HEVC capture runs.
 public enum RefreshProbe {
   public static func computeStats(deltasMs: [Double]) -> RefreshStats {
     let valid = deltasMs.filter { $0 > 0.5 && $0 < 250.0 }.sorted()

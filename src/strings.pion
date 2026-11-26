@@ -1,0 +1,17 @@
+fn t(zh : String) -> String {
+  if !is_english() {
+    return zh
+  }
+  match english.get(zh) {
+    Option::Some(en) => en
+    Option::None => zh
+  }}
+
+fn tf(zh : String, args : Array[String]) -> String {
+  let mut s = t(zh)
+  for i, a in args {
+    s = s.replace("{\{i}}", a)
+  }
+  s}
+
+

@@ -1,0 +1,114 @@
+import "mbt_compat"
+import "ui"
+
+fn seg_image_kept(path : String, key : String) -> Unit {
+  match seg_images.get(path) {
+    Option::Some(keys) => keys.push(key)
+    Option::None => seg_images.set(path, [key])
+  }
+}
+
+fn seg_images_forget(path : String) -> Unit {
+  match seg_images.get(path) {
+    Option::Some(keys) => {
+      for k in keys {
+        ui::forget_image(k)
+      }
+      seg_images.remove(path)
+    }
+    Option::None => ()
+  }
+}
+
+fn seg_images_forget_all() -> Unit {
+  seg_images.each(fn(_path, keys) {
+    for k in keys {
+      ui::forget_image(k)
+    }
+  })
+  seg_images.clear()
+}
+
+struct Newest {
+  cap : Int
+  keys : Array[String]
+}
+
+fn Newest::keep(self : Newest, key : String) -> Unit {
+  self.keys.push(key)
+  if self.keys.length() > self.cap {
+    let drop = self.keys.length() - self.cap
+    for i in 0..<drop {
+      ui::forget_image(self.keys[i])
+    }
+    let rest = mbt_compat::array_slice_clamp(self.keys, drop, self.keys.length())
+    self.keys.clear()
+    arr_append(self.keys, rest)
+  }
+}
+
+fn Newest::forget_all(self : Newest) -> Unit {
+  for k in self.keys {
+    ui::forget_image(k)
+  }
+  self.keys.clear()
+}
+
+fn clip_thumb_kept(path : String, key : String) -> Unit {
+  match clip_thumb_keys.get(path) {
+    Option::Some(was) if was != key => ui::forget_image(was)
+    _ => ()
+  }
+  clip_thumb_keys.set(path, key)
+}
+
+fn clip_thumbs_forget_all() -> Unit {
+  clip_thumb_keys.each(fn(_path, key) {
+    ui::forget_image(key)
+  })
+  clip_thumb_keys.clear()
+}
+
+fn clips_gone_forget(dir : String, names : Array[String]) -> Unit {
+  let here : mbt_compat::OrderedMap[String, Bool] = mbt_compat::ordered_map_new()
+  for n in names {
+    here.set(pjoin(dir, n), true)
+  }
+  let gone : Array[String] = []
+  clip_thumb_keys.each(fn(path, key) {
+    if !here.contains(path) {
+      ui::forget_image(key)
+      gone.push(path)
+    }
+  })
+  for path in gone {
+    clip_thumb_keys.remove(path)
+  }
+  let stale : Array[String] = []
+  clip_durations.each(fn(path, _v) {
+    if !here.contains(path) {
+      stale.push(path)
+    }
+  })
+  clip_leads.each(fn(path, _v) {
+    if !here.contains(path) {
+      stale.push(path)
+    }
+  })
+  gif_lengths.each(fn(path, _v) {
+    if !here.contains(path) {
+      stale.push(path)
+    }
+  })
+  saved_clip_codecs.each(fn(path, _v) {
+    if !here.contains(path) {
+      stale.push(path)
+    }
+  })
+  for path in stale {
+    saved_clip_codecs.remove(path)
+    clip_durations.remove(path)
+    clip_leads.remove(path)
+    gif_lengths.remove(path)
+  }
+}

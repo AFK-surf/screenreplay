@@ -1,0 +1,146 @@
+import "signals"
+import "ui"
+import "view"
+
+fn now() -> Double {
+  match the_root.v {
+    Some(r) => r.cause_at()
+    None => 0.0
+  }}
+
+// Schedule by wall clock: the UI tree clock pauses while hidden, so scheduling from cause_at()
+// alone causes a catch-up timer storm when a long-hidden resident window is shown.
+fn again(root : view::View, ms : Double, f : () -> Unit) -> Unit {
+  let t = root.cause_at()
+  let gap = rp_now() - t
+  if gap < clock_gap.v {
+    clock_gap.v = gap
+  }
+  root.at_moment(t + (gap - clock_gap.v) + ms, f, later=true) |> ignore}
+
+fn data_changed() -> Unit {
+  rev.set(rev.untracked() + 1)}
+
+fn data() -> Unit {
+  rev.get() |> ignore}
+
+fn has_segs() -> Bool {
+  data()
+  !segs.is_empty()}
+
+#derive(Eq)
+pub struct Play {
+  pos : Double
+  at : Double
+  rate : Double
+  going : Bool
+}
+
+fn pos_at(p : Play, t : Double) -> Double {
+  if p.going {
+    clamp(p.pos + (t - p.at) * p.rate, 0.0, span())
+  } else {
+    p.pos
+  }}
+
+fn pos_now() -> Double {
+  pos_at(play.untracked(), now())}
+
+fn head_jump(to : Double) -> Unit {
+  let from = pos_now()
+  if (to - from).abs() > 250.0 && !motion_off() {
+    head_glide.set((from, now()))
+  }}
+
+fn pos_drawn(v : view::View) -> Double {
+  let p = play.get()
+  let (gfrom, gat) = head_glide.get()
+  let t = v.drawn_while(fn(t) { p.going || t < gat + head_glide_ms })
+  let target = if !p.going || t > 1.0e300 { p.pos } else { pos_at(p, t) }
+  if t > 1.0e300 || t >= gat + head_glide_ms {
+    return target
+  }
+  let k = clamp((t - gat) / head_glide_ms, 0.0, 1.0)
+  gfrom + (target - gfrom) * ease_out(k)}
+
+fn test_speed() -> Double {
+  match ui::env("REPLAY_TEST_SPEED") {
+    "0.5" => 0.5
+    "1.5" => 1.5
+    "2" => 2.0
+    "4" => 4.0
+    "8" => 8.0
+    "10" => 10.0
+    "20" => 20.0
+    _ => 1.0
+  }}
+
+fn view_len() -> Double {
+  data()
+  dmax(1.0, dmin(view_duration.get(), view_total()))}
+
+#derive(Eq)
+pub struct Glide {
+  from : Double
+  len : Double
+  at : Double
+}
+
+fn shown_at(g : Glide, t : Double) -> (Double, Double) {
+  let to_from = view_from.get()
+  let to_len = view_len()
+  let ms = if motion_off() { 0.0 } else { glide_ms }
+  let k = (t - g.at) / ms
+  if ms <= 0.0 || k >= 1.0 || k < 0.0 {
+    (to_from, to_len)
+  } else {
+    let e = ease_out(k)
+    (g.from + (to_from - g.from) * e, g.len + (to_len - g.len) * e)
+  }}
+
+fn shown(v : view::View) -> (Double, Double) {
+  let g = view_glide.get()
+  if motion_off() {
+    return (view_from.get(), view_len())
+  }
+  let t = v.drawn_while(fn(t) { t < g.at + glide_ms })
+  shown_at(g, if t > 1.0e300 { g.at + glide_ms } else { t })}
+
+fn shown_now() -> (Double, Double) {
+  signals::untracked(fn() { shown_at(view_glide.get(), now()) })}
+
+fn glide() -> Unit {
+  let (f, l) = shown_now()
+  view_glide.set(Glide::{ from: f, len: l, at: now() })}
+
+fn ease_out(k : Double) -> Double {
+  let u = 1.0 - clamp(k, 0.0, 1.0)
+  1.0 - u * u * u}
+
+fn clamp(v : Double, lo : Double, hi : Double) -> Double {
+  dmax(lo, dmin(hi, v))}
+
+fn motion_off() -> Bool {
+  still_motion.get() || ui::reduced_motion()}
+
+fn mix(a : Int64, b : Int64, t : Double) -> Int64 {
+  if t <= 0.0 {
+    return a
+  }
+  if t >= 1.0 {
+    return b
+  }
+  // Interpolate in premultiplied alpha so fading from transparent does not darken through black.
+  let ch = fn(c : Int64, shift : Int) { ((c >> shift) & 0xFFL).to_double() }
+  let aa = ch(a, 0) / 255.0
+  let ba = ch(b, 0) / 255.0
+  let alpha = aa + (ba - aa) * t
+  let one = fn(shift : Int) {
+    let v = if alpha <= 0.0 {
+      ch(b, shift)
+    } else {
+      (ch(a, shift) * aa + (ch(b, shift) * ba - ch(a, shift) * aa) * t) / alpha
+    }
+    dmin(255.0, dmax(0.0, v)).round().to_int64() << shift
+  }
+  one(24) | one(16) | one(8) | ((alpha * 255.0).round().to_int64() & 0xFFL)}

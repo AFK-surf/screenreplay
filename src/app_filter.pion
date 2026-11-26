@@ -1,0 +1,499 @@
+import "mbt_compat"
+import "motion"
+import "pixels"
+import "signals"
+import "ui"
+import "view"
+
+fn filter_on() -> Bool {
+  !app_filter.get().is_empty()}
+
+fn toggle_app(app : String) -> Unit {
+  let now = app_filter.untracked()
+  if now.contains(app) {
+    set_filter(arr_filter(now, fn(a) { a != app }))
+  } else {
+    let next = now.copy()
+    next.push(app)
+    set_filter(next)
+  }}
+
+fn set_filter(apps : Array[String]) -> Unit {
+  app_filter.set(apps)
+  let mut p = pos_now()
+  if !apps.is_empty() {
+    match kept_at(p, 1) {
+      Option::Some(q) => p = q
+      Option::None =>
+        match kept_at(p, -1) {
+          Option::Some(q) => p = q
+          Option::None => ()
+        }
+    }
+    if p != pos_now() {
+      seek_to(p)
+    }
+  }
+  follow_latest.set(false)
+  let len = signals::untracked(view_len)
+  view_from.set(ax_d(p, len) - len / 2.0)
+  keep_view()}
+
+fn kept_at(at : Double, dir : Int) -> Option[Double] {
+  if app_filter.untracked().is_empty() {
+    return Option::Some(at)
+  }
+  let ks = signals::untracked(fn() { kept_now.get() })
+  for k in ks {
+    if at >= k.0 && at < k.1 {
+      return Option::Some(at)
+    }
+  }
+  if dir > 0 {
+    for k in ks {
+      if k.0 > at {
+        // Nudge +1 ms past boundary to avoid clock/sample rounding landing outside the stretch.
+        return Option::Some(k.0 + 1.0)
+      }
+    }
+    Option::None
+  } else {
+    let mut found : Option[Double] = Option::None
+    for k in ks {
+      if k.1 <= at {
+        found = Option::Some(dmax(k.0 + 1.0, k.1 - 1000.0))
+      }
+    }
+    found
+  }}
+
+fn jump_by(by : Double) -> Unit {
+  let at = pos_now() + by
+  match kept_at(at, if by >= 0.0 { 1 } else { -1 }) {
+    Option::Some(q) => jump_to(q)
+    Option::None => ()
+  }}
+
+fn filter_skip(p : Double) -> Bool {
+  if app_filter.untracked().is_empty() || clipping.untracked() {
+    return false
+  }
+  match kept_at(p, 1) {
+    Option::Some(q) if q == p => false
+    Option::Some(q) => {
+      seek_to(q)
+      true
+    }
+    Option::None => {
+      set_playing(false)
+      true
+    }
+  }}
+
+fn filter_dim_picture(w : Double, from : Double, len : Double, f : Array[String]) -> Option[pixels::Vector] {
+  if f.is_empty() || w <= 0.0 || len <= 0.0 || segs.is_empty() {
+    return Option::None
+  }
+  let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
+  let fill = StringBuilder()
+  let lines = StringBuilder()
+  for p in pieces_now.get() {
+    if p.2 != "" && f.contains(app_name(p.2)) {
+      continue
+    }
+    let a = x_of(p.0)
+    let b = x_of(p.1)
+    if b - a >= 1.0 {
+      fill.write_string(rect_d(a, 0.0, b - a, strip_h))
+      lines.write_string(hatch_d(a, b - a, strip_h))
+    }
+  }
+  Option::Some({
+    w: w,
+    h: strip_h,
+    layers: [
+      layer(fill.to_string(), tone(0x1B1C1FC0L, 0xF2F3F5C0L)),
+      layer(lines.to_string(), 0L, stroke=tone(0xFFFFFF10L, 0x00000012L), width=1.0),
+    ],
+  })}
+
+fn front_words(ms : Double) -> String {
+  if ms < 1000.0 {
+    t("不到 1 秒")
+  } else if ms < 60000.0 {
+    let s = (ms / 1000.0).round().to_int()
+    if s >= 60 {
+      tf("{0} 分", ["1"])
+    } else {
+      tf("{0} 秒", [s.to_string()])
+    }
+  } else {
+    let m = (ms / 60000.0).round().to_int()
+    if m < 60 {
+      tf("{0} 分", [m.to_string()])
+    } else {
+      tf("{0} 小时 {1} 分", [(m / 60).to_string(), (m % 60).to_string()])
+    }
+  }}
+
+fn apps_key(parent : view::View) -> Unit {
+  let k = pressable(parent, fn() { t("按应用统计和过滤") }, fn() {
+    apps_more.set(false)
+    apps_open.set(true)
+  }, fn(b) {
+    let (hand, _) = answer(b)
+    let ink = fn() { if filter_on() { ui_text() } else { mix(ui_muted(), ui_text(), hand.shown(b)) } }
+    b
+    .row(view::Live::Is(true))
+    .gap(view::Live::Is(5.0))
+    .padding(view::Live::Is((8.0, 0.0, 4.0, 0.0)))
+    .height(view::Live::Is(Some(28.0)))
+    .radius(view::Live::Is(6.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .ground(view::Live::By(fn() {
+      if filter_on() {
+        mix(c_s3(), c_s4(), hand.shown(b))
+      } else {
+        mix(clear(c_s3()), c_s3(), hand.shown(b))
+      }
+    }))
+    .laid_nowhere(view::Live::By(fn() { !has_segs() }))
+    |> ignore
+    b.show(fn() { !filter_on() }, fn(x) {
+      x.box(fn(g) {
+        g
+        .width(view::Live::Is(Some(14.0)))
+        .height(view::Live::Is(Some(14.0)))
+        .picture(view::Live::Is(Some(vector("M2 2.8h10L8.2 7.4V11L5.8 12.2V7.4Z", 14.0, 14.0, stroke=1.4))))
+        .tint(view::Live::By(ink))
+        |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+    |> ignore
+    b.show(fn() { filter_on() }, fn(x) {
+      x.box(fn(ic) {
+        ic.row(view::Live::Is(true)).gap(view::Live::Is(3.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        ic.each(fn() {
+          let f = app_filter.get()
+          if f.length() <= 2 { f } else { mbt_compat::array_slice_clamp(f, 0, 3) }
+        }, fn(n : String) -> String { n }, fn(slot, n) {
+          let name = signals::untracked(fn() { n.get() })
+          let process = signals::untracked(fn() {
+            let mut found = ""
+            for r in app_stats.get().0 {
+              if r.0 == name {
+                found = r.2
+                break
+              }
+            }
+            found
+          })
+          app_icon(slot, process, size=16.0)
+        }, at_once=true)
+        |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+    |> ignore
+    b.box(fn(n) {
+      n.max_width(view::Live::Is(Some(180.0))).cuts(view::Live::Is(true)).padding(view::Live::Is((0.0, 0.0, 4.0, 0.0))) |> ignore
+      words(n, fn() {
+        let f = app_filter.get()
+        if f.is_empty() {
+          t("应用")
+        } else if f.length() <= 2 {
+          f.join(t("、"))
+        } else {
+          tf("{0} 个应用", [f.length().to_string()])
+        }
+      }, 12.0, ink, weight=500)
+      |> ignore
+    })
+    |> ignore
+    b.show(fn() { filter_on() }, fn(x) {
+      pressable(x, fn() { t("清除过滤") }, fn() { set_filter([]) }, fn(c) {
+        let (h2, _) = answer(c)
+        c
+        .width(view::Live::Is(Some(18.0)))
+        .height(view::Live::Is(Some(18.0)))
+        .radius(view::Live::Is(4.0))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .lies_along(view::Live::Is(view::Lies::Middle))
+        .ground(view::Live::By(fn() { mix(clear(c_s4()), c_s4(), h2.shown(c)) }))
+        |> ignore
+        c.box(fn(g) {
+          g
+          .width(view::Live::Is(Some(10.0)))
+          .height(view::Live::Is(Some(10.0)))
+          .picture(view::Live::Is(Some(vector("M2.5 2.5l5 5M7.5 2.5l-5 5", 10.0, 10.0, stroke=1.4))))
+          .tint(view::Live::By(fn() { mix(ui_subtle(), ui_text(), h2.shown(c)) }))
+          |> ignore
+        })
+        |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+    |> ignore
+  })
+  apps_anchor.v = Some(k.id())}
+
+fn tick_box(parent : view::View, on : () -> Bool) -> Unit {
+  parent.box(fn(c) {
+    c
+    .width(view::Live::Is(Some(16.0)))
+    .height(view::Live::Is(Some(16.0)))
+    .radius(view::Live::Is(4.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .ground(view::Live::By(fn() { if on() { ui_accent() } else { 0L } }))
+    .edge(view::Live::By(fn() { if on() { (0.0, 0L) } else { (1.5, ui_subtle()) } }))
+    |> ignore
+    c.show(on, fn(g) {
+      g
+      .width(view::Live::Is(Some(11.0)))
+      .height(view::Live::Is(Some(11.0)))
+      .picture(view::Live::Is(Some(vector("M2.3 5.8l2.2 2.2 4.3-4.6", 11.0, 11.0, stroke=1.8))))
+      .tint(view::Live::By(ui_on_accent))
+      |> ignore
+    }, at_once=true)
+    |> ignore
+  })
+  |> ignore}
+
+fn shell_process(process : String, name : String) -> Bool {
+  let p = str_to_ascii_lower(process)
+  let n = str_to_ascii_lower(name)
+  [
+    "screenreplay", "screenreplayviewer", "screenreplay helper", "screenreplayhelper",
+    "shellexperiencehost", "shellhost", "sihost", "startmenuexperiencehost", "searchhost",
+    "searchapp", "lockapp", "textinputhost", "applicationframehost", "systemsettings", "taskmgr",
+    "windowserver", "dock", "control center", "controlcenter", "notificationcenter", "notification center",
+    "spotlight", "systemuiserver", "loginwindow", "universalcontrol", "wallpaper",
+  ].contains(p) ||
+  [
+    "screenreplay", "screenreplay helper", "windowserver", "dock", "control center",
+    "notification center", "notificationcenter", "spotlight",
+  ].contains(n) ||
+  name.starts_with("Microsoft® Windows®")}
+
+fn apps_rows() -> (Array[(String, Double, String)], Int, Double) {
+  let (rows, total) = app_stats.get()
+  let f = app_filter.get()
+  let more = apps_more.get()
+  let min_ms = dmin(60000.0, total * 0.05)
+  let shown : Array[(String, Double, String)] = []
+  let mut rest = 0
+  let mut rest_ms = 0.0
+  for r in rows {
+    let big = r.1 >= min_ms && (total <= 0.0 || r.1 / total >= 0.01) && !shell_process(r.2, r.0)
+    if f.contains(r.0) || (big && shown.length() < 8) || more {
+      shown.push(r)
+    } else {
+      rest += 1
+      rest_ms += r.1
+    }
+  }
+  if shown.is_empty() && !rows.is_empty() {
+    rest = 0
+    rest_ms = 0.0
+    let mut has_non_shell = false
+    for r in rows {
+      if !shell_process(r.2, r.0) {
+        has_non_shell = true
+        break
+      }
+    }
+    for r in rows {
+      let pick = (!has_non_shell || !shell_process(r.2, r.0)) && shown.length() < 8
+      if pick {
+        shown.push(r)
+      } else {
+        rest += 1
+        rest_ms += r.1
+      }
+    }
+  }
+  (shown, rest, rest_ms)}
+
+fn app_row(parent : view::View, name : String, process : String, ms_get : () -> Double) -> Unit {
+  pressable(parent, fn() { name }, fn() { toggle_app(name) }, fn(b) {
+    b
+    .height(view::Live::Is(Some(34.0)))
+    .radius(view::Live::Is(6.0))
+    .ground(view::Live::By(fn() { if b.pointed() || b.focus_shown() { c_s2() } else { 0L } }))
+    |> ignore
+    b.box(fn(top) {
+      top
+      .row(view::Live::Is(true))
+      .height(view::Live::Is(Some(34.0)))
+      .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+      .gap(view::Live::Is(10.0))
+      .lines_up(view::Live::Is(Some(view::Along::Middle)))
+      |> ignore
+      tick_box(top, fn() { app_filter.get().contains(name) })
+      app_icon(top, process, size=16.0)
+      top.box(fn(n) {
+        n.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).cuts(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
+        words(n, fn() { name }, 13.0, ui_text) |> ignore
+      })
+      |> ignore
+      top.pick(fn() { b.pointed() }, fn(r, over) {
+        r.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        if over {
+          pressable(r, fn() { t("只看它") }, fn() { set_filter([name]) }, fn(c) {
+            let (h2, _) = answer(c)
+            c
+            .height(view::Live::Is(Some(22.0)))
+            .padding(view::Live::Is((7.0, 0.0, 7.0, 0.0)))
+            .radius(view::Live::Is(5.0))
+            .lines_up(view::Live::Is(Some(view::Along::Middle)))
+            .ground(view::Live::By(fn() { mix(c_s3(), c_s4(), h2.shown(c)) }))
+            |> ignore
+            words(c, fn() { t("只看它") }, 12.0, ui_text, weight=500) |> ignore
+          })
+          |> ignore
+        } else {
+          words(r, fn() { front_words(ms_get()) }, 12.0, ui_muted) |> ignore
+          r.box(fn(pc) {
+            pc.row(view::Live::Is(true)).width(view::Live::Is(Some(34.0))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
+            words(pc, fn() {
+              let total = app_stats.get().1
+              share_words(if total > 0.0 { ms_get() / total } else { 0.0 })
+            }, 12.0, ui_subtle) |> ignore
+          })
+          |> ignore
+        }
+      }, at_once=true)
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn share_words(share : Double) -> String {
+  if share < 0.01 {
+    "<1%"
+  } else {
+    (share * 100.0).round().to_int().to_string() + "%"
+  }}
+
+fn apps_layer(root : view::View) -> Unit {
+  root.box(fn(o) {
+    o.over(view::Live::Is(true)).over_all(view::Live::Is(true)) |> ignore
+    o.show(fn() { apps_open.get() }, fn(m) {
+      let close = fn() { apps_open.set(false) }
+      m.over(view::Live::Is(true)).modal(view::Live::Is(true)).presses(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))).on_press(close) |> ignore
+      m.on_action("escape", fn(_) {
+        close()
+        true
+      })
+      |> ignore
+      m.box(fn(panel) {
+        let open = motion::NodeWay::new(0.0)
+        open.go_ms(panel, 1.0, if motion_off() { 1.0 } else { 120.0 })
+        panel
+        .alpha(view::Live::By(fn() { open.shown(panel) }))
+        .scale(view::Live::By(fn() { if motion_off() { 1.0 } else { 0.96 + 0.04 * open.shown(panel) } }), about=view::Pivot::At(1.0, 1.0))
+        .width(view::Live::Is(Some(384.0)))
+        .padding(view::Live::Is((6.0, 10.0, 6.0, 8.0)))
+        .ground(view::Live::By(c_s1))
+        .radius(view::Live::Is(10.0))
+        .edge(view::Live::By(fn() { (1.0, hair2()) }))
+        .shadow(view::Live::By(fn() { (32.0, 12.0, sheet_shadow()) }))
+        .presses(view::Live::Is(true))
+        |> ignore
+        match apps_anchor.v {
+          Some(a) => panel.beside(a, side=view::Side::Top, along=view::Along::End, offset=6.0) |> ignore
+          None => ()
+        }
+        panel.box(fn(h) {
+          h.row(view::Live::Is(true)).padding(view::Live::Is((10.0, 2.0, 10.0, 8.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+          h.box(fn(l) {
+            l.grow(view::Live::Is(1.0)) |> ignore
+            words(l, fn() { t("前台应用") }, 13.0, ui_text, weight=600) |> ignore
+          })
+          |> ignore
+          words(h, fn() {
+            tf("过去 {0} · 共录 {1}", [view_len_words(span()), front_words(app_stats.get().1)])
+          }, 12.0, ui_subtle)
+          |> ignore
+        })
+        |> ignore
+        panel.box(fn(sc) {
+          sc.max_height(view::Live::Is(Some(400.0))) |> ignore
+          sc.scrolls(view::Scroll::new(), slop=ui::touch_slop(), bar=ui::tree_scroll_bar(), fn(list) {
+            list.each(fn() { apps_rows().0 }, fn(r : (String, Double, String)) -> String { r.0 }, fn(row, r) {
+              let snap = signals::untracked(fn() { r.get() })
+              app_row(row, snap.0, snap.2, fn() { r.get().1 })
+            }, at_once=true)
+            |> ignore
+            list.show(fn() { apps_rows().0.is_empty() && apps_rows().1 == 0 }, fn(x) {
+              x.box(fn(e) {
+                e.height(view::Live::Is(Some(34.0))).padding(view::Live::Is((10.0, 0.0, 10.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+                words(e, fn() { t("暂无应用记录") }, 12.0, ui_subtle) |> ignore
+              })
+              |> ignore
+            }, at_once=true)
+            |> ignore
+            list.show(fn() { apps_rows().1 > 0 }, fn(x) {
+              pressable(x, fn() { t("显示全部") }, fn() { apps_more.set(true) }, fn(b) {
+                b
+                .row(view::Live::Is(true))
+                .height(view::Live::Is(Some(34.0)))
+                .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+                .gap(view::Live::Is(10.0))
+                .radius(view::Live::Is(6.0))
+                .lines_up(view::Live::Is(Some(view::Along::Middle)))
+                .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+                .ground(view::Live::By(fn() { if b.pointed() || b.focus_shown() { c_s2() } else { 0L } }))
+                |> ignore
+                b.box(fn(n) {
+                  n.grow(view::Live::Is(1.0)).padding(view::Live::Is((52.0, 0.0, 0.0, 0.0))) |> ignore
+                  words(n, fn() {
+                    let count = apps_rows().1
+                    if count == 1 {
+                      t("其他 1 个")
+                    } else {
+                      tf("其他 {0} 个", [count.to_string()])
+                    }
+                  }, 13.0, ui_muted) |> ignore
+                })
+                |> ignore
+                words(b, fn() { front_words(apps_rows().2) }, 12.0, ui_subtle) |> ignore
+                // Aligns duration column with app_row's 34 pt share column.
+                b.box(fn(sp) { sp.width(view::Live::Is(Some(30.0))) |> ignore }) |> ignore
+              })
+              |> ignore
+            }, at_once=true)
+            |> ignore
+          })
+          |> ignore
+        })
+        |> ignore
+        rule(panel, hair)
+        panel.box(fn(f) {
+          f.row(view::Live::Is(true)).padding(view::Live::Is((10.0, 8.0, 6.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+          f.box(fn(l) {
+            l.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))) |> ignore
+            words(l, fn() {
+              if filter_on() {
+                t("播放和前进/后退 15 秒只经过所选应用")
+              } else {
+                t("勾选应用后，只看它们的时段")
+              }
+            }, 12.0, ui_subtle)
+            |> ignore
+          })
+          |> ignore
+          f.show(fn() { filter_on() }, fn(x) {
+            text_button(x, fn() { t("清除") }, fn() { set_filter([]) }, ghost=true, small=true) |> ignore
+          }, at_once=true)
+          |> ignore
+        })
+        |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+  })
+  |> ignore}

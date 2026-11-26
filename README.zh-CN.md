@@ -4,7 +4,7 @@
 
 Windows 11 后台循环录屏与即时回放工具。灵感来自 Steam 自带的后台游戏录像，把它搬到了整个桌面上：在后台用显卡硬件编码循环保留最近一段时间的屏幕和声音（默认 2 小时，旧录像自动清理），遇到闪一下就复现不出来的偶发 Bug，或者打非 Steam 游戏忘了开 OBS，按 `Ctrl+Alt+R` 就能拉回时间线按帧查看、单窗口裁剪导出，一键复制发进群里。
 
-回放器界面（`ScreenReplayViewer.exe`）使用 [MoonBit](https://www.moonbitlang.com) 基于 still.fail 的原生 UI 框架 [`mbui`](https://github.com/AFK-surf/monoid)（`libs/mbui` 与 `libs/sf-ui`）编写，不套 Electron 或 WebView，视频流走 Direct3D 11 硬解零 CPU 拷贝直出，常驻内存小、快捷键秒开，独立安装包约 9.3 MB。
+回放器界面（`ScreenReplayViewer.exe`）使用 [Pion](https://github.com/AFK-surf/pion) 基于原生 UI 框架 [`invar`](https://github.com/AFK-surf/invar) 编写，不套 Electron 或 WebView，视频流走 Direct3D 11 硬解零 CPU 拷贝直出，常驻内存小、快捷键秒开，独立安装包约 9.3 MB。
 
 ![ScreenReplay](packaging/store/screenshots/zh/1-replay.png)
 
@@ -48,24 +48,20 @@ Windows 11 后台循环录屏与即时回放工具。灵感来自 Steam 自带�
 - **`recording/`**（C#，`Vortice.Windows` Direct3D 11 与 Media Foundation）：
   - 通过 `Windows.Graphics.Capture` 直接采集到显存，在 GPU 上经 `ID3D11VideoProcessor` 完成缩放与 HDR FP16 scRGB → SDR 色调映射（`DisplayColor.cs`、`HdrToSdr.cs`），并调用 NVENC / AMF / QuickSync 硬件 MFT 编码 H.265（HEVC）或 H.264（`VideoEncoder.cs`）。画面未变化时不写入，静止桌面几乎零落盘。
   - 通过 WASAPI 采集系统环回音频与可选麦克风输入并混音编码为 AAC（`AudioSource.cs`、`AudioMixer.cs`）。
-- **`app/`**（`ScreenReplayViewer.exe`，MoonBit + C/C++，基于 `mbui`）：
-  - 基于 `mbui` 保留式视图树（`@view.View`）与 Direct3D 11 渲染器构建（默认开启 `WDA_EXCLUDEFROMCAPTURE`，回看录像时不会把回放器自己录进去）。
-  - 直接解封装 MP4 分片（`mp4.mbt`、`sps.mbt`），经 Media Foundation D3D11VA 硬件解码器解入 NV12 `ID3D11Texture2D` 纹理池，GPU 转 BGRA 后通过 `mbui` 的 `@ui.Stream` 直出渲染（`native_player.mbt`、`replay_play.cpp`），并扣除 `XAudio2` 声卡输出延迟保持声画同步。
-  - 后台 GPU 关键帧缩略图生成（`replay_index.cpp`）、无损 MP4 重封装、GPU 单窗口/区域裁剪导出（`replay_export.cpp`）与 GIF 编码（`replay_gif.cpp`）。
+- **`src/` + `native/`**（`ScreenReplayViewer.exe`，Pion + C/C++/ObjC++，基于 `invar`）：
+  - 基于 `invar` 保留式视图树（`view::View`）与 Direct3D 11 / Metal 渲染器构建（默认开启 `WDA_EXCLUDEFROMCAPTURE`，回看录像时不会把回放器自己录进去）。
+  - 直接解封装 MP4 分片（`src/mp4.pion`、`src/sps.pion`），经 Media Foundation D3D11VA 硬件解码器解入 NV12 `ID3D11Texture2D` 纹理池，GPU 转 BGRA 后通过 `invar` 的 `ui::Stream` 直出渲染（`src/native_player.pion`、`native/replay_play.cpp`），并扣除 `XAudio2` 声卡输出延迟保持声画同步。
+  - 后台 GPU 关键帧缩略图生成（`native/replay_index.cpp`）、无损 MP4 重封装、GPU 单窗口/区域裁剪导出（`native/replay_export.cpp`）与 GIF 编码（`native/replay_gif.cpp`）。
 
 ## Windows 构建
 
-需要 Windows 11、Visual Studio 2022（勾选**使用 C++ 的桌面开发**）、.NET 10 SDK、Git for Windows（Git Bash）以及 MoonBit（`moon` 在 `PATH` 中，或 `MBUI_TOOLS` 指向含 `moon/` 的目录）。
-
-> **路径长度说明**：建议克隆到较短路径（如 `C:\src\screenreplay`），避免触发 Windows `MAX_PATH`（260 字符）限制。
+需要 Windows 11、Visual Studio 2022（勾选**使用 C++ 的桌面开发**）、.NET 10 SDK、Clang/LLVM（`clang`）以及 `pionc`（通过环境变量 `PIONC` 或 `PATH` 提供），并在同级目录检出 `pion.toml` 对应的 `invar` 与 `pion-packages`。
 
 ```powershell
 powershell -File scripts/build.ps1                     # 构建 out\ScreenReplay.exe + out\ScreenReplayViewer.exe
 powershell -File packaging/pack-setup.ps1              # 打包独立安装程序 out\setup\ScreenReplay-Setup-<ver>.exe（需 Inno Setup 6）
 powershell -File packaging/pack-msix.ps1 -Viewer out   # 打包 Microsoft Store MSIX 安装包
 ```
-
-构建时 `scripts/fetch-stillfail.sh` 会自动从 [`AFK-surf/monoid`](https://github.com/AFK-surf/monoid) 按 `stillfail.lock` 锁定的提交稀疏拉取 `libs/mbui` 与 `libs/sf-ui` 到 `deps/stillfail`。
 
 ## 赞助
 

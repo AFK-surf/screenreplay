@@ -1,0 +1,165 @@
+import "mbt_compat"
+
+// Sidecar format (.levels / .input): 1 byte (0..255) per 100 ms (level_step), with 16-sample (1.6 s) max-mip blocks.
+fn make_mip(b : Bytes) -> Bytes {
+  let n = b.length()
+  if n == 0 {
+    return "".to_bytes()
+  }
+  let m = (n + 15) / 16
+  mbt_compat::bytes_makei(m, fn(blk) {
+    let start = blk * 16
+    let end = imin(n, start + 16)
+    let mut best = 0
+    for k in start..<end {
+      let v = b[k].to_int()
+      if v > best {
+        best = v
+      }
+    }
+    best.to_byte()
+  })}
+
+fn seg_sidecar(cache : mbt_compat::OrderedMap[String, (Bytes, Bytes)], s : Seg, ext : String) -> (Bytes, Bytes) {
+  match cache.get(s.path) {
+    Option::Some(pair) => pair
+    Option::None => {
+      let path = s.path.slice(0, s.path.length() - 4) + ext
+      let b = rp_read(cstr(path), 0.0, 0x100000)
+      let pair = (b, make_mip(b))
+      cache.set(s.path, pair)
+      pair
+    }
+  }}
+
+fn sidecars_drop(path : String) -> Unit {
+  levels_of.remove(path)
+  input_of.remove(path)
+  sidecars_rev.v = -1}
+
+fn sidecars_clear() -> Unit {
+  levels_of.clear()
+  input_of.clear()
+  lv_raw.clear()
+
+  lv_mip.clear()
+
+  in_raw.clear()
+
+  in_mip.clear()
+
+  sidecars_rev.v = -1}
+
+fn sync_sidecars() -> Unit {
+  let r = rev.untracked()
+  if sidecars_rev.v == r && lv_raw.length() == segs.length() {
+    return
+  }
+  sidecars_rev.v = r
+  lv_raw.clear()
+  lv_mip.clear()
+  in_raw.clear()
+  in_mip.clear()
+  for s in segs {
+    let (lr, lm) = seg_sidecar(levels_of, s, ".levels")
+    lv_raw.push(lr)
+    lv_mip.push(lm)
+    let (ir, im) = seg_sidecar(input_of, s, ".input")
+    in_raw.push(ir)
+    in_mip.push(im)
+  }}
+
+fn seg_peak(raw : Bytes, mip : Bytes, from0 : Int, to0 : Int) -> Int {
+  let n = raw.length()
+  if n == 0 {
+    return -1
+  }
+  let from = imax(0, from0)
+  let to = imin(n - 1, to0)
+  if from > to {
+    return -1
+  }
+  let mut best = 0
+  let mut k = from
+  if to - from >= 32 {
+    let b0 = (from + 15) >> 4
+    let b1 = (to + 1) >> 4
+    if b0 < b1 {
+      let head_end = b0 << 4
+      while k < head_end {
+        let v = raw[k].to_int()
+        if v > best {
+          best = v
+        }
+        k += 1
+      }
+      let mut blk = b0
+      while blk < b1 {
+        let v = mip[blk].to_int()
+        if v > best {
+          best = v
+        }
+        blk += 1
+      }
+      k = b1 << 4
+    }
+  }
+  while k <= to {
+    let v = raw[k].to_int()
+    if v > best {
+      best = v
+    }
+    k += 1
+  }
+  best}
+
+fn peaks_grid(k0 : Double, n : Int, cell : Double, is_input : Bool) -> (Array[Int], Bool) {
+  sync_sidecars()
+  let out = Array::make(n, 0)
+  let n_segs = segs.length()
+  if n <= 0 || n_segs == 0 {
+    return (out, false)
+  }
+  let raws = if is_input { in_raw } else { lv_raw }
+  let mips = if is_input { in_mip } else { lv_mip }
+  let base = t0()
+  let a0 = base + k0 * cell
+  let mut lo = 0
+  let mut hi = n_segs
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if segs[mid].start + segs[mid].dur <= a0 {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  let mut seg_i = lo
+  let mut any = false
+  for idx in 0..<n {
+    let a = base + (k0 + idx.to_double()) * cell
+    let b = a + cell
+    while seg_i < n_segs && segs[seg_i].start + segs[seg_i].dur <= a {
+      seg_i += 1
+    }
+    let mut j = seg_i
+    let mut best = 0
+    while j < n_segs && segs[j].start < b {
+      let s = segs[j]
+      let raw = raws[j]
+      if raw.length() > 0 {
+        let from = ((a - s.start) / level_step).floor().to_int()
+        let to = ((b - s.start) / level_step).floor().to_int()
+        let v = seg_peak(raw, mips[j], from, to)
+        if v > best {
+          best = v
+        }
+      }
+      j += 1
+    }
+    if best > 0 {
+      any = true
+      out[idx] = best
+    }
+  }
+  (out, any)}

@@ -19,10 +19,10 @@ jobs:
       # (the recorder's own, too: left behind, the new version takes itself for an old one and updates again and again)
       - name: The tag is the app's version
         run: |
-          app=$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' app/about.mbt)
+          app=$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' src/about.pion)
           rec=$(sed -n 's/.*const string AppVersion = "\(.*\)";.*/\1/p' recorder/Updater.cs)
           if [ "v$app" != "$GITHUB_REF_NAME" ] || [ "$rec" != "$app" ]; then
-            echo "::error::tag $GITHUB_REF_NAME, app_version $app (app/about.mbt) and AppVersion $rec (recorder/Updater.cs) are not one version"
+            echo "::error::tag $GITHUB_REF_NAME, app_version $app (src/about.pion) and AppVersion $rec (recorder/Updater.cs) are not one version"
             exit 1
           fi
 

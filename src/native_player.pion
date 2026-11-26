@@ -1,0 +1,1111 @@
+import "mbt_compat"
+import "signals"
+import "ui"
+import "view"
+import "hostapi"
+
+fn sounds_at(r : Double) -> Bool {
+  r >= 0.5 && r <= 4.0}
+
+pub struct Sound {
+  mut on : Bool
+  mut seg : Int
+  mut path : String
+  mut track : Option[Mp4Track]
+  mut next : Int
+  mut dec : Int
+  mut asc : Bytes
+  mut skip : Int
+  packet : FixedArray[Byte]
+  mut fill : Int
+  mut sent : Double
+  mut zero : Double
+  anchors : Array[(Double, Double)]
+  mut ends : Double
+  mut seen : Double
+  mut seen_at : Double
+  mut told_at : Double
+  mut due : Option[() -> Unit]
+  mut heard_any : Bool
+  mut retry : Option[() -> Unit]
+  mut rate : Double
+  mut ts : Int
+}
+
+fn Sound::new() -> Sound {
+  Sound::{
+    on: false,
+    seg: -1,
+    path: "",
+    track: Option::None,
+    next: 0,
+    dec: 0,
+    asc: "".to_bytes(),
+    skip: 0,
+    packet: FixedArray::make(3840, 0.to_byte()),
+    fill: 0,
+    sent: 0.0,
+    zero: 0.0,
+    anchors: [],
+    ends: -1.0,
+    seen: 0.0,
+    seen_at: 0.0,
+    told_at: 0.0,
+    due: Option::None,
+    heard_any: false,
+    retry: Option::None,
+    rate: 1.0,
+    ts: 0,
+  }}
+
+pub struct Deck {
+  count : () -> Int
+  file : (Int) -> String
+  start : (Int) -> Double
+  dur : (Int) -> Double
+  span : () -> Double
+  play : signals::Signal[Play]
+  speed : () -> Double
+  wants : () -> Bool
+  held : () -> Bool
+  stops : (Double) -> Bool
+  ended : () -> Unit
+  went : () -> Unit
+  shape : signals::Signal[Double]
+  mut stream : Option[ui::Stream]
+  mut seg : Int
+  mut path : String
+  mut track : Option[Mp4Track]
+  mut next : Int
+  mut config : Bytes
+  mut configured : Bool
+  mut shown_path : String
+  mut shown_k : Int
+  mut due : Option[() -> Unit]
+  mut rest : Option[() -> Unit]
+  mut waiting : Double
+  mut waited_at : Double
+  mut drained : Bool
+  mut warm : Double
+  mut warm_pos : Double
+  mut warm_since : Double
+  in_flight : Array[Double]
+  mut in_flight_at : Double
+  mut stalled_pump : Bool
+  mut later : Option[Double]
+  mut step_to : Option[(Double, Bool)]
+  sound : Sound
+}
+
+fn Deck::new(count~ : () -> Int, file~ : (Int) -> String, start~ : (Int) -> Double, dur~ : (Int) -> Double, span~ : () -> Double, play~ : signals::Signal[Play], speed? : () -> Double, wants~ : () -> Bool, held? : () -> Bool, stops? : (Double) -> Bool, ended~ : () -> Unit, went? : () -> Unit, shape~ : signals::Signal[Double]) -> Deck {
+  let speed = match speed { Some(__mbt_v) => __mbt_v, None => fn() { 1.0 } }
+  let held = match held { Some(__mbt_v) => __mbt_v, None => fn() { false } }
+  let stops = match stops { Some(__mbt_v) => __mbt_v, None => fn(_) { false } }
+  let went = match went { Some(__mbt_v) => __mbt_v, None => fn() {  } }
+
+  Deck::{
+    count: count,
+    file: file,
+    start: start,
+    dur: dur,
+    span: span,
+    play: play,
+    speed: speed,
+    wants: wants,
+    held: held,
+    stops: stops,
+    ended: ended,
+    went: went,
+    shape: shape,
+    stream: Option::None,
+    seg: -1,
+    path: "",
+    track: Option::None,
+    next: 0,
+    config: "".to_bytes(),
+    configured: false,
+    shown_path: "",
+    shown_k: -1,
+    due: Option::None,
+    rest: Option::None,
+    waiting: -1.0,
+    waited_at: 0.0,
+    drained: false,
+    warm: -1.0,
+    warm_pos: 0.0,
+    warm_since: 0.0,
+    in_flight: [],
+    in_flight_at: 0.0,
+    stalled_pump: false,
+    later: Option::None,
+    step_to: Option::None,
+    sound: Sound::new(),
+  }}
+
+fn fps_log() -> Bool {
+  if fps_on.v < 0 {
+    fps_on.v = if ui::env("REPLAY_FPS") == "1" { 1 } else { 0 }
+  }
+  fps_on.v == 1}
+
+struct FpsCount {
+  wanted : Array[Double]
+  mut handed_shown : Int
+  mut handed_unseen : Int
+  mut last_drawn : Double
+  gaps : Array[Double]
+  mut since : Double
+}
+
+
+fn fps_handed(ts : Double, show : Bool) -> Unit {
+  let c = fps_count
+  if show {
+    c.handed_shown = c.handed_shown + 1
+    c.wanted.push(ts)
+    if c.wanted.length() > 64 {
+      arr_remove(c.wanted, 0) |> ignore
+    }
+  } else {
+    c.handed_unseen = c.handed_unseen + 1
+  }}
+
+fn fps_drawn(ts : Double, playing : Bool) -> Unit {
+  let c = fps_count
+  let mut found = -1
+  for i, w in c.wanted {
+    if (w - ts).abs() < 1.0 {
+      found = i
+      break
+    }
+  }
+  if found < 0 {
+    return
+  }
+  arr_remove(c.wanted, found) |> ignore
+  let t = rp_now()
+  if playing && c.last_drawn > 0.0 && t - c.last_drawn < 1000.0 {
+    c.gaps.push(t - c.last_drawn)
+  }
+  c.last_drawn = t
+  if c.since == 0.0 {
+    c.since = t
+  }
+  if t - c.since >= 2000.0 {
+    fps_say(t)
+  }}
+
+fn fps_say(t : Double) -> Unit {
+  let c = fps_count
+  let g = c.gaps.copy()
+  arr_sort_double(g)
+  let at = fn(q : Double) -> Double {
+    if g.is_empty() {
+      0.0
+    } else {
+      g[imin(g.length() - 1, (q * g.length().to_double()).to_int())]
+    }
+  }
+  let secs = (t - c.since) / 1000.0
+  let drawn = g.length() + 1
+  hostapi::log("REPLAY_FPS secs=\{secs} drawn_fps=\{drawn.to_double() / secs} handed_shown=\{c.handed_shown} handed_unseen=\{c.handed_unseen} gaps_ms p50=\{at(0.5)} p95=\{at(0.95)} p99=\{at(0.99)} max=\{at(1.0)}")
+  c.handed_shown = 0
+  c.handed_unseen = 0
+  c.gaps.clear()
+  c.since = t}
+
+fn ntrace(words : String) -> Unit {
+  if ui::env("REPLAY_TRACE") == "1" {
+    hostapi::log("REPLAY native " + words)
+  }}
+
+fn Deck::stream(self : Deck) -> ui::Stream {
+  match self.stream {
+    Option::Some(s) => s
+    Option::None => {
+      let d = self
+      let s = ui::Stream::new(shown=fn(ts) {
+          if fps_log() {
+            fps_drawn(ts, d.play.untracked().going)
+          }
+          // Settle this frame and any older frames from the same flush epoch.
+          for i in 0..<d.in_flight.length() {
+            if (d.in_flight[i] - ts).abs() < 1.0 {
+              let left : Array[Double] = []
+              for j in (i + 1)..<d.in_flight.length() {
+                left.push(d.in_flight[j])
+              }
+              d.in_flight.clear()
+              arr_append(d.in_flight, left)
+              d.in_flight_at = now()
+              break
+            }
+          }
+          if ts == d.waiting {
+            d.waiting = -1.0
+            match (d.step_to, d.later) {
+              (Some((at, near)), _) => {
+                d.step_to = Option::None
+                d.go(at, near)
+              }
+              (None, Some(at)) => {
+                d.later = Option::None
+                d.show_near(at)
+              }
+              _ => ()
+            }
+          }
+          // A seek's target frame just finished decoding: release the held clock and start audio in sync.
+          if d.warm >= 0.0 && (ts - d.warm).abs() < 1.0 {
+            d.warm = -1.0
+            if (d.wants)() && !(d.held)() {
+              d.play.set(Play::{ ..d.play.untracked(), pos: d.warm_pos, at: now() })
+              d.sound_start(d.warm_pos)
+              d.pump()
+            }
+          } else if d.stalled_pump && d.in_flight.length() < 8 {
+            d.stalled_pump = false
+            d.pump()
+          }
+        }, broken=fn() {
+          // Decoder reset: Stream::frame drops packets until the next keyframe.
+          d.in_flight.clear()
+          d.stalled_pump = false
+          d.warm = -1.0
+          ntrace("broken")
+        })
+      self.stream = Option::Some(s)
+      s.audio_volume(volume_now())
+      s
+    }
+  }}
+
+fn volume_now() -> Double {
+  let (v, m) = signals::untracked(fn() { (volume.get(), muted.get()) })
+  if m || v <= 0.0 {
+    0.0
+  } else {
+    v
+  }}
+
+fn Deck::picture(self : Deck, pic : view::View) -> view::View {
+  ui::stream(pic, self.stream(), fit=ui::FitContain, closes=false)}
+
+fn Deck::pos_drawn(self : Deck, v : view::View) -> Double {
+  let p = self.play.get()
+  if !p.going {
+    return p.pos
+  }
+  let t = v.drawn_while(fn(_) { p.going })
+  if t > 1.0e300 {
+    p.pos
+  } else {
+    clamp(p.pos + (t - p.at) * p.rate, 0.0, (self.span)())
+  }}
+
+fn Deck::pos(self : Deck) -> Double {
+  let p = self.play.untracked()
+  if p.going {
+    clamp(p.pos + (now() - p.at) * p.rate, 0.0, (self.span)())
+  } else {
+    p.pos
+  }}
+
+fn Deck::locate(self : Deck, at : Double) -> (Int, Double) {
+  let n = (self.count)()
+  // Upper-bound search so slightly overlapping segments resolve to the later one.
+  let mut lo = 0
+  let mut hi = n
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if (self.start)(mid) <= at {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  let i = lo - 1
+  if i < 0 {
+    return (0, 0.0)
+  }
+  let a = (self.start)(i)
+  if at < a + (self.dur)(i) {
+    return (i, at - a)
+  }
+  if i + 1 < n {
+    return (i + 1, 0.0)
+  }
+  (n - 1, dmax(0.0, (self.dur)(n - 1) - 100.0))}
+
+fn Deck::index(self : Deck, i : Int, path : String) -> Int {
+  let n = (self.count)()
+  if i >= 0 && i < n && (self.file)(i) == path {
+    return i
+  }
+  for j in 0..<n {
+    if (self.file)(j) == path {
+      return j
+    }
+  }
+  -1}
+
+fn tracks_of(path : String) -> Array[Mp4Track] {
+  match tracks_read.get(path) {
+    Option::Some(t) => t
+    Option::None => {
+      let t = if is_gif_path(path) { gif_tracks(path) } else { mp4_tracks(path) }
+      if tracks_read.size() >= 64 {
+        tracks_read.clear()
+      }
+      // Don't cache empty tracks for segments still being written.
+      if !t.is_empty() {
+        tracks_read.set(path, t)
+      }
+      t
+    }
+  }}
+
+fn track_of(path : String, kind : String) -> Option[Mp4Track] {
+  for t in tracks_of(path) {
+    if t.kind == kind && !t.samples.is_empty() && t.config.length() > 0 {
+      return Option::Some(t)
+    }
+  }
+  Option::None}
+
+fn sample_ms(t : Mp4Track, k : Int) -> Double {
+  t.samples[k].pts.to_double() * 1000.0 / t.timescale.to_double()}
+
+fn key_before(t : Mp4Track, k : Int) -> Int {
+  let mut i = imin(k, t.samples.length() - 1)
+  while i > 0 && !t.samples[i].key {
+    i = i - 1
+  }
+  i}
+
+fn sample_at(t : Mp4Track, ms : Double) -> Int {
+  let mut lo = 0
+  let mut hi = t.samples.length() - 1
+  if hi < 0 || sample_ms(t, 0) > ms {
+    return -1
+  }
+  while lo < hi {
+    let mid = (lo + hi + 1) / 2
+    if sample_ms(t, mid) <= ms {
+      lo = mid
+    } else {
+      hi = mid - 1
+    }
+  }
+  lo}
+
+fn Deck::open(self : Deck, i : Int) -> Bool {
+  let path = (self.file)(i)
+  if self.path == path && self.track is Some(_) {
+    self.seg = i
+    return true
+  }
+  self.seg = i
+  self.path = path
+  self.next = 0
+  self.track = track_of(path, "vide")
+  match self.track {
+    Option::Some(t) => {
+      let s = self.stream()
+      if t.codec == "gif" {
+        ()
+      } else if !self.configured || !bytes_eq(self.config, t.config) {
+        if t.codec.starts_with("hv") || t.codec.starts_with("he") {
+          s.hevc(t.config, t.shown_w, t.shown_h)
+        } else if t.codec == "av01" {
+          s.av1(t.config, t.shown_w, t.shown_h)
+        } else {
+          s.h264(t.config, t.shown_w, t.shown_h)
+        }
+        self.config = t.config
+        self.configured = true
+      }
+      if t.shown_h > 0 {
+        self.shape.set(t.shown_w.to_double() / t.shown_h.to_double())
+      }
+      // Prime AAC decoder and audio voice with silent packet immediately cancelled (host starts at >=100 ms queued), avoiding ~60 ms hitch on first play.
+      match track_of(path, "soun") {
+        Option::Some(a) if self.sound.dec == 0 && a.codec == "mp4a" && self.sound_decoder(a) => {
+          s.audio(bytes_make(3840, 0.to_byte()))
+          s.audio("".to_bytes())
+        }
+        _ => ()
+      }
+      true
+    }
+    Option::None => false
+  }}
+
+fn Deck::hand(self : Deck, t : Mp4Track, k : Int, show? : Bool) -> Double {
+  let show = match show { Some(__mbt_v) => __mbt_v, None => true }
+
+  let x = t.samples[k]
+  let ts = (((self.start)(self.seg) + sample_ms(t, k)) * 1000.0).round()
+  if t.codec == "gif" {
+    if show {
+      self.stream().jpeg(rp_gif_frame(cstr(self.path), k, 0), ts)
+      self.shown_path = self.path
+      self.shown_k = k
+    }
+    return ts
+  }
+  let data = rp_play_read(cstr(self.path), x.at, x.size)
+  if fps_log() {
+    fps_handed(ts, show)
+  }
+  self.in_flight.push(ts)
+  self.in_flight_at = now()
+  self.stream().frame(data, x.key, ts, show~)
+  if show {
+    self.shown_path = self.path
+    self.shown_k = k
+  }
+  ts}
+
+fn Deck::cancel(self : Deck) -> Unit {
+  match self.due {
+    Option::Some(stop) => stop()
+    Option::None => ()
+  }
+  self.due = Option::None}
+
+fn Deck::cancel_rest(self : Deck) -> Unit {
+  match self.rest {
+    Option::Some(stop) => stop()
+    Option::None => ()
+  }
+  self.rest = Option::None}
+
+fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
+  self.cancel()
+  self.cancel_rest()
+  self.later = Option::None
+  let n = (self.count)()
+  if n == 0 {
+    return
+  }
+  let (i, inside) = self.locate(dmax(0.0, dmin(at, (self.span)() - 50.0)))
+  let pos = (self.start)(i) + inside
+  let going = (self.wants)() && !(self.held)()
+  self.play.set(Play::{ pos: pos, at: now(), rate: (self.speed)(), going: going })
+  self.sound_stop()
+  self.step_to = Option::None
+  // While paused, coalesce rapid seeks until current decode completes to prevent decoder queue backlog.
+  if !going && self.waiting >= 0.0 && now() - self.waited_at < 300.0 {
+    self.step_to = Option::Some((at, near))
+    // Watchdog: treat decode as lost after 300 ms.
+    match the_root.v {
+      Some(r) => {
+        let d = self
+        let w = self.waiting
+        r.at_moment(self.waited_at + 300.0, fn() {
+          if d.step_to is Some((a, n)) && d.waiting == w {
+            d.waiting = -1.0
+            d.step_to = Option::None
+            d.go(a, n)
+          }
+        })
+        |> ignore
+      }
+      None => ()
+    }
+    return
+  }
+  if !self.open(i) {
+    return
+  }
+  guard self.track is Some(t) else { return }
+  // +0.5 ms slack for timescale-to-ms rounding.
+  let k = imax(0, sample_at(t, inside + 0.5))
+  ntrace("go seg=\{i} inside=\{inside} k=\{k} near=\{near}")
+  let key = key_before(t, k)
+  let last = if near { key } else { k }
+  // Drain decoder when paused so the target frame isn't held back in its reorder/output queue.
+  let s = self.stream()
+  s.flush()
+  self.in_flight.clear()
+  self.stalled_pump = false
+  self.waiting = -1.0
+  for j in key..=last {
+    let ts = self.hand(t, j, show=j == last)
+    if j == last && !going && t.codec != "gif" {
+      self.waiting = ts
+      self.waited_at = now()
+    }
+  }
+  if !going {
+    s.flush(drain=true)
+  }
+  self.drained = !going
+  self.next = last + 1
+  self.warm = -1.0
+  if going {
+    rp_play_warm(cstr(self.path))
+    // Hold clock and audio until target+1 decodes so playback doesn't advance while keyframe-to-target catches up.
+    if last + 1 < t.samples.length() {
+      self.warm = self.hand(t, last + 1)
+      self.warm_pos = (self.start)(i) + sample_ms(t, last + 1)
+      self.warm_since = now()
+      self.next = last + 2
+    } else {
+      self.sound_start(pos)
+    }
+  }
+  self.pump()}
+
+fn Deck::scrub(self : Deck, at : Double) -> Unit {
+  self.step_to = Option::None
+  self.warm = -1.0
+  self.stalled_pump = false
+  self.cancel()
+  self.sound_stop()
+  let p = self.play.untracked()
+  self.play.set(Play::{ ..p, pos: at, at: now(), going: false })
+  self.cancel_rest()
+  match the_root.v {
+    Some(r) => {
+      let d = self
+      self.rest = Option::Some(
+        r.at_moment(now() + 120.0, fn() {
+          d.rest = Option::None
+          if (d.held)() {
+            d.go(at, false)
+          }
+        }),
+      )
+    }
+    None => ()
+  }
+  if self.waiting >= 0.0 && now() - self.waited_at < 300.0 {
+    self.later = Option::Some(at)
+    return
+  }
+  self.show_near(at)}
+
+fn Deck::show_near(self : Deck, at : Double) -> Unit {
+  if (self.count)() == 0 {
+    return
+  }
+  let (i, inside) = self.locate(dmax(0.0, dmin(at, (self.span)() - 50.0)))
+  if !self.open(i) {
+    return
+  }
+  guard self.track is Some(t) else { return }
+  let key = key_before(t, imax(0, sample_at(t, inside + 0.5)))
+  if self.shown_path == self.path && self.shown_k >= 0 && key_before(t, self.shown_k) == key {
+    return
+  }
+  let s = self.stream()
+  s.flush()
+  self.in_flight.clear()
+  self.stalled_pump = false
+  self.waiting = self.hand(t, key)
+  self.waited_at = now()
+  s.flush(drain=true)
+  self.drained = true
+  self.next = key + 1}
+
+fn Deck::pump(self : Deck) -> Unit {
+  self.cancel()
+  guard (self.wants)() && !(self.held)() && self.track is Some(t) else { return }
+  let i = self.index(self.seg, self.path)
+  if i < 0 {
+    return
+  }
+  self.seg = i
+  if self.warm >= 0.0 {
+    self.play.set(Play::{ ..self.play.untracked(), pos: self.warm_pos, at: now() })
+    if now() - self.warm_since < 400.0 {
+      match the_root.v {
+        Some(r) => self.due = Option::Some(r.at_moment(now() + 4.0, fn() { self.pump() }, later=true))
+        None => ()
+      }
+      return
+    }
+    self.warm = -1.0
+    self.sound_start(self.warm_pos)
+  }
+  let base = (self.start)(i)
+  let p = self.pos()
+  if (self.stops)(p) {
+    return
+  }
+  let root = match the_root.v {
+    Some(r) => r
+    None => return
+  }
+  let rate = dmax(0.01, self.play.untracked().rate)
+  let end = base + (self.dur)(i)
+  if self.in_flight.length() >= 8 && now() - self.in_flight_at > 500.0 {
+    ntrace("in_flight timeout (\{self.in_flight.length()}), clearing")
+    self.in_flight.clear()
+  }
+  let inside = p - base + 0.5
+  let reached = sample_at(t, inside)
+  let n = t.samples.length()
+  let mut backed_up = false
+  if reached >= self.next {
+    // If clock passed a later keyframe, flush backlog and jump directly to it.
+    let key = key_before(t, reached)
+    if key > self.next {
+      if !self.in_flight.is_empty() {
+        self.stream().flush()
+        self.in_flight.clear()
+        self.stalled_pump = false
+      }
+      self.next = key
+      for j in key..=reached {
+        self.hand(t, j, show=j == reached) |> ignore
+      }
+      self.next = reached + 1
+    } else {
+      let room = 8 - self.in_flight.length()
+      if room <= 0 {
+        backed_up = true
+      } else {
+        let last = imin(reached, self.next + room - 1)
+        for j in self.next..=last {
+          self.hand(t, j, show=j == last) |> ignore
+        }
+        self.next = last + 1
+        if last < reached {
+          backed_up = true
+        }
+      }
+    }
+  }
+  (self.went)()
+  if i + 1 < (self.count)() && end - p < 3000.0 * rate {
+    rp_play_warm(cstr((self.file)(i + 1)))
+  }
+  if p >= end - 1.0 && i + 1 < (self.count)() {
+    if backed_up && !self.in_flight.is_empty() {
+      self.stream().flush()
+      self.in_flight.clear()
+    }
+    self.stalled_pump = false
+    let next_at = (self.start)(i + 1)
+    if next_at > p {
+      self.play.set(Play::{ ..self.play.untracked(), pos: next_at, at: now() })
+    }
+    if self.open(i + 1) {
+      self.next = 0
+      if !self.sound.on && sounds_at((self.speed)()) {
+        self.sound_start(self.pos())
+      }
+      self.pump()
+    }
+  } else if backed_up {
+    self.stalled_pump = true
+    self.due = Option::Some(root.at_moment(now() + 10.0, fn() { self.pump() }, later=true))
+  } else if self.next < n {
+    let wait = (sample_ms(t, self.next) - (p - base)) / rate
+    self.due = Option::Some(root.at_moment(now() + dmax(1.0, wait), fn() { self.pump() }, later=true))
+  } else if p < end - 1.0 {
+    self.due = Option::Some(root.at_moment(now() + dmax(1.0, (end - p) / rate), fn() { self.pump() }, later=true))
+  } else {
+    (self.ended)()
+  }}
+
+fn Deck::set_playing(self : Deck, on : Bool) -> Unit {
+  let p = self.pos()
+  self.play.set(Play::{ pos: p, at: now(), rate: (self.speed)(), going: on && !(self.held)() })
+  if on {
+    let i = if (self.count)() > 0 { self.locate(p).0 } else { -1 }
+    // After drain, decoder requires a keyframe to resume; re-seek from prior keyframe to avoid freezing until the next GOP.
+    if self.track is None || i < 0 || (self.file)(i) != self.path || self.drained {
+      self.go(p, false)
+    } else {
+      rp_play_warm(cstr(self.path))
+      self.sound_start(p)
+      self.pump()
+    }
+  } else {
+    self.warm = -1.0
+    self.stalled_pump = false
+    self.cancel()
+    self.sound_stop()
+  }}
+
+fn Deck::set_rate(self : Deck, r : Double) -> Unit {
+  let p = self.pos()
+  let was = self.play.untracked()
+  if r == was.rate || (self.sound.on && self.sound.rate == r) {
+    return
+  }
+  self.play.set(Play::{ ..was, pos: p, at: now(), rate: r })
+  if was.going && sounds_at(r) {
+    self.sound_start(p)
+  } else {
+    self.sound_stop()
+  }
+  self.pump()}
+
+fn Deck::close(self : Deck) -> Unit {
+  self.warm = -1.0
+  self.stalled_pump = false
+  self.in_flight.clear()
+  self.cancel()
+  self.cancel_rest()
+  self.sound_stop()
+  if self.sound.dec != 0 {
+    rp_aac_close(self.sound.dec)
+    self.sound.dec = 0
+  }
+  match self.stream {
+    Option::Some(s) => s.close()
+    Option::None => ()
+  }
+  self.stream = Option::None}
+
+fn Deck::rest(self : Deck) -> Unit {
+  self.cancel()
+  self.cancel_rest()
+  self.sound_stop()
+  if self.sound.dec != 0 {
+    rp_aac_close(self.sound.dec)
+    self.sound.dec = 0
+    self.sound.asc = "".to_bytes()
+  }
+  self.sound.track = None}
+
+fn Deck::sound_stop(self : Deck) -> Unit {
+  let s = self.sound
+  match s.due {
+    Option::Some(stop) => stop()
+    Option::None => ()
+  }
+  s.due = Option::None
+  match s.retry {
+    Option::Some(stop) => stop()
+    Option::None => ()
+  }
+  s.retry = Option::None
+  if s.on {
+    // Empty packet flushes queued audio immediately.
+    self.stream().audio("".to_bytes())
+  }
+  s.on = false
+  if s.ts != 0 {
+    rp_ts_close(s.ts)
+    s.ts = 0
+  }}
+
+fn Deck::sound_start(self : Deck, at : Double) -> Unit {
+  self.sound_stop()
+  let s = self.sound
+  let rate = (self.speed)()
+  if !ui::stream_audio_here() || !sounds_at(rate) || (self.count)() == 0 {
+    return
+  }
+  let (i, inside) = self.locate(at)
+  let path = (self.file)(i)
+  guard track_of(path, "soun") is Some(t) && t.codec == "mp4a" else { return }
+  if !self.sound_decoder(t) {
+    return
+  }
+  // Decode from previous AAC frame for MDCT overlap priming, then skip pre-target samples.
+  let k = sample_at(t, inside)
+  let from = imax(0, k - 1)
+  let skip_ms = dmax(0.0, inside - sample_ms(t, from))
+  s.seg = i
+  s.path = path
+  s.track = Option::Some(t)
+  s.next = from
+  s.skip = (skip_ms * 48.0).round().to_int()
+  s.fill = 0
+  s.sent = 0.0
+  let st = self.stream()
+  s.zero = st.audio_played()
+  s.seen = 0.0
+  s.seen_at = now()
+  s.heard_any = false
+  s.ends = -1.0
+  s.rate = rate
+  if rate != 1.0 {
+    s.ts = rp_ts_open(rate)
+  }
+  // Offset first anchor by WSOLA stretcher latency.
+  let first = if s.ts != 0 { rp_ts_lag(s.ts) / rate } else { 0.0 }
+  s.anchors.clear()
+  s.anchors.push((first, (self.start)(i) + sample_ms(t, from) + skip_ms))
+  s.on = true
+  ntrace("sound from \{at} seg=\{i} k=\{from} skip=\{s.skip}")
+  self.sound_tick()}
+
+fn Deck::sound_decoder(self : Deck, t : Mp4Track) -> Bool {
+  let s = self.sound
+  if s.dec != 0 && bytes_eq(s.asc, t.config) {
+    rp_aac_reset(s.dec)
+    return true
+  }
+  if s.dec != 0 {
+    rp_aac_close(s.dec)
+  }
+  s.dec = rp_aac_open(t.config, t.rate, imax(1, t.channels))
+  s.asc = t.config
+  if s.dec == 0 {
+    ntrace("sound: no decoder")
+  }
+  s.dec != 0}
+
+fn Deck::sound_put(self : Deck, pcm : Bytes, pad? : Bool) -> Unit {
+  let pad = match pad { Some(__mbt_v) => __mbt_v, None => false }
+
+  let s = self.sound
+  let mut i = 0
+  let mut pcm = pcm
+  let mut n = pcm.length()
+  if s.skip > 0 {
+    let leave = imin(s.skip * 4, n - n % 4)
+    i = leave
+    s.skip = s.skip - leave / 4
+  }
+  if s.ts != 0 {
+    pcm = rp_ts_feed(s.ts, pcm, i, if pad { 1 } else { 0 })
+    n = pcm.length()
+    i = 0
+  }
+  while i < n {
+    let take = imin(3840 - s.fill, n - i)
+    for j in 0..<take {
+      s.packet[s.fill + j] = pcm[i + j]
+    }
+    s.fill = s.fill + take
+    i = i + take
+    if s.fill == 3840 {
+      self.sound_send()
+    }
+  }
+  if pad && s.fill > 0 {
+    for j in s.fill..<3840 {
+      s.packet[j] = 0.to_byte()
+    }
+    s.fill = 3840
+    self.sound_send()
+  }}
+
+fn Deck::sound_send(self : Deck) -> Unit {
+  let s = self.sound
+  self.stream().audio(mbt_compat::bytes_makei(3840, fn(i) { s.packet[i] }))
+  s.fill = 0
+  s.sent = s.sent + 960.0}
+
+fn Deck::sound_more(self : Deck) -> Bool {
+  let s = self.sound
+  guard s.track is Some(t) else { return false }
+  if s.next < t.samples.length() {
+    let x = t.samples[s.next]
+    s.next = s.next + 1
+    self.sound_put(rp_aac_decode(s.dec, rp_play_read(cstr(s.path), x.at, x.size)))
+    return true
+  }
+  let i = self.index(s.seg, s.path) + 1
+  if i <= 0 || i >= (self.count)() {
+    return false
+  }
+  let path = (self.file)(i)
+  guard track_of(path, "soun") is Some(n) && n.codec == "mp4a" else { return false }
+  if !self.sound_decoder(n) {
+    return false
+  }
+  // Skip negative-PTS AAC priming samples.
+  let first = sample_ms(n, 0)
+  s.skip = s.skip + (dmax(0.0, -first) * 48.0).round().to_int()
+  let lag = if s.ts != 0 { rp_ts_lag(s.ts) / s.rate } else { 0.0 }
+  s.anchors.push((s.sent + (s.fill / 4).to_double() + lag, (self.start)(i) + dmax(0.0, first)))
+  s.seg = i
+  s.path = path
+  s.track = Option::Some(n)
+  s.next = 0
+  true}
+
+fn Deck::sound_pos(self : Deck) -> Option[Double] {
+  let s = self.sound
+  if !s.on {
+    return Option::None
+  }
+  let played = self.stream().audio_played() - s.zero
+  if s.ends >= 0.0 && played >= s.ends {
+    self.sound_stop()
+    return Option::None
+  }
+  // Watchdog: require +48 samples (1 ms) to ignore +/-2 sample jitter on a stopped voice;
+  // allow 2 s before first audio plays (Bluetooth/device wake latency), 500 ms thereafter.
+  if played > s.seen + 48.0 {
+    s.seen = played
+    s.seen_at = now()
+    s.heard_any = true
+  } else if now() - s.seen_at > (if s.heard_any { 500.0 } else { 2000.0 }) {
+    ntrace("sound: not played, the clock alone (asked again in 1 s)")
+    self.sound_stop()
+    self.sound_retry()
+    return Option::None
+  }
+  // Don't pull clock back to audio start before first samples are actually played.
+  if !s.heard_any {
+    return Option::None
+  }
+  while s.anchors.length() > 1 && s.anchors[1].0 <= played {
+    arr_remove(s.anchors, 0) |> ignore
+  }
+  let (from, at) = s.anchors[0]
+  Option::Some(at + dmax(0.0, played - from) / 48.0 * s.rate)}
+
+// Rebase pending positions and audio anchors when expired segments shift t0().
+fn Deck::shifted(self : Deck, by : Double) -> Unit {
+  if self.step_to is Some((at, near)) {
+    self.step_to = Option::Some((at + by, near))
+  }
+  if self.warm >= 0.0 {
+    self.warm_pos = self.warm_pos + by
+  }
+  let s = self.sound
+  for i in 0..<s.anchors.length() {
+    let (from, at) = s.anchors[i]
+    s.anchors[i] = (from, at + by)
+  }}
+
+// Keep >=160 ms (and host reserve + 40 ms) queued; check audio_queued() directly because
+// audio_played() subtracts device latency, which otherwise deadlocks restarts after UI stalls.
+fn Deck::sound_tick(self : Deck) -> Unit {
+  let s = self.sound
+  s.due = Option::None
+  if !s.on {
+    return
+  }
+  let st = self.stream()
+  let want_ms = dmax(160.0, st.audio_wanted() + 40.0)
+  // Cap unplayed audio to prevent unbounded sends to a dead voice while tolerating high-latency headsets.
+  let max_ahead = 48.0 * (want_ms + 1000.0)
+  let mut n = 0
+  // Scale per-tick AAC decode limit with playback rate (24 frames ~= 512 ms at 1x).
+  let limit = (24.0 * dmax(1.0, s.rate)).ceil().to_int()
+  while s.ends < 0.0 && st.audio_queued() < want_ms && s.sent - (st.audio_played() - s.zero) < max_ahead && n < limit {
+    if !self.sound_more() {
+      self.sound_put("".to_bytes(), pad=true)
+      s.ends = s.sent
+    }
+    n = n + 1
+  }
+  match self.sound_pos() {
+    Some(heard) => {
+      let p = self.play.untracked()
+      if p.going {
+        let ours = self.pos()
+        let off = heard - ours
+        let wall = off / s.rate
+        if now() - s.told_at >= 1000.0 {
+          s.told_at = now()
+          ntrace("sound off=\{off} rate=\{p.rate} queued=\{st.audio_queued()} inflight=\{self.in_flight.length()}")
+        }
+        if wall.abs() > 150.0 {
+          ntrace("sound: clock put at \{heard} (was \{ours})")
+          self.play.set(Play::{ pos: heard, at: now(), rate: s.rate, going: true })
+          self.pump()
+        } else {
+          let r = s.rate * (if wall.abs() < 12.0 { 1.0 } else { 1.0 + clamp(wall / 500.0, -0.08, 0.08) })
+          if r != p.rate {
+            self.play.set(Play::{ pos: ours, at: now(), rate: r, going: true })
+          }
+        }
+      }
+    }
+    None => if !s.on { return }
+  }
+  match the_root.v {
+    Some(r) => {
+      let d = self
+      s.due = Option::Some(r.at_moment(now() + 40.0, fn() { d.sound_tick() }, later=true))
+    }
+    None => ()
+  }}
+
+fn Deck::sound_retry(self : Deck) -> Unit {
+  match the_root.v {
+    Some(r) => {
+      let d = self
+      self.sound.retry = Some(
+        r.at_moment(now() + 1000.0, fn() {
+          d.sound.retry = None
+          let p = d.play.untracked()
+          if p.going && !d.sound.on && sounds_at((d.speed)()) && (d.wants)() && !(d.held)() {
+            d.sound_start(d.pos())
+          }
+        }),
+      )
+    }
+    None => ()
+  }}
+
+fn native() -> Deck {
+  match native_made.v {
+    Some(d) => d
+    None => {
+      let d = native_deck()
+      native_made.v = Some(d)
+      d
+    }
+  }}
+
+fn native_deck() -> Deck {
+  Deck::new(count=fn() { segs.length() }, file=fn(i) { segs[i].path }, start=fn(i) { segs[i].start - t0() }, dur=fn(i) { segs[i].dur }, span=span, play=play, speed=fn() { speed.untracked() }, wants=fn() { want_play.untracked() }, held=fn() { (grabbed.untracked() == 3 && scrub_dragged.untracked()) || key_seeking.v }, stops=fn(p) {
+    if clipping.untracked() && p >= clip_b.untracked() {
+      set_playing(false)
+      seek_to(clip_b.untracked())
+      true
+    } else {
+      filter_skip(p)
+    }
+  }, ended=fn() { set_playing(false) }, went=native_went, shape=picture_aspect)}
+
+fn native_went() -> Unit {
+  current.v = native().seg
+  follow_playhead()}
+
+fn follow_playhead() -> Unit {
+  if want_play.untracked() && grabbed.untracked() == 0 && !follow_latest.untracked() && !view_dragging.untracked() &&
+    now() - view_by_hand.v > 3000.0 {
+    let len = signals::untracked(view_len)
+    let from = view_from.untracked()
+    let p = ax_d(pos_now(), len)
+    if p > from + len || p < from {
+      glide()
+      view_from.set(p - len * 0.1)
+      keep_view()
+    }
+  }}
+
+fn native_step(dir : Int) -> Unit {
+  set_playing(false)
+  if segs.is_empty() {
+    return
+  }
+  let (i, inside) = locate(dmax(0.0, dmin(pos_now(), span() - 50.0)))
+  // Flush active segment (at most every 2 s) when stepping into the final second so live frames become available.
+  if dir > 0 && i == segs.length() - 1 && pos_now() >= span() - 1000.0 && rp_now() - step_flushed.v > 2000.0 {
+    step_flushed.v = rp_now()
+    ask_flush()
+  }
+  if !native().open(i) {
+    return
+  }
+  guard native().track is Some(t) else { return }
+  let k = sample_at(t, inside + 0.5) + dir
+  if k >= 0 && k < t.samples.length() {
+    go(segs[i].start - t0() + sample_ms(t, k), false)
+    fine_time.set(true)
+  } else if k < 0 && i > 0 && native().open(i - 1) {
+    guard native().track is Some(p) else { return }
+    go(segs[i - 1].start - t0() + sample_ms(p, p.samples.length() - 1), false)
+    fine_time.set(true)
+  } else if k >= t.samples.length() && i + 1 < segs.length() && native().open(i + 1) {
+    guard native().track is Some(n) else { return }
+    go(segs[i + 1].start - t0() + sample_ms(n, 0), false)
+    fine_time.set(true)
+  }}

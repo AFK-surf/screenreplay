@@ -1,0 +1,57 @@
+import "ui"
+
+fn index_start() -> Unit {
+  if !index_ready.v {
+    index_ready.v = true
+    rp_idx_dir(cstr(pjoin(root_dir(), "Thumbs")))
+  }}
+
+fn seg_at(abs : Double) -> Option[Int] {
+  let mut lo = 0
+  let mut hi = segs.length() - 1
+  while lo <= hi {
+    let mid = (lo + hi) / 2
+    let s = segs[mid]
+    if abs < s.start {
+      hi = mid - 1
+    } else if abs >= s.start + s.dur {
+      lo = mid + 1
+    } else {
+      return Option::Some(mid)
+    }
+  }
+  Option::None}
+
+// rp_idx_at returns -1.0 while indexing and -2.0 on permanent failure.
+fn thumb_failed(at : Double) -> Bool {
+  match seg_at(t0() + at) {
+    Option::None => false
+    Option::Some(i) => rp_idx_at(cstr(segs[i].path), t0() + at - segs[i].start) == -2.0
+  }}
+
+fn thumb_key(at : Double) -> String {
+  match seg_at(t0() + at) {
+    Option::None => ""
+    Option::Some(i) => {
+      let s = segs[i]
+      let inside = t0() + at - s.start
+      let p = cstr(s.path)
+      let ms = rp_idx_at(p, inside)
+      if ms < 0.0 {
+        if ms == -1.0 {
+          rp_idx_prefer(p)
+        }
+        return ""
+      }
+      let key = "ix:\{s.path}:\{ms}"
+      if !ui::image_bytes_for(key).is_some() {
+        let jpeg = rp_idx_jpeg(p, inside)
+        if jpeg.length() == 0 {
+          return ""
+        }
+        ui::add_image(key, jpeg)
+        seg_image_kept(s.path, key)
+      }
+      key
+    }
+  }}

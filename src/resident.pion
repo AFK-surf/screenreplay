@@ -1,0 +1,201 @@
+import "signals"
+import "ui"
+import "view"
+
+fn resident() -> Bool {
+  ui::env("REPLAY_RESIDENT") == "1"}
+
+fn make_popup_window(wid : Int, what : String) -> (view::View) -> Unit {
+  if what == "tray" {
+    fn(root) { tray_popup_window(wid, root) }
+  } else {
+    fn(root) { note_popup_window(wid, root) }
+  }}
+
+fn wire_inproc_popups() -> Unit {
+  if popups_wired.v {
+    return
+  }
+  popups_wired.v = true
+  ui::set_window_tree(make_popup_window)
+  ui::when_window_closed(fn(wid) {
+    if inproc_tray_wid.v == wid {
+      inproc_tray_wid.v = 0
+    }
+    if inproc_note_wid.v == wid {
+      inproc_note_wid.v = 0
+      if rp_window_shown() == 0 {
+        clip_thumbs_forget_all()
+        rp_frame_release()
+      }
+    }
+  })}
+
+fn check_popup_requests() -> Unit {
+  let tseq = rp_tray_req_seq_get()
+  if tseq != tray_req_seen.v {
+    tray_req_seen.v = tseq
+    let px = rp_tray_req_x_get()
+    let py = rp_tray_req_y_get()
+    inproc_tray_pos.v = (px, py)
+    load_settings()
+    status_rev.set(status_rev.untracked() + 1)
+    let h = tray_height_for(signals::untracked(recorder_code))
+    if inproc_tray_wid.v > 0 {
+      rp_style_tray_win(inproc_tray_wid.v, tray_w, h, px, py) |> ignore
+    } else if ui::windows_here() {
+      rp_prepare_popup(1)
+      let wid = ui::window_open_here("tray")
+      rp_prepare_popup(0)
+      if wid > 0 {
+        inproc_tray_wid.v = wid
+        rp_style_tray_win(wid, tray_w, h, px, py) |> ignore
+      }
+    }
+  }
+  let nseq = rp_note_req_seq_get()
+  if nseq != note_req_seen.v {
+    note_req_seen.v = nseq
+    match note_file_ask() {
+      Option::Some(a) if a.mode != "" => {
+        if inproc_note_wid.v == 0 && a.id == last_note_id_closed.v {
+          return
+        }
+        load_settings()
+        inproc_note_ask.set(Some(a))
+        let h = note_ask_height(a)
+        if inproc_note_wid.v > 0 {
+          rp_style_note_win(inproc_note_wid.v, note_w, h) |> ignore
+        } else if ui::windows_here() {
+          rp_prepare_popup(2)
+          let wid = ui::window_open_here("note")
+          rp_prepare_popup(0)
+          if wid > 0 {
+            inproc_note_wid.v = wid
+            rp_style_note_win(wid, note_w, h) |> ignore
+          }
+        }
+      }
+      _ => ()
+    }
+  }}
+
+// Host does not push show/hide events; poll rp_window_turns on rp.wake (WM_CLOSE/SWP_SHOWWINDOW) and 200 ms fallback.
+fn stay_resident(root : view::View) -> Unit {
+  if !resident() || rp_stay_resident() != 1 {
+    return
+  }
+  wire_inproc_popups()
+  turns_seen.v = rp_window_turns()
+  ui::on_message_said("rp.wake", fn(_, _) {
+    check_turns()
+    true
+  })
+  watch_turns(root)}
+
+fn check_turns() -> Unit {
+  if ui::current_window_id() != 0 {
+    return
+  }
+  let now_turns = rp_window_turns()
+  let was = turns_seen.v
+  if now_turns != was {
+    turns_seen.v = now_turns
+    if now_turns >> 16 != was >> 16 {
+      put_away()
+    }
+    if (now_turns & 0xFFFF) != (was & 0xFFFF) {
+      as_opened()
+    }
+  }
+  check_popup_requests()}
+
+fn watch_turns(root : view::View) -> Unit {
+  check_turns()
+  again(root, 200.0, fn() { watch_turns(root) })}
+
+fn hidden_unshown() -> Bool {
+  resident() && ui::env("REPLAY_HIDDEN") == "1" && rp_window_shown() == 0}
+
+// Keep the video stream alive for instant re-show; release decoders, open files, and preview caches.
+fn let_go_while_hidden() -> Unit {
+  ntrace("put away: what it holds let go of")
+  match native_made.v {
+    Some(d) => d.rest()
+    None => ()
+  }
+  rp_play_release()
+  rp_thumb_release()
+  rp_frame_release()
+  tracks_read.clear()
+  clip_history_free()
+  hover_images.forget_all()
+  seg_images_forget_all()
+  clip_thumbs_forget_all()
+  sidecars_clear()
+  app_names.clear()
+  app_names_missed.clear()
+  // Preserve crop preview while an export is still running.
+  if export_out.untracked() == "" {
+    crop_images.forget_all()
+  }}
+
+fn put_away() -> Unit {
+  set_playing(false)
+  close_menu()
+  window_options_open.set(false)
+  if export_out.untracked() == "" {
+    export_open.set(false)
+  }
+  settings_open.set(false)
+  consent_open.set(false)
+  library_open.set(false)
+  if clip_playing.untracked() != "" {
+    close_clip_player()
+  }
+  clipping.set(false)
+  clear_windows()
+  saved.set("")
+  if full_screen.untracked() {
+    set_full_screen(false)
+  }
+  let_go_while_hidden()
+  rp_resident_hidden()}
+
+fn as_opened() -> Unit {
+  // Defer clip-folder scan by 80 ms on first show so the buffer and first frame appear first.
+  let mut defer_clips : Option[view::View] = Option::None
+  match first_show_waits.v {
+    Some(root) => {
+      first_show_waits.v = None
+      awaiting_first_show.set(false)
+      again(root, 3000.0, fn() { refresh(root, false) })
+      defer_clips = Some(root)
+    }
+    None => ()
+  }
+  ask_flush()
+  app_names.clear()
+  app_icons_found.clear()
+  load()
+  status_rev.set(status_rev.untracked() + 1)
+  if rp_take_request(cstr(pjoin(root_dir(), "settings.request"))) != 0 {
+    load_settings()
+    settings_open.set(true)
+  }
+  consent_check()
+  follow_latest.set(true)
+  keep_view()
+  if !segs.is_empty() {
+    seek_to(span() - 30000.0)
+  }
+  match defer_clips {
+    Option::Some(root) => root.at_moment(now() + 80.0, fn() { load_clips() }) |> ignore
+    Option::None => ()
+  }}
+
+// DWM-cloak the first frame so shaders and UI shell warm up before hiding.
+fn start_hidden() -> Unit {
+  if resident() && ui::env("REPLAY_HIDDEN") == "1" {
+    rp_start_resident_hidden()
+  }}

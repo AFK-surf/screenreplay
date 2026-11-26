@@ -1,0 +1,567 @@
+import "headless"
+import "hostapi"
+import "lg"
+import "mbt_compat"
+import "motion"
+import "signals"
+import "ui"
+import "view"
+
+let sf_shortcut_keys_of : mbt_compat::Ref[(String) -> String] = mbt_compat::ref_new(fn(_ : String) -> String { "" })
+
+fn sf_set_shortcuts(keys : (String) -> String) -> Unit {
+  sf_shortcut_keys_of.v = keys
+}
+
+fn sf_shortcut_keys(action : String) -> String {
+  if action == "" || hostapi::keyboard() == 0 {
+    ""
+  } else {
+    (sf_shortcut_keys_of.v)(action)
+  }
+}
+
+fn sf_set_dark(dark : Option[Bool]) -> Unit {
+  lg::set_dark(dark)
+}
+
+fn sf_ui_theme_now() -> ui::Theme {
+  let th = lg::ui_theme()
+  ui::Theme::{
+    dark: th.dark,
+    bg: th.bg,
+    surface: th.surface,
+    fg: th.fg,
+    muted: th.muted,
+    subtle: th.subtle,
+    faint: th.faint,
+    border: th.border,
+    line: th.line,
+    accent: th.accent,
+    on_accent: th.on_accent,
+    primary: th.primary,
+    on_primary: th.on_primary,
+    positive: th.positive,
+    danger: th.danger,
+    on_danger: th.on_danger,
+    hover: th.hover,
+    field_hover: th.field_hover,
+    focus: th.focus,
+    scrim: th.scrim,
+    shadow: th.shadow,
+    thumb: th.thumb,
+    radius: th.radius,
+    radius_lg: th.radius_lg,
+    radius_dialog: th.radius_dialog,
+    font: th.font,
+    font_sm: th.font_sm,
+    font_title: th.font_title,
+    font_heading: th.font_heading,
+    control_h: th.control_h,
+    focus_w: th.focus_w,
+    focus_gap: th.focus_gap,
+    raised: th.raised,
+    card: th.card,
+    accent_text: th.accent_text,
+    accent_bg: th.accent_bg,
+    danger_bg: th.danger_bg,
+    neutral: th.neutral,
+    selected: th.selected,
+    link: th.link,
+    warn: th.warn,
+    warn_ink: th.warn_ink,
+    lifted: th.lifted,
+    wash: th.wash,
+    sidebar: th.sidebar,
+    list: th.list,
+    text: th.text,
+    leading: th.leading,
+    radii: th.radii,
+    corner_ladder: th.corner_ladder,
+    corner_fit: th.corner_fit,
+    lit_apart: th.lit_apart,
+    lit_reach: th.lit_reach,
+    text_line: th.text_line,
+    tabular: true,
+  }
+}
+
+fn sf_node_words_w(s : String, size : Double, weight~ : Int = 400) -> Double {
+  let style = if ui::tree_theme().tabular { hostapi::style_tabular } else { 0 }
+  ui::measure_text_width(s, size, weight=weight, style_bits=style)
+}
+
+struct TipLayer {
+  layer : () -> Option[view::View]
+  active : signals::Signal[Option[headless::TipOwner]]
+  group : headless::TooltipGroup[headless::TipOwner]
+}
+
+fn TipLayer::new(layer : () -> Option[view::View]) -> TipLayer {
+  let active : signals::Signal[Option[headless::TipOwner]] = signals::signal_by(None, fn(a, b) { a == b })
+  let group = headless::TooltipGroup::new(
+    fn() { active.get() },
+    fn(k) { active.set(k) },
+    open_delay_ms=420.0,
+    warmup_ms=headless::tooltip_skip_ms,
+  )
+  TipLayer::{ layer, active, group }
+}
+
+fn sf_tip_node(
+  tips : TipLayer,
+  anchor : view::View,
+  label : () -> String,
+  side~ : view::Side = view::Side::Bottom,
+  shortcut~ : String = "",
+) -> Unit {
+  let open : signals::Signal[Bool] = signals::signal(false)
+  let shut : signals::Signal[Bool] = signals::signal(false)
+  let anchor_id = anchor.id()
+  let owner = headless::tip_node_owner()
+  let over_now = fn() -> Bool {
+    match ui::pointing() {
+      ui::Pointing::Mouse => anchor.pointed()
+      _ => false
+    }
+  }
+  anchor.reacts(fn() { (anchor.pressed(), over_now(), anchor.focus_shown()) }, at_start=false, fn(st) {
+    let (down, over, focused) = st
+    if down {
+      shut.set(true)
+    } else if !over && !focused {
+      shut.set(false)
+    }
+  })
+  let group_disabled = fn() -> Bool {
+    label() == "" || shut.get() || anchor.pressed()
+  }
+  tips.group.trigger(anchor, owner, disabled=group_disabled)
+  let made : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
+  let holder_v : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
+  let make = fn() -> Bool {
+    match (tips.layer)() {
+      None => false
+      Some(l) => {
+        let holder = l.box(fn(h) {
+          let _ = h.transitions_only().over(view::Live::Is(true))
+        }).lives_with(anchor)
+        holder_v.v = Some(holder)
+        holder.show(fn() { open.get() }, leave=motion::tip_out_ms, fn(t) {
+          let _ = t.over(view::Live::Is(true))
+          let _ = headless::tooltip_bubble(t, label, fn(b) {
+            let (ov_look, _) = motion::overlay_presence(b, enter=motion::tip_in, exit=motion::tip_out)
+            let _ = b
+              .over(view::Live::Is(true))
+              .points(view::Live::Is(false))
+              .beside(anchor_id, side=side, offset=6.0)
+              .row(view::Live::Is(true))
+              .lines_up(view::Live::Is(Some(view::Along::Middle)))
+              .gap(view::Live::Is(6.0))
+              .padding(view::Live::Is((8.0, 5.0, 8.0, 5.0)))
+              .corners(view::Live::Is(Some((6.0, 6.0, 6.0, 6.0))))
+              .ground(view::Live::By(fn() -> Int64 { tone(0x2B2D32FFL, 0x17181BFFL) }))
+              .edge(view::Live::By(fn() -> (Double, Int64) { (1.0, tone(0xFFFFFF24L, 0x00000024L)) }))
+              .alpha(view::Live::By(fn() -> Double { ov_look().alpha }))
+            let _ = b.box(fn(w) {
+              let _ = w
+                .words(view::Live::By(label))
+                .words_look(view::Live::Is(lg::words_at(11.5, weight=500)))
+                .ink(view::Live::Is(0xF5F6F8FFL))
+            })
+            b.show(fn() { sf_shortcut_keys(shortcut) != "" }, fn(k) {
+              let _ = k
+                .padding(view::Live::Is((4.0, 1.0, 4.0, 1.0)))
+                .corners(view::Live::Is(Some((4.0, 4.0, 4.0, 4.0))))
+                .ground(view::Live::Is(0xFFFFFF1FL))
+                .words(view::Live::By(fn() { sf_shortcut_keys(shortcut) }))
+                .words_look(view::Live::Is(lg::words_at(10.5, weight=600)))
+                .ink(view::Live::Is(0xD4D7DDFFL))
+            })
+          })
+        })
+        true
+      }
+    }
+  }
+  anchor.reacts(fn() { tips.group.is_open(owner) && !group_disabled() }, fn(on) {
+    if on == open.untracked() {
+      return
+    }
+    if on {
+      if !made.v {
+        made.v = make()
+      }
+      if made.v {
+        headless::tip_claim(owner)
+      }
+    }
+    match holder_v.v {
+      Some(h) => {
+        if h.alive() {
+          view::transition(within=h, fn() { open.set(on) })
+        } else {
+          open.set(on)
+        }
+      }
+      None => open.set(on)
+    }
+  })
+}
+
+fn utf8_encode(s : String) -> Bytes {
+  s.to_bytes()
+}
+
+fn text_of(b : Bytes) -> String {
+  let sb = StringBuilder::new()
+  let n = b.length()
+  let mut i = 0
+  while i < n {
+    let c0 = b[i].to_int()
+    if c0 < 0x80 {
+      sb.write_char(int_to_char(c0))
+      i += 1
+    } else if (c0 & 0xE0) == 0xC0 && i + 1 < n {
+      let c1 = b[i + 1].to_int()
+      if (c1 & 0xC0) == 0x80 {
+        let cp = ((c0 & 0x1F) << 6) | (c1 & 0x3F)
+        if cp >= 0x80 {
+          sb.write_char(int_to_char(cp))
+          i += 2
+        } else {
+          sb.write_char('\u{FFFD}')
+          i += 1
+        }
+      } else {
+        sb.write_char('\u{FFFD}')
+        i += 1
+      }
+    } else if (c0 & 0xF0) == 0xE0 && i + 2 < n {
+      let c1 = b[i + 1].to_int()
+      let c2 = b[i + 2].to_int()
+      if (c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 {
+        let cp = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F)
+        if cp >= 0x800 && (cp < 0xD800 || cp > 0xDFFF) {
+          sb.write_char(int_to_char(cp))
+          i += 3
+        } else {
+          sb.write_char('\u{FFFD}')
+          i += 1
+        }
+      } else {
+        sb.write_char('\u{FFFD}')
+        i += 1
+      }
+    } else if (c0 & 0xF8) == 0xF0 && i + 3 < n {
+      let c1 = b[i + 1].to_int()
+      let c2 = b[i + 2].to_int()
+      let c3 = b[i + 3].to_int()
+      if (c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80 {
+        let cp = ((c0 & 0x07) << 18) | ((c1 & 0x3F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F)
+        if cp >= 0x10000 && cp <= 0x10FFFF {
+          sb.write_char(int_to_char(cp))
+          i += 4
+        } else {
+          sb.write_char('\u{FFFD}')
+          i += 1
+        }
+      } else {
+        sb.write_char('\u{FFFD}')
+        i += 1
+      }
+    } else {
+      sb.write_char('\u{FFFD}')
+      i += 1
+    }
+  }
+  sb.to_string()
+}
+
+fn int_to_char(cp : Int) -> Char {
+  if cp >= 0 && cp <= 0x10FFFF && (cp < 0xD800 || cp > 0xDFFF) {
+    cp.unsafe_to_char()
+  } else {
+    '\u{FFFD}'
+  }
+}
+
+fn bytes_slice(b : Bytes, start : Int, end : Int) -> Bytes {
+  let lo = if start < 0 { 0 } else if start > b.length() { b.length() } else { start }
+  let hi = if end < lo { lo } else if end > b.length() { b.length() } else { end }
+  let sb = StringBuilder::new()
+  let mut i = lo
+  while i < hi {
+    sb.write_byte(b[i])
+    i += 1
+  }
+  sb.to_string().to_bytes()
+}
+
+fn parse_double_or(s : String, fallback : Double) -> Double {
+  match mbt_compat::str_try_parse_double(s) {
+    Ok(v) => v
+    Err(_) => fallback
+  }
+}
+
+fn println(s : String) -> Unit {
+  let b = s.to_bytes()
+  c_rp_stdout(bytes_data_ptr(b), b.length().to_int64())
+}
+
+fn dmax(a : Double, b : Double) -> Double {
+  if a > b { a } else { b }
+}
+
+fn dmin(a : Double, b : Double) -> Double {
+  if a < b { a } else { b }
+}
+
+fn imax(a : Int, b : Int) -> Int {
+  if a > b { a } else { b }
+}
+
+fn imin(a : Int, b : Int) -> Int {
+  if a < b { a } else { b }
+}
+
+fn str_to_ascii_lower(s : String) -> String {
+  let sb = StringBuilder::new()
+  let mut i = 0
+  while i < s.length() {
+    let c = s.code_unit_at(i)
+    if c >= 65 && c <= 90 {
+      sb.write_byte((c + 32) as Byte)
+    } else {
+      sb.write_byte(c as Byte)
+    }
+    i += 1
+  }
+  sb.to_string()
+}
+
+fn str_to_ascii_upper(s : String) -> String {
+  let sb = StringBuilder::new()
+  let mut i = 0
+  while i < s.length() {
+    let c = s.code_unit_at(i)
+    if c >= 97 && c <= 122 {
+      sb.write_byte((c - 32) as Byte)
+    } else {
+      sb.write_byte(c as Byte)
+    }
+    i += 1
+  }
+  sb.to_string()
+}
+
+fn arr_remove[T](xs : Array[T], idx : Int) -> T {
+  let v = xs[idx]
+  let mut i = idx
+  while i + 1 < xs.length() {
+    xs[i] = xs[i + 1]
+    i += 1
+  }
+  let _ = xs.pop()
+  v
+}
+
+fn arr_insert[T](xs : Array[T], idx : Int, v : T) -> Unit {
+  xs.push(v)
+  let mut i = xs.length() - 1
+  while i > idx {
+    xs[i] = xs[i - 1]
+    i -= 1
+  }
+  xs[idx] = v
+}
+
+fn arr_append[T](dst : Array[T], src : Array[T]) -> Unit {
+  for x in src {
+    dst.push(x)
+  }
+}
+
+fn arr_filter[T](xs : Array[T], pred : (T) -> Bool) -> Array[T] {
+  let out : Array[T] = []
+  for x in xs {
+    if pred(x) {
+      out.push(x)
+    }
+  }
+  out
+}
+
+fn arr_map[T, U](xs : Array[T], f : (T) -> U) -> Array[U] {
+  let out : Array[U] = []
+  for x in xs {
+    out.push(f(x))
+  }
+  out
+}
+
+fn arr_mapi[T, U](xs : Array[T], f : (Int, T) -> U) -> Array[U] {
+  let out : Array[U] = []
+  let mut i = 0
+  while i < xs.length() {
+    out.push(f(i, xs[i]))
+    i += 1
+  }
+  out
+}
+
+fn arr_fold[T, U](xs : Array[T], init : U, f : (U, T) -> U) -> U {
+  let mut acc = init
+  for x in xs {
+    acc = f(acc, x)
+  }
+  acc
+}
+
+fn arr_sort_by[T](xs : Array[T], cmp : (T, T) -> Int) -> Unit {
+  let n = xs.length()
+  let mut i = 1
+  while i < n {
+    let key = xs[i]
+    let mut j = i - 1
+    while j >= 0 && cmp(xs[j], key) > 0 {
+      xs[j + 1] = xs[j]
+      j -= 1
+    }
+    xs[j + 1] = key
+    i += 1
+  }
+}
+
+fn arr_sort_double(xs : Array[Double]) -> Unit {
+  arr_sort_by(xs, fn(a : Double, b : Double) -> Int {
+    if a < b { -1 } else if a > b { 1 } else { 0 }
+  })
+}
+
+fn arr_search_str(xs : Array[String], target : String) -> Option[Int] {
+  let mut i = 0
+  while i < xs.length() {
+    if xs[i] == target {
+      return Some(i)
+    }
+    i += 1
+  }
+  None
+}
+
+fn arr_search_double(xs : Array[Double], target : Double) -> Option[Int] {
+  let mut i = 0
+  while i < xs.length() {
+    if xs[i] == target {
+      return Some(i)
+    }
+    i += 1
+  }
+  None
+}
+
+fn opt_map[T, U](o : Option[T], f : (T) -> U) -> Option[U] {
+  match o {
+    Some(v) => Some(f(v))
+    None => None
+  }
+}
+
+fn bytes_eq(a : Bytes, b : Bytes) -> Bool {
+  if a.length() != b.length() {
+    return false
+  }
+  let mut i = 0
+  while i < a.length() {
+    if a[i] != b[i] {
+      return false
+    }
+    i += 1
+  }
+  true
+}
+
+fn bytes_make(n : Int, fill : Byte) -> Bytes {
+  let sb = StringBuilder::new()
+  let mut i = 0
+  while i < n {
+    sb.write_byte(fill)
+    i += 1
+  }
+  sb.to_string().to_bytes()
+}
+
+fn str_has_char(chars : String, c : Int) -> Bool {
+  let mut i = 0
+  while i < chars.length() {
+    if chars.code_unit_at(i) == c {
+      return true
+    }
+    i += 1
+  }
+  false
+}
+
+fn str_trim_end_chars(s : String, chars : String) -> String {
+  let mut hi = s.length()
+  while hi > 0 && str_has_char(chars, s.code_unit_at(hi - 1)) {
+    hi -= 1
+  }
+  s.slice(0, hi)
+}
+
+fn str_trim_start_chars(s : String, chars : String) -> String {
+  let mut lo = 0
+  let n = s.length()
+  while lo < n && str_has_char(chars, s.code_unit_at(lo)) {
+    lo += 1
+  }
+  s.slice(lo, n)
+}
+
+fn str_rev_find(s : String, pat : String) -> Option[Int] {
+  let n = s.length()
+  let m = pat.length()
+  if m == 0 || m > n {
+    return None
+  }
+  let mut i = n - m
+  while i >= 0 {
+    let mut ok = true
+    let mut j = 0
+    while j < m {
+      if s.code_unit_at(i + j) != pat.code_unit_at(j) {
+        ok = false
+        break
+      }
+      j += 1
+    }
+    if ok {
+      return Some(i)
+    }
+    i -= 1
+  }
+  None
+}
+
+fn str_replace_all(s : String, old : String, rep : String) -> String {
+  if old == "" {
+    return s
+  }
+  let parts = s.split(old)
+  if parts.length() <= 1 {
+    return s
+  }
+  let sb = StringBuilder::new()
+  let mut i = 0
+  while i < parts.length() {
+    if i > 0 {
+      sb.write_string(rep)
+    }
+    sb.write_string(parts[i])
+    i += 1
+  }
+  sb.to_string()
+}

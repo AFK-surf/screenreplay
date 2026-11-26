@@ -1,0 +1,909 @@
+import "hostapi"
+import "host"
+import "mbt_compat"
+import "signals"
+import "ui"
+import "view"
+
+fn exe_dir() -> String {
+  text_of(rp_exe_dir())}
+
+fn title_h() -> Double {
+  if is_mac() {
+    44.0
+  } else {
+    40.0
+  }}
+
+fn refresh(root : view::View, first : Bool) -> Unit {
+  load()
+  if clipping.untracked() {
+    load_windows()
+  } else if !snaps.is_empty() {
+    clear_windows()
+    clip_history_free()
+  }
+  status_rev.set(status_rev.untracked() + 1)
+  if rp_take_request(cstr(pjoin(root_dir(), "settings.request"))) != 0 {
+    load_settings()
+    settings_open.set(true)
+  }
+  if first {
+    ask_flush()
+    consent_check()
+  } else if rp_window_shown() == 1 && !segs.is_empty() && signals::untracked(recorder_status).1 &&
+    rp_now() - (t0() + span()) > 6000.0 {
+    // Flush active 30 s segment when >6 s behind so the live timeline stays current.
+    ask_flush()
+  }
+  if current.v < 0 && !segs.is_empty() {
+    keep_view()
+    seek_to(span() - 30000.0)
+  } else {
+    keep_view()
+  }
+  again(root, 3000.0, fn() { refresh(root, false) })}
+
+fn status_words(code : String, arg : String) -> String {
+  match code {
+    "recording" => t("后台录制中")
+    "locked" => t("已锁屏，暂停中")
+    "paused" => tf("已暂停，{0} 继续", [arg])
+    "fullscreen" => t("全屏应用在前台，暂停中")
+    "disabled" => t("后台录制已关闭")
+    "diskLow" => t("磁盘空间不足，暂停录制")
+    "noDisplay" => t("找不到主显示器")
+    "startFailed" => t("录制没能开始")
+    "noPermission" | "permission" => t("未授予录屏权限")
+    "noEncoder" => t("显卡不支持硬件视频编码，无法录制")
+    _ => t("启动中…")
+  }}
+
+fn window_key(parent : view::View, label : () -> String, icon : () -> String, press : () -> Unit, close? : Bool, snap? : Bool) -> Unit {
+  let close = match close { Some(__mbt_v) => __mbt_v, None => false }
+  let snap = match snap { Some(__mbt_v) => __mbt_v, None => false }
+
+  pressable(parent, label, press, fn(b) {
+    // Maximize button hover/press can come from host Windows Snap Layouts.
+    let lit = fn() { b.pointed() || b.pressed() || (snap && ui::window_snap_state() != 0) }
+    let held = fn() { b.pressed() || (snap && ui::window_snap_state() == 2) }
+    b
+    .width(view::Live::Is(Some(key_w)))
+    .height(view::Live::Is(Some(title_h())))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .cursor(view::Live::Is(Some(view::Cursor::Arrow)))
+    .ground(view::Live::By(fn() {
+      let on = lit()
+      if !on {
+        0L
+      } else if close {
+        if held() { 0xB0271AFFL } else { 0xC42B1CFFL }
+      } else if held() {
+        tone(0xFFFFFF0FL, 0x0000000AL)
+      } else {
+        press_ground()
+      }
+    }))
+    |> ignore
+    sf_icon_node(b, "", 12.0, view::Live::By(fn() {
+        let on = lit()
+        if on && close {
+          0xFFFFFFFFL
+        } else if on {
+          ui_text()
+        } else {
+          ui_muted()
+        }
+      }), name_now=icon)
+    |> ignore
+  })
+  |> ignore}
+
+fn title_bar(parent : view::View) -> Unit {
+  let th = title_h()
+  let mac = is_mac()
+  parent.box(fn(bar) {
+    bar.row(view::Live::Is(true)).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))).ground(view::Live::By(c_bg)) |> ignore
+    // Windows: manual system menu on right-click; macOS: moves_window handles titlebar double-click.
+    let moves = fn(v : view::View) {
+      v.presses(view::Live::Is(true)).moves_window(view::Live::Is(true)) |> ignore
+      if !mac {
+        v.on_menu(fn(m) { rp_system_menu(m.wx * v.pixel_scale(), m.wy * v.pixel_scale()) }) |> ignore
+      }
+    }
+    // Measure both sides post-layout and lock min_width so center stays centered without overlap.
+    let side_need : signals::Signal[Double] = signals::signal_by(0.0, fn(a, b) { a == b })
+    let left_box : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
+    let right_box : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
+    let measure = fn() -> Unit { __mbt_local_title_bar_measure_5(bar, left_box, right_box, side_need) }
+    bar.reacts(
+      fn() {
+        recorder_status().0 + "|" + library_open.get().to_string() + "|" + is_english().to_string() + "|" + hostapi::window_inset().to_string()
+      },
+      fn(_) { bar.at_moment(now() + 30.0, measure, later=true) |> ignore },
+    )
+    bar.box(fn(side) {
+      side.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::By(fn() { Some(side_need.get()) })).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+      moves(side)
+      side.box(fn(left) {
+        left_box.v = Some(left)
+        left.row(view::Live::Is(true)).padding(view::Live::By(fn() { (if mac && hostapi::window_inset() { 82.0 } else { 14.0 }, 0.0, 8.0, 0.0) })).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        left.pick(fn() { library_open.get() }, fn(b, lib) {
+          b.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+          if lib {
+            icon_button(b, fn() { "chevron-left" }, fn() { t("回放") }, fn() { library_open.set(false) }, side=view::Side::Bottom) |> ignore
+            words(b, fn() { t("已保存片段") }, 12.0, ui_text, weight=500) |> ignore
+            words(b, fn() {
+              clips_rev.get() |> ignore
+              tf("共 {0} 个", [clip_files.length().to_string()])
+            }, 12.0, ui_subtle)
+            |> ignore
+          } else {
+            app_logo(b, 16.0)
+            words(b, fn() { "ScreenReplay" }, 12.0, ui_muted) |> ignore
+          }
+        }, at_once=true)
+      })
+      |> ignore
+    })
+    |> ignore
+    bar.box(fn(o) {
+      o.row(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)).gap(view::Live::Is(10.0)).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).clips(view::Live::Is(true)) |> ignore
+      moves(o)
+      // Use laid_nowhere instead of pick so text nodes stay direct flex children and can ellipsize.
+      let kind = fn() { if library_open.get() || !has_segs() { 0 } else if clipping.get() { 1 } else { 2 } }
+      let app_now = fn() {
+        data()
+        app_at(pos_drawn(o))
+      }
+      o.box(fn(pill) {
+        pill
+        .laid_nowhere(view::Live::By(fn() { kind() != 1 }))
+        .height(view::Live::Is(Some(22.0)))
+        .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+        .radius(view::Live::Is(11.0))
+        .ground(view::Live::By(c_s3))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .lies_along(view::Live::Is(view::Lies::Middle))
+        |> ignore
+        words(pill, fn() { t("剪辑") }, 12.0, ui_text, weight=500) |> ignore
+      })
+      |> ignore
+      words(o, fn() {
+        let at = t0() + pos_drawn(o)
+        day_name(at) + " " + wall(at)
+      }, 12.0, ui_text, weight=500)
+      .laid_nowhere(view::Live::By(fn() { kind() != 2 }))
+      .shrink(view::Live::Is(0.01))
+      .min_width(view::Live::Is(Some(0.0)))
+      .allow_ellipsis(view::Live::Is(true))
+      |> ignore
+      // Shrink priority: app name (400) -> relative time (0.05) -> wall clock (0.01).
+      words(o, fn() { ago(t0() + pos_drawn(o)) }, 12.0, ui_muted)
+      .laid_nowhere(view::Live::By(fn() { kind() != 2 }))
+      .shrink(view::Live::Is(0.05))
+      .min_width(view::Live::Is(Some(0.0)))
+      .allow_ellipsis(view::Live::Is(true))
+      |> ignore
+      words(o, fn() { "·   " + app_name(app_now()) }, 12.0, ui_muted)
+      .laid_nowhere(view::Live::By(fn() { kind() != 2 || app_now() == "" }))
+      .shrink(view::Live::Is(400.0))
+      .min_width(view::Live::Is(Some(0.0)))
+      .allow_ellipsis(view::Live::Is(true))
+      |> ignore
+    })
+    |> ignore
+    bar.box(fn(side) {
+      side.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::By(fn() { Some(side_need.get()) })).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
+      moves(side)
+      side.box(fn(content) {
+        right_box.v = Some(content)
+        content.row(view::Live::Is(true)).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        content.box(fn(tools) {
+          tools.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).padding(view::Live::Is((0.0, 0.0, if mac { 14.0 } else { 6.0 }, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+          recorder_chip(tools)
+          icon_button(tools, fn() { if library_open.get() { "folder" } else { "clips" } }, fn() { if library_open.get() { t("打开文件夹") } else { t("已保存片段") } }, fn() {
+            if library_open.untracked() {
+              rp_mkdirs(cstr(clips_dir())) |> ignore
+              if rp_launch(cstr(clips_dir())) == 0 {
+                library_message.set(t("文件夹未能打开"))
+              }
+              return
+            }
+            set_playing(false)
+            clips_read()
+            library_open.set(true)
+          }, side=view::Side::Bottom)
+          |> ignore
+          icon_button(tools, fn() { "settings" }, fn() { t("设置") }, fn() {
+            load_settings()
+            purge_state.set(0)
+            settings_open.set(true)
+          }, shortcut="settings", side=view::Side::Bottom)
+          |> ignore
+        })
+        |> ignore
+        if !mac {
+          window_key(content, fn() { t("最小化") }, fn() { "minus" }, fn() { hostapi::window_act(1) })
+          window_key(content, fn() { if ui::window_zoomed() { t("还原") } else { t("最大化") } }, fn() {
+            if ui::window_zoomed() {
+              "copy"
+            } else {
+              "square"
+            }
+          }, fn() { hostapi::window_act(2) }, snap=true)
+          window_key(content, fn() { t("关闭") }, fn() { "close" }, fn() { hostapi::window_act(3) }, close=true)
+        }
+      })
+      |> ignore
+    })
+    |> ignore
+    // Register maximize button rect for Windows Snap Layouts.
+    if !mac {
+      let snap = bar.by_room(fn(_, room) {
+        bar.reacts(fn() { room.width() }, fn(w) { hostapi::window_snap(w - key_w * 2.0, 0.0, key_w, th) })
+      })
+      snap.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
+    }
+  })
+  |> ignore}
+
+fn picture(parent : view::View) -> Unit {
+  parent.box(fn(stage) {
+    stage
+    .grow(view::Live::Is(1.0))
+    .over(view::Live::By(fn() { full_screen.get() }))
+    .ground(view::Live::By(fn() { if full_screen.get() { picture_ground } else { well() } }))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .clips(view::Live::Is(true))
+    |> ignore
+    stage.pick(fn() { has_segs() }, fn(b, any) {
+      if any {
+        b.grow(view::Live::Is(1.0)).fills_across(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
+        b.box(fn(pic) {
+          pic
+          .aspect(view::Live::By(fn() { picture_aspect.get() }))
+          .height_share(view::Live::Is(1.0))
+          .max_width(view::Live::Is(None), within=true)
+          .ground(view::Live::Is(picture_ground))
+          .clips(view::Live::Is(true))
+          .presses(view::Live::Is(true))
+          .on_press(fn() { set_playing(!want_play.untracked()) })
+          .on_double_press(fn() { set_full_screen(!full_screen.untracked()) })
+          .on_wheel_moves(pic_wheel)
+          .on_menu(fn(m) { open_moment_menu(m.wx, m.wy, pos_now(), true) })
+          .on_pointer_moved(fn() {
+            (pointer_moved.v)()
+            picker_at.set(pic.pointer_here())
+          })
+          |> ignore
+          native()
+          .picture(pic)
+          .grow(view::Live::Is(1.0))
+          .ground(view::Live::Is(picture_ground))
+          |> pic_zoomed_node
+          play_state_over(pic)
+          pic_zoom_pill(pic)
+          window_picker(pic)
+        })
+        |> ignore
+      } else {
+        b.show(fn() { !awaiting_first_show.get() }, fn(e) {
+          e.lines_up(view::Live::Is(Some(view::Along::Middle))).gap(view::Live::Is(8.0)) |> ignore
+          sf_icon_node(e, "monitor", 32.0, view::Live::By(ui_subtle)) |> ignore
+          words(e, fn() { t("还没有录像") }, 15.0, ui_text, weight=600) |> ignore
+          words(e, fn() { t("后台录制开始后，最近的录像会出现在这里") }, 12.0, ui_subtle) |> ignore
+        }, at_once=true)
+        |> ignore
+      }
+    }, at_once=true)
+    saved_note(stage)
+    told_layer(stage)
+  })
+  |> ignore}
+
+fn set_full_screen(on : Bool) -> Unit {
+  full_screen.set(rp_fullscreen(if on { 1 } else { 0 }) == 1)}
+
+fn controls(parent : view::View) -> Unit {
+  parent.box(fn(row) {
+    row.row(view::Live::Is(true)).height(view::Live::Is(Some(32.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    let play_key = fn(b : view::View, press : () -> Unit) { play_button(b, press) }
+    row.box(fn(left) {
+      left.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).clips(view::Live::Is(true)) |> ignore
+      left.pick(fn() { clipping.get() }, fn(b, clip) {
+        b.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        if clip {
+          window_bar(b)
+        } else {
+          icon_button(b, fn() {
+              match the_root.v {
+                Some(r) if mark_at_playhead(r) is Some(_) => "bookmark-on"
+                _ => "bookmark"
+              }
+            }, fn() {
+              match the_root.v {
+                Some(r) if mark_at_playhead(r) is Some(_) => t("移除这里的标记")
+                _ => t("在当前位置加标记")
+              }
+            }, fn() {
+              match the_root.v {
+                Some(r) => toggle_marker(r)
+                None => ()
+              }
+            }, shortcut="mark")
+          |> ignore
+          icon_button(b, fn() { if full_screen.get() { "unfull" } else { "full" } }, fn() {
+              if full_screen.get() {
+                t("退出全屏")
+              } else {
+                t("全屏")
+              }
+            }, fn() {
+              set_full_screen(!full_screen.untracked())
+            }, shortcut="full")
+          |> ignore
+          volume_control(b)
+        }
+      }, at_once=true)
+    })
+    |> ignore
+    row.box(fn(mid) {
+      mid.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+      let slot_w = 112.0
+      mid.box(fn(l) {
+        l.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 6.0, 0.0))) |> ignore
+        l.show(fn() { clipping.get() }, fn(b) {
+          words(b, fn() {
+            let (a, z) = (clip_a.get(), clip_b.get())
+            let at = clip_time(clamp(pos_drawn(b), a, z))
+            clock(at) + " / " + clock(clip_kept())
+          }, 13.0, ui_muted, weight=500) |> ignore
+        }, at_once=true)
+        |> ignore
+      })
+      |> ignore
+      icon_button(mid, fn() { "back-15" }, fn() { t("后退 15 秒") }, fn() { jump_by(-15000.0) }, shortcut="back15") |> ignore
+      play_key(mid, fn() {
+        if clipping.untracked() {
+          if want_play.untracked() {
+            set_playing(false)
+          } else {
+            play_clip()
+          }
+        } else {
+          set_playing(!want_play.untracked())
+        }
+      })
+      icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒") }, fn() { jump_by(15000.0) }, shortcut="on15") |> ignore
+      mid.box(fn(r) {
+        r.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Start)).padding(view::Live::Is((6.0, 0.0, 0.0, 0.0))) |> ignore
+        speed_key(r)
+      })
+      |> ignore
+    })
+    |> ignore
+    row.box(fn(right) {
+      right.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
+      right.pick(fn() { clipping.get() }, fn(b, clip) {
+        b.row(view::Live::Is(true)).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        if clip {
+          window_options_button(b)
+          b.box(fn(h) {
+            h.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+            for step in [("undo", true), ("redo", false)] {
+              let (name, back) = step
+              let can = fn() { if back { clip_can_undo() } else { clip_can_redo() } }
+              icon_button(h, fn() { name }, fn() { if back { t("撤销") } else { t("重做") } }, fn() {
+                if back {
+                  clip_undo() |> ignore
+                } else {
+                  clip_redo() |> ignore
+                }
+              }, shortcut=name)
+              .alpha(view::Live::By(fn() { if can() { 1.0 } else { 0.35 } }))
+              .presses(view::Live::By(can))
+              |> ignore
+            }
+          })
+          |> ignore
+          text_button(b, fn() { t("取消") }, fn() { clipping.set(false) }, ghost=true) |> ignore
+          let save_k = solid_button(b, fn() { t("保存…") }, open_export, icon="download", small=fn() {
+            if cropping() {
+              let (w, h, _, _, _) = export_plan()
+              "\{w}×\{h} · " + size_text()
+            } else {
+              clock(clip_kept())
+            }
+          })
+          tip(save_k, fn() { t("保存片段") }, shortcut="save")
+        } else {
+          b.show(fn() { filter_on() && ax_on() }, fn(x) {
+            x.padding(view::Live::Is((0.0, 0.0, 2.0, 0.0))) |> ignore
+            words(x, filter_summary, 12.0, ui_subtle) |> ignore
+          }, at_once=true)
+          apps_key(b)
+          zoom_key(b)
+          b.show(fn() { !follow_latest.get() }, fn(x) {
+            text_button(x, fn() { t("回到最新") }, show_latest, ghost=true) |> ignore
+          }, at_once=true)
+          let clip = text_button(b, fn() { t("剪辑") }, start_clip, icon="scissors")
+          tip(clip, fn() { t("剪辑") }, shortcut="clip")
+        }
+      }, at_once=true)
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, stage? : Bool) -> Unit {
+  let now = match now { Some(__mbt_v) => __mbt_v, None => fn() { speed.get() } }
+  let set = match set { Some(__mbt_v) => __mbt_v, None => set_speed }
+  let stage = match stage { Some(__mbt_v) => __mbt_v, None => false }
+
+  let label = fn() {
+    let s = now()
+    if s == s.floor() {
+      "\{s.to_int()}×"
+    } else {
+      "\{s}×"
+    }
+  }
+  let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
+  let k = pressable(parent, label, fn() {
+    guard key.v is Some(b) else { return }
+    let chosen = signals::untracked(now)
+    open_menu_under(b, arr_map(speeds, fn(s) {
+        let name = if s == s.floor() { "\{s.to_int()}×" } else { "\{s}×" }
+        Some(MenuEntry::{ label: name, key: if s == chosen { "✓" } else { "" }, act: fn() { set(s) } })
+      }), above=true)
+  }, fn(b) {
+    let (hand, _) = answer(b)
+    b
+    .row(view::Live::Is(true))
+    .gap(view::Live::Is(2.0))
+    .padding(view::Live::Is((8.0, 0.0, 5.0, 0.0)))
+    .height(view::Live::Is(Some(28.0)))
+    .radius(view::Live::Is(6.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .ground(view::Live::By(fn() {
+      let on = if stage { stage_hover } else { c_s3() }
+      mix(clear(on), on, hand.shown(b))
+    }))
+    |> ignore
+    words(b, label, 12.0, fn() {
+      if stage {
+        mix(stage_muted, stage_text, hand.shown(b))
+      } else {
+        mix(ui_muted(), ui_text(), hand.shown(b))
+      }
+    }, weight=500)
+    |> ignore
+    b.box(fn(c) {
+      c.width(view::Live::Is(Some(10.0))).height(view::Live::Is(Some(10.0))).picture(view::Live::Is(Some(vector("M2.5 3.75 5 6.25 7.5 3.75", 10.0, 10.0, stroke=1.25)))).tint(view::Live::By(fn() {
+        if stage {
+          mix(stage_subtle, stage_muted, hand.shown(b))
+        } else {
+          mix(ui_subtle(), ui_muted(), hand.shown(b))
+        }
+      })) |> ignore
+    })
+    |> ignore
+  })
+  key.v = Some(k)}
+
+fn zoom_key(parent : view::View) -> Unit {
+  let zoom_tip = fn() { t(if is_mac() { "时间线缩放 · ⌘+滚轮" } else { "时间线缩放 · Ctrl+滚轮" }) }
+  let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
+  let k = pressable(parent, zoom_tip, fn() {
+    guard key.v is Some(b) else { return }
+    let total = view_total()
+    let len = signals::untracked(view_len)
+    let entries : Array[Option[MenuEntry]] = []
+    for step in [(60000.0, "1 分钟"), (300000.0, "5 分钟"), (600000.0, "10 分钟"), (1800000.0, "30 分钟"), (3600000.0, "1 小时")] {
+      if step.0 < total {
+        entries.push(Some(MenuEntry::{ label: t(step.1), key: if (len - step.0).abs() < 1.0 { "✓" } else { "" }, act: fn() { zoom_to(step.0) } }))
+      }
+    }
+    entries.push(Some(MenuEntry::{ label: t("全部"), key: if len >= total - 1.0 { "✓" } else { "" }, act: fn() { zoom_to(total) } }))
+    open_menu_under(b, entries, above=true)
+  }, fn(b) {
+    let (hand, _) = answer(b)
+    let ink = fn() { mix(ui_muted(), ui_text(), hand.shown(b)) }
+    b
+    .row(view::Live::Is(true))
+    .gap(view::Live::Is(5.0))
+    .padding(view::Live::Is((8.0, 0.0, 8.0, 0.0)))
+    .height(view::Live::Is(Some(28.0)))
+    .radius(view::Live::Is(6.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .ground(view::Live::By(fn() { mix(clear(c_s3()), c_s3(), hand.shown(b)) }))
+    .laid_nowhere(view::Live::By(fn() { !has_segs() }))
+    |> ignore
+    b.box(fn(g) {
+      g
+      .width(view::Live::Is(Some(14.0)))
+      .height(view::Live::Is(Some(14.0)))
+      .picture(view::Live::Is(Some(vectors(14.0, 14.0, [("M1.8 6a4.2 4.2 0 1 0 8.4 0a4.2 4.2 0 1 0-8.4 0z", 1.5), ("M9.2 9.2 12.5 12.5", 1.5)]))))
+      .tint(view::Live::By(ink))
+      |> ignore
+    })
+    |> ignore
+    words(b, fn() { view_len_words(view_len()) }, 12.0, ink, weight=500) |> ignore
+    b.box(fn(c) {
+      c.width(view::Live::Is(Some(8.0))).height(view::Live::Is(Some(8.0))).picture(view::Live::Is(Some(vector("M1.5 3 4 5.5 6.5 3", 8.0, 8.0, stroke=1.25)))).tint(view::Live::By(ink)) |> ignore
+    })
+    |> ignore
+  })
+  tip(k, zoom_tip)
+  key.v = Some(k)}
+
+fn dock(parent : view::View) -> Unit {
+  rule(parent, hair)
+  parent.box(fn(d) {
+    // Top padding (dock_over) lives inside timeline() so hover preview covers the heatmap and margin above it.
+    d.ground(view::Live::By(c_bg)).padding(view::Live::Is((20.0, 0.0, 20.0, 6.0))) |> ignore
+    d.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
+    d.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
+    controls(d)
+  })
+  |> ignore}
+
+fn key_bindings() -> view::Keymap {
+  let k = fn(code : Int, action : String, mods : Int) -> view::Binding {
+    view::Binding::{ keys: [view::Stroke::{ code: code, mods: mods }], action: action, when: view::KeyWhen::Always }
+  }
+  let ch = fn(c : Char, action : String, mods : Int) { k(ui::key_of_char(c), action, mods) }
+  let shift = ui::mod_shift_key
+  let keys = [
+    k(ui::key_space, "play", 0),
+    ch('k', "play", 0),
+    ch('f', "full", 0),
+    k(ui::key_escape, "escape", 0),
+    k(ui::key_code_enter, "save", 0),
+    k(ui::key_code_enter, "save-copy", shift),
+    k(ui::key_code_left, "frame-back", 0),
+    k(ui::key_code_right, "frame-on", 0),
+    k(ui::key_code_left, "back5", shift),
+    k(ui::key_code_right, "on5", shift),
+    ch('j', "back15", 0),
+    ch('l', "on15", 0),
+    ch(',', "frame-back", 0),
+    ch('.', "frame-on", 0),
+    k(ui::key_code_home, "home", 0),
+    k(ui::key_code_end, "latest", 0),
+    k(ui::key_code_page_up, "page-back", 0),
+    k(ui::key_code_page_down, "page-on", 0),
+    ch('=', "zoom-in", 0),
+    ch('=', "zoom-in", shift),
+    ch('+', "zoom-in", 0),
+    ch('+', "zoom-in", shift),
+    ch('-', "zoom-out", 0),
+    ch('0', "pic-fit", 0),
+    ch('[', "mark-back", 0),
+    ch(']', "mark-on", 0),
+    ch('i', "clip-start", 0),
+    ch('o', "clip-end", 0),
+    ch('c', "clip", 0),
+    k(ui::key_code_copy, "copy-frame", ui::mod_ctrl),
+    ch('s', "save", ui::mod_ctrl),
+    ch('s', "save-copy", ui::mod_ctrl | shift),
+    ch(',', "settings", ui::mod_ctrl),
+    ch('m', "mark", 0),
+  ]
+  if is_mac() {
+    keys.push(k(ui::key_code_copy, "copy-frame", ui::mod_cmd))
+    keys.push(ch('c', "copy-frame", ui::mod_ctrl))
+    keys.push(ch('s', "save", ui::mod_cmd))
+    keys.push(ch('s', "save-copy", ui::mod_cmd | shift))
+    keys.push(ch(',', "settings", ui::mod_cmd))
+    keys.push(k(ui::key_code_left, "home", ui::mod_cmd))
+    keys.push(k(ui::key_code_right, "latest", ui::mod_cmd))
+    keys.push(ch('=', "zoom-in", ui::mod_cmd))
+    keys.push(ch('=', "zoom-in", ui::mod_cmd | shift))
+    keys.push(ch('+', "zoom-in", ui::mod_cmd))
+    keys.push(ch('+', "zoom-in", ui::mod_cmd | shift))
+    keys.push(ch('-', "zoom-out", ui::mod_cmd))
+    keys.push(ch('0', "pic-fit", ui::mod_cmd))
+  }
+  arr_append(keys, region_bindings())
+  view::Keymap::new(keys)}
+
+fn layer_keys(v : view::View, names : Array[String]) -> Unit {
+  for name in names {
+    v.on_action(name, fn(_) {
+      match actions.get(name) {
+        Option::Some(f) => {
+          f()
+          true
+        }
+        Option::None => false
+      }
+    })
+    |> ignore
+  }}
+
+fn replay_actions(root : view::View) -> Unit {
+  let on = fn(name : String, f : () -> Unit) {
+    actions.set(name, f)
+    root.on_action(name, fn(_) {
+      if (segs.is_empty() || library_open.untracked()) && name != "escape" && name != "settings" {
+        return false
+      }
+      f()
+      true
+    })
+    |> ignore
+  }
+  on("settings", fn() {
+    if !consent_open.untracked() && !export_open.untracked() && clip_playing.untracked() == "" {
+      load_settings()
+      purge_state.set(0)
+      settings_open.set(!settings_open.untracked())
+    }
+  })
+  on("play", fn() {
+    if clipping.untracked() {
+      if want_play.untracked() {
+        set_playing(false)
+      } else {
+        play_clip()
+      }
+    } else {
+      set_playing(!want_play.untracked())
+    }
+  })
+  on("full", fn() { set_full_screen(!full_screen.untracked()) })
+  on("save", fn() { if export_open.untracked() { export_now(false) } else if clipping.untracked() { open_export() } })
+  on("save-copy", fn() {
+    if export_open.untracked() {
+      export_now(true)
+    } else if clipping.untracked() {
+      if !signals::untracked(cropping) {
+        save_clip(copy=true)
+      } else {
+        open_export()
+        export_now(true)
+      }
+    }
+  })
+  on("escape", fn() {
+    if window_options_open.untracked() {
+      window_options_open.set(false)
+      menu_up.set(false)
+    } else if menu_up.untracked() {
+      close_menu()
+    } else if av1_note.untracked() != "" {
+      av1_note.set("")
+    } else if consent_open.untracked() {
+      if consent_reading.untracked() {
+        consent_open.set(false)
+      } else if is_mac() {
+        if resident() {
+          rp_tray_hide()
+        } else {
+          hostapi::exit(0)
+        }
+      } else {
+        hostapi::window_act(3)
+      }
+    } else if clip_playing.untracked() != "" {
+      if full_screen.untracked() {
+        set_full_screen(false)
+      } else {
+        close_clip_player()
+      }
+    } else if export_open.untracked() {
+      if export_out.untracked() != "" {
+        rp_export_cancel()
+        rp_concat_cancel()
+      } else {
+        export_open.set(false)
+      }
+    } else if settings_open.untracked() {
+      if purge_state.untracked() == 1 {
+        purge_state.set(0)
+      } else {
+        purge_state.set(0)
+        settings_open.set(false)
+      }
+    } else if library_open.untracked() {
+      if delete_pending.untracked() != "" {
+        delete_pending.set("")
+      } else {
+        library_open.set(false)
+      }
+    } else if clipping.untracked() && region.untracked() is Some(_) {
+      clear_region()
+    } else if full_screen.untracked() {
+      set_full_screen(false)
+    } else if picked_hwnd.untracked() != 0L {
+      pick_window(Option::None)
+    } else if clipping.untracked() {
+      clipping.set(false)
+    } else {
+      saved.set("")
+    }
+  })
+  on("back5", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(-10.0, 0.0) {
+      jump_to(pos_now() - 5000.0)
+    }
+  })
+  on("on5", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(10.0, 0.0) {
+      jump_to(pos_now() + 5000.0)
+    }
+  })
+  on("back1", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(-10.0, 0.0) {
+      jump_to(pos_now() - 1000.0)
+    }
+  })
+  on("on1", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(10.0, 0.0) {
+      jump_to(pos_now() + 1000.0)
+    }
+  })
+  on("back15", fn() { jump_by(-15000.0) })
+  on("on15", fn() { jump_by(15000.0) })
+  on("frame-back", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(-1.0, 0.0) {
+      native_step(-1)
+    }
+  })
+  on("frame-on", fn() {
+    if region_selected.untracked() {
+      clip_mark()
+    }
+    if !region_nudge(1.0, 0.0) {
+      native_step(1)
+    }
+  })
+  on("home", fn() { jump_to(if clipping.untracked() { clip_a.untracked() } else { 0.0 }) })
+  on("latest", fn() { if clipping.untracked() { jump_to(clip_b.untracked()) } else { show_latest() } })
+  on("zoom-in", fn() { zoom_by(2.0) })
+  on("zoom-out", fn() { zoom_by(0.5) })
+  on("pic-fit", pic_fit)
+  on("mark-back", fn() {
+    match next_mark(-1) {
+      Option::Some(at) => jump_to(at)
+      Option::None => ()
+    }
+  })
+  on("mark-on", fn() {
+    match next_mark(1) {
+      Option::Some(at) => jump_to(at)
+      Option::None => ()
+    }
+  })
+  on("clip-start", fn() {
+    clip_mark()
+    set_clip_start(pos_now())
+  })
+  on("clip-end", fn() {
+    clip_mark()
+    set_clip_end(pos_now())
+  })
+  on("clip", fn() { if clipping.untracked() { clipping.set(false) } else { start_clip() } })
+  on("mark", fn() { toggle_marker(root) })
+  on("copy-frame", fn() { copy_frame(pos_now(), shown=true) })}
+
+fn make_window(root : view::View) -> Unit {
+  the_root.v = Some(root)
+  root.tree.hand_over_presses(false)
+  // Must set theme after tree creation; pre-run theme is overwritten when the window is constructed.
+  ui::set_tree_theme(sf_ui_theme_now)
+  load_prefs()
+  ask_system(root)
+  keep_theme(root)
+  index_start()
+  root.ground(view::Live::By(c_bg)).keymap(view::Live::Is(key_bindings())) |> ignore
+  replay_actions(root)
+  region_keys(root)
+  watch_pointer(root)
+  dev_pointer(root)
+  let dev_saved = ui::env("REPLAY_DEV_SAVED")
+  if dev_saved != "" {
+    saved.set(if dev_saved == "-" { t("正在保存…") } else { tf("已保存 {0} 的片段", ["0:30"]) })
+    saved_path.set(if dev_saved == "-" { "" } else { dev_saved })
+  }
+  let top = root.box(fn(b) {
+    title_bar(b)
+    rule(b, fn() { tone(0x00000080L, 0x00000014L) })
+  })
+  chrome(root, top)
+  picture(root)
+  // Spacer keeps the dock pinned to the bottom when picture switches to over() in fullscreen.
+  root.box(fn(s) { s.grow(view::Live::Is(1.0)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore }) |> ignore
+  let foot = root.box(fn(b) { dock(b) })
+  chrome(root, foot)
+  library_layer(root)
+  settings_dialog(root)
+  window_options_layer(root)
+  export_dialog(root)
+  clip_player_layer(root)
+  av1_note_layer(root)
+  consent_sheet(root)
+  apps_layer(root)
+  menu_layer(root)
+  index_watch(root)
+  perf_watch(root)
+  update_watch(root)
+  if hidden_unshown() {
+    awaiting_first_show.set(true)
+  }
+  root.reacts(fn() { ((c_bg() >> 8) & 0xFFFFFFL).to_int() }, fn(rgb) { rp_set_bg_rgb(rgb) })
+  root.at_moment(now() + 1.0, fn() {
+    // Started hidden/cloaked by recorder: defer folder load/decode until first real show (resident.pion).
+    if hidden_unshown() {
+      first_show_waits.v = Some(root)
+      stay_resident(root)
+      rp_alt_arrows() |> ignore
+      rp_resident_primed()
+      return
+    }
+    refresh(root, true)
+    stay_resident(root)
+    rp_alt_arrows() |> ignore
+    load_clips()
+  })
+  |> ignore}
+
+fn main() -> Unit {
+  host::install()
+  if demux_dump() {
+    return
+  }
+  sf_set_shortcuts(shortcut_words)
+  if note_mode() != "" {
+    rp_start_hidden()
+    hostapi::window_setup(note_w, note_h(), note_w, note_h(), true)
+    ui::run("ScreenReplay", note_window, theme=sf_ui_theme_now)
+    return
+  }
+  if tray_mode() {
+    rp_start_hidden()
+    hostapi::window_setup(tray_w, tray_h, tray_w, tray_h, true)
+    ui::run("ScreenReplay", tray_window, theme=sf_ui_theme_now)
+    return
+  }
+  rp_set_bg_rgb(((signals::untracked(c_bg) >> 8) & 0xFFFFFFL).to_int())
+  start_hidden()
+  hostapi::window_setup(1000.0, 720.0, 1440.0, 900.0, true)
+  // Pass theme to ui::run so host clear color matches dark background instead of white.
+  ui::run("ScreenReplay", make_window, theme=sf_ui_theme_now)
+}
+fn __mbt_local_title_bar_measure_5(bar : view::View, left_box : mbt_compat::Ref[Option[view::View]], right_box : mbt_compat::Ref[Option[view::View]], side_need : signals::Signal[Double]) -> Unit {
+      match (left_box.v, right_box.v) {
+        (Some(l), Some(r)) => {
+          let w = dmax(l.laid_size().0, r.laid_size().0).ceil()
+          if w <= 0.0 {
+            bar.at_moment(now() + 100.0, fn() { __mbt_local_title_bar_measure_5(bar, left_box, right_box, side_need) }, later=true) |> ignore
+          } else {
+            side_need.set(w)
+          }
+        }
+        _ => ()
+      }
+    }
+
+

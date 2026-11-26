@@ -32,7 +32,6 @@ public enum Status {
     CGPreflightPostEventAccess() || AXIsProcessTrusted()
   }
 
-  /// Live permissions, responsible process, and display inventory for this process.
   public static func now() -> [String: Any] {
     let online = onlineDisplays()
     let mainID = CGMainDisplayID()

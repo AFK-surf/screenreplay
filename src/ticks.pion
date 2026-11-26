@@ -1,0 +1,186 @@
+import "mbt_compat"
+import "signals"
+import "view"
+
+fn tick_step(len : Double, w : Double) -> Double {
+  let least = tick_room / dmax(1.0, w) * len
+  for s in tick_steps {
+    if s >= least {
+      return s
+    }
+  }
+  tick_steps[tick_steps.length() - 1]}
+
+fn tick_major(step : Double) -> Double {
+  if step < 60000.0 {
+    60000.0
+  } else if step < 3600000.0 {
+    3600000.0
+  } else {
+    86400000.0
+  }}
+
+fn tick_kept(at : Double) -> Bool {
+  match axis() {
+    Option::None => true
+    Option::Some(a) => {
+      let i = ax_find(a, at)
+      i >= 0 && at <= a.ks[i].1
+    }
+  }}
+
+#derive(Eq)
+pub struct Tick {
+  at : Double
+  text : String
+  major : Bool
+}
+
+fn ticks_in(a : Double, z : Double, step : Double) -> Array[Tick] {
+  let out : Array[Tick] = []
+  if segs.is_empty() {
+    return out
+  }
+  let vl = signals::untracked(view_len)
+  let b0 = dmax(0.0, ax_b(dmax(0.0, a), vl))
+  let b1 = dmin(span(), ax_b(z, vl))
+  if b1 <= b0 {
+    return out
+  }
+  let off = rp_local_offset().to_double() * 60000.0
+  let base = t0()
+  let major = tick_major(step)
+  let mut lt = ((base + b0 + off) / step).ceil() * step
+  while lt - off - base <= b1 && out.length() < 400 {
+    let at = lt - off - base
+    if tick_kept(at) {
+      let day = lt - (lt / 86400000.0).floor() * 86400000.0
+      let text = if day == 0.0 {
+        let (_, m, d) = civil_from_days((lt / 86400000.0).floor().to_int())
+        month_day(m, d)
+      } else if step < 60000.0 {
+        wall(base + at)
+      } else {
+        wall(base + at, short=true)
+      }
+      let on_major = lt - (lt / major).floor() * major == 0.0
+      out.push(Tick::{ at: at, text: text, major: on_major })
+    }
+    lt += step
+  }
+  out}
+
+fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
+  parent.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
+    // Quantize visible range on 1.5x steps so tick nodes only rebuild when crossing a bucket.
+    let reach = signals::computed_by(fn(_) {
+      let (from, len) = shown(o)
+      let width = dmax(1.0, w())
+      let q = min_view * mbt_compat::math_pow(1.5, (mbt_compat::math_ln(dmax(1.0, len / min_view)) / mbt_compat::math_ln(1.5)).floor())
+      let at = (from / q).floor() * q
+      (at - q, at + 3.0 * q, tick_step(len, width))
+    }, fn(a, b) { a == b })
+    let named = signals::computed_ref(fn(_) {
+      let (a, z, _) = reach.get()
+      let (_, len) = shown(o)
+      let min_dur = 30.0 / dmax(1.0, w()) * len
+      let vl = view_len()
+      let out : Array[(Double, Double, Double)] = []
+      for p in pieces_now.get() {
+        if p.2 == "" || p.1 - p.0 < min_dur {
+          continue
+        }
+        let d0 = ax_d(p.0, vl)
+        let d1 = ax_d(p.1, vl)
+        if d1 - d0 >= min_dur && d1 > a && d0 < z {
+          out.push((p.0, p.1, sf_node_words_w(app_name(p.2), 12.0).ceil()))
+        }
+      }
+      out
+    })
+    let gaps_in = signals::computed_ref(fn(_) {
+      let (a, z, _) = reach.get()
+      let vl = view_len()
+      arr_filter(gaps_now.get(), fn(g) { ax_d(g.1, vl) > a && ax_d(g.0, vl) < z })
+    })
+    let gap_w = sf_node_words_w(t("未录制"), 11.0).ceil()
+    // Mirror piece_labels/gap_labels layout widths to detect label collisions.
+    let in_way = fn(v : view::View, x0 : Double, x1 : Double) -> Bool {
+      let width = w()
+      for p in named.get() {
+        let a = clamp(x_drawn_of(v, p.0, width), 0.0, width)
+        let z = clamp(x_drawn_of(v, p.1, width), 0.0, width)
+        let room = z - a - 1.0
+        if room < 30.0 || a > x1 {
+          continue
+        }
+        let end = dmin(a + room, a + 9.0 + 14.0 + (if room >= 52.0 { 7.0 + p.2 } else { 0.0 }) + 4.0)
+        if end > x0 {
+          return true
+        }
+      }
+      for g in gaps_in.get() {
+        let a = clamp(x_drawn_of(v, g.0, width), 0.0, width)
+        let z = clamp(x_drawn_of(v, g.1, width), 0.0, width)
+        if z - a - 1.0 >= 72.0 {
+          let mid = (a + z) / 2.0
+          if mid + gap_w / 2.0 + 4.0 > x0 && mid - gap_w / 2.0 - 4.0 < x1 {
+            return true
+          }
+        }
+      }
+      false
+    }
+    o.each(fn() {
+      let (a, z, step) = reach.get()
+      data()
+      axis_now.get() |> ignore
+      ticks_in(a, z, step)
+    }, fn(k : Tick) -> String { "\{k.at}/\{k.text}" }, fn(row, k) {
+      let tick = k.untracked()
+      let tw = sf_node_words_w(tick.text, tick_size, weight=if tick.major { 600 } else { 500 }).ceil()
+      row.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+      let x = fn(v : view::View) { x_drawn_of(v, tick.at, w()) }
+      let place = fn(v : view::View) -> Option[Double] {
+        let at = x(v)
+        if at < 0.0 || at > w() {
+          return None
+        }
+        for k in 0..=12 {
+          let shift = (if k % 2 == 1 { 1.0 } else { -1.0 }) * ((k + 1) / 2).to_double() * 6.0
+          let left = at - tw / 2.0 + shift
+          if left >= 2.0 && left + tw <= w() - 2.0 && !in_way(v, left - 2.0, left + tw + 2.0) {
+            return Some(left)
+          }
+        }
+        None
+      }
+      row.box(fn(l) {
+        l
+        .over(view::Live::Is(true))
+        .width(view::Live::Is(Some(1.0)))
+        .height(view::Live::Is(Some(tick_h)))
+        .ground(view::Live::By(fn() { if tick.major { tone(0xFFFFFF99L, 0x00000099L) } else { tone(0xFFFFFF66L, 0x00000066L) } }))
+        .laid_nowhere(view::Live::By(fn() { place(l) is None }))
+        .offset(view::Live::By(fn() { (x(l) - 0.5, strip_h - tick_h) }))
+        |> ignore
+      })
+      |> ignore
+      row.box(fn(b) {
+        b
+        .over(view::Live::Is(true))
+        .laid_nowhere(view::Live::By(fn() { place(b) is None }))
+        .offset(view::Live::By(fn() { (place(b).unwrap_or(0.0), strip_h - 15.0) }))
+        |> ignore
+        words(b, fn() { tick.text }, tick_size, if tick.major { ui_text } else { ui_muted }, weight=if tick.major {
+          600
+        } else {
+          500
+        })
+        |> ignore
+      })
+      |> ignore
+    }, at_once=true)
+  })
+  |> ignore}

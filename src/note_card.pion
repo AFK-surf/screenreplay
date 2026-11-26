@@ -1,0 +1,412 @@
+import "hostapi"
+import "mbt_compat"
+import "signals"
+import "ui"
+import "view"
+
+fn note_mode() -> String {
+  ui::env("REPLAY_NOTE")}
+
+fn note_h() -> Double {
+  if note_mode() == "saved" && ui::env("REPLAY_NOTE_PATH") != "" {
+    note_clip_h
+  } else {
+    note_line_h
+  }}
+
+fn note_body(parent : view::View, title : () -> String, path : String, play : () -> Unit, reveal : () -> Unit, close : () -> Unit, warning? : Bool, mark? : String) -> Unit {
+  let warning = match warning { Some(__mbt_v) => __mbt_v, None => false }
+  let mark = match mark { Some(__mbt_v) => __mbt_v, None => "check-circle" }
+
+  parent.padding(view::Live::Is(if path == "" { (14.0, 0.0, 8.0, 0.0) } else { (14.0, 14.0, 14.0, 14.0) })).gap(view::Live::Is(12.0)) |> ignore
+  if path == "" {
+    parent.row(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).gap(view::Live::Is(10.0)) |> ignore
+    glyph(parent, fn() { if warning { "warn-tri" } else { mark } }, 16.0, fn() {
+      if warning {
+        warn()
+      } else {
+        ui_muted()
+      }
+    })
+    words(parent, title, 13.0, ui_text, weight=500).grow(view::Live::Is(1.0)).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).allow_ellipsis(view::Live::Is(true))
+    |> ignore
+    icon_button(parent, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore
+    return
+  }
+  let name = pbase(path)
+  parent.box(fn(head) {
+    head.row(view::Live::Is(true)).height(view::Live::Is(Some(72.0))).gap(view::Live::Is(12.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    pressable(head, fn() { t("播放") }, play, fn(pic) {
+      pic
+      .width(view::Live::Is(Some(128.0)))
+      .height(view::Live::Is(Some(72.0)))
+      .radius(view::Live::Is(6.0))
+      .clips(view::Live::Is(true))
+      .ground(view::Live::Is(picture_ground))
+      .lines_up(view::Live::Is(Some(view::Along::Middle)))
+      .lies_along(view::Live::Is(view::Lies::Middle))
+      .edge(view::Live::By(fn() { (1.0, if pic.pointed() { tone(0xFFFFFF33L, 0x00000040L) } else { hair2() }) }))
+      |> ignore
+      // Host image on an unrounded child so letterboxed frames aren't independently rounded; parent clips() rounds full-bleed corners.
+      pic.box(fn(o) {
+        o
+        .over(view::Live::Is(true))
+        .presses(view::Live::Is(false))
+        .image(view::Live::By(fn() {
+          clips_rev.get() |> ignore
+          let k = clip_thumb(path)
+          if k == "" || k == "!" {
+            None
+          } else {
+            Some((k, "", 256))
+          }
+        }))
+        .image_contains(view::Live::Is(true))
+        |> ignore
+      })
+      |> ignore
+      pic.box(fn(o) {
+        o.over(view::Live::Is(true)).pad(view::Live::Is(5.0)).lines_up(view::Live::Is(Some(view::Along::End))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
+        let ms = clip_duration(path)
+        if ms > 0.0 {
+          o.box(fn(tag) {
+            tag.height(view::Live::Is(Some(18.0))).padding(view::Live::Is((5.0, 0.0, 5.0, 0.0))).radius(view::Live::Is(4.0)).ground(view::Live::Is(0x000000B3L)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
+            words(tag, fn() { clock(ms) }, 11.0, fn() { 0xFFFFFFFFL }, weight=500) |> ignore
+          })
+          |> ignore
+        }
+      })
+      |> ignore
+      pic.box(fn(o) {
+        o
+        .over(view::Live::Is(true))
+        .presses(view::Live::Is(false))
+        .ground(view::Live::Is(0x00000040L))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .lies_along(view::Live::Is(view::Lies::Middle))
+        .alpha(view::Live::By(fn() { if pic.pointed() { 1.0 } else { 0.0 } }))
+        |> ignore
+        o.box(fn(c) {
+          c.width(view::Live::Is(Some(28.0))).height(view::Live::Is(Some(28.0))).radius(view::Live::Is(14.0)).ground(view::Live::Is(0xFFFFFFE6L)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
+          sf_icon_node(c, "play", 13.0, view::Live::Is(0x0F1011FFL)) |> ignore
+        })
+        |> ignore
+      })
+      |> ignore
+    })
+    |> ignore
+    head.box(fn(says) {
+      says.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::Is(Some(0.0))).gap(view::Live::Is(4.0)) |> ignore
+      says.box(fn(top) {
+        top.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        sf_icon_node(top, "check-circle", 14.0, view::Live::By(ui_muted)) |> ignore
+        words(top, title, 13.0, ui_text, weight=600).grow(view::Live::Is(1.0)).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).allow_ellipsis(view::Live::Is(true))
+        |> ignore
+      })
+      |> ignore
+      words(says, fn() { clip_title(name) }, 12.0, ui_muted).allow_ellipsis(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
+      words(says, fn() { bytes_text(rp_size(cstr(path))) }, 12.0, ui_subtle) |> ignore
+    })
+    |> ignore
+    head.box(fn(c) {
+      c.height(view::Live::Is(Some(72.0))) |> ignore
+      icon_button(c, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore
+    })
+    |> ignore
+  })
+  |> ignore
+  parent.box(fn(acts) {
+    acts.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    let even = fn(b : view::View) { b.grow(view::Live::Is(1.0)).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore }
+    even(text_button(acts, fn() { t("播放") }, play, icon="play", small=true))
+    even(text_button(acts, fn() { if note_copied.get() == path { t("已复制") } else { t("复制") } }, fn() {
+        if rp_copy_file(cstr(path)) == 1 {
+          note_copied.set(path)
+        }
+      }, icon="copy", small=true))
+    even(text_button(acts, fn() { t(if is_mac() { "在 Finder 中显示" } else { "打开位置" }) }, reveal, icon="folder", small=true))
+  })
+  |> ignore}
+
+fn note_pending(parent : view::View, title : () -> String, close : () -> Unit) -> Unit {
+  parent.padding(view::Live::Is((14.0, 0.0, 8.0, 0.0))).row(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).gap(view::Live::Is(10.0)) |> ignore
+  parent.box(fn(d) {
+    d.width(view::Live::Is(Some(16.0))).height(view::Live::Is(Some(16.0))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
+    d.box(fn(dot) {
+      dot.width(view::Live::Is(Some(8.0))).height(view::Live::Is(Some(8.0))).radius(view::Live::Is(4.0)).ground(view::Live::By(ui_muted)).alpha(view::Live::By(fn() { note_breath(dot) })) |> ignore
+    })
+    |> ignore
+  })
+  |> ignore
+  words(parent, title, 13.0, ui_text, weight=500).grow(view::Live::Is(1.0)).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).allow_ellipsis(view::Live::Is(true))
+  |> ignore
+  icon_button(parent, fn() { "close" }, fn() { t("关闭") }, close, w=28.0, h=28.0, size=12.0) |> ignore}
+
+fn note_breath(v : view::View) -> Double {
+  if motion_off() {
+    return 0.8
+  }
+  let k = v.cycle_resident(1400.0)
+  0.775 + 0.225 * mbt_compat::math_cos(k * 2.0 * 3.141592653589793)}
+
+#derive(Eq)
+struct NoteAsk {
+  id : Int
+  mode : String
+  path : String
+  text : String
+  warn : Bool
+}
+
+fn note_file_ask() -> Option[NoteAsk] {
+  let path = pjoin(root_dir(), "note.json")
+  let written = rp_modified(cstr(path))
+  let size = rp_size(cstr(path))
+  let (seen, seen_size, kept) = note_read.v
+  if written == seen && size == seen_size && written >= 0.0 {
+    return kept
+  }
+  let ask = note_file_parse(path)
+  note_read.v = (written, size, ask)
+  ask}
+
+fn note_file_parse(path : String) -> Option[NoteAsk] {
+  match parse(read_text(path)) {
+    Option::Some(Object(o)) => {
+      let str = fn(k : String) -> String {
+        match o.get(k) {
+          Option::Some(String(v)) => v
+          _ => ""
+        }
+      }
+      let id = match o.get("id") {
+        Option::Some(Number(n, _)) => n.to_int()
+        _ => -1
+      }
+      Option::Some(NoteAsk::{ id: id, mode: str("mode"), path: str("path"), text: str("text"), warn: o.get("warn") is Some(True) })
+    }
+    _ => Option::None
+  }}
+
+fn note_ask_height(a : NoteAsk) -> Double {
+  if a.mode == "saved" && a.path != "" {
+    note_clip_h
+  } else {
+    note_line_h
+  }}
+
+fn note_popup_window(wid : Int, root : view::View) -> Unit {
+  root.tree.hand_over_presses(false)
+  ui::set_tree_theme(sf_ui_theme_now)
+  root.ground(view::Live::By(c_s2)) |> ignore
+  let gone = fn() {
+    match inproc_note_ask.untracked() {
+      Some(a) => last_note_id_closed.v = a.id
+      None => ()
+    }
+    ui::window_close_here(wid)
+  }
+  let leave_gen : mbt_compat::Ref[Int] = mbt_compat::ref_new(0)
+  let schedule_leave = fn(ms : Double) -> Unit {
+    leave_gen.v += 1
+    let mine = leave_gen.v
+    let check = fn() -> Unit { __mbt_local_note_popup_window_check_6(leave_gen, mine, gone, root, wid) }
+    again(root, ms, check)
+  }
+  let shown_at : mbt_compat::Ref[Double] = mbt_compat::ref_new(rp_now())
+  let apply_ask = fn(a : NoteAsk) {
+    rp_style_note_win(wid, note_w, note_ask_height(a)) |> ignore
+    shown_at.v = rp_now()
+    if a.mode != "saved" || a.path != "" {
+      schedule_leave(if a.mode == "saved" { 8000.0 } else if a.warn { 7000.0 } else { 4000.0 })
+    } else {
+      leave_gen.v += 1
+    }
+  }
+  match inproc_note_ask.untracked() {
+    Some(a) => apply_ask(a)
+    None => ()
+  }
+  root.reacts(fn() { inproc_note_ask.get() }, fn(v) {
+    match v {
+      Some(a) => apply_ask(a)
+      None => ()
+    }
+  })
+  root.reacts(fn() { note_copied.get() }, fn(v) {
+    if v != "" && inproc_note_wid.v == wid {
+      schedule_leave(4000.0)
+    }
+  })
+  let look = fn() -> Unit { __mbt_local_note_popup_window_look_7(gone, root, shown_at, wid) }
+  again(root, 100.0, look)
+  root.box(fn(card) {
+    card.grow(view::Live::Is(1.0)) |> ignore
+    card.pick(fn() { inproc_note_ask.get() }, fn(b, maybe) {
+      b.grow(view::Live::Is(1.0)) |> ignore
+      match maybe {
+        Some(a) if a.mode == "saved" && a.path == "" =>
+          note_pending(b, fn() { tf("正在保存最近 {0} 秒…", [sets().last_seconds.to_string()]) }, gone)
+        Some(a) if a.mode == "saved" => {
+          let path = a.path
+          note_body(b, fn() { tf("已保存最近 {0} 秒", [sets().last_seconds.to_string()]) }, path, fn() {
+            rp_launch(cstr(path)) |> ignore
+            gone()
+          }, fn() {
+            rp_reveal(cstr(path))
+            gone()
+          }, gone)
+        }
+        Some(a) if a.mode == "text" =>
+          note_body(b, fn() { a.text }, "", gone, gone, gone, warning=a.warn)
+        _ => ()
+      }
+    }, at_once=true)
+  })
+  |> ignore}
+
+fn note_window(root : view::View) -> Unit {
+  the_root.v = Some(root)
+  root.tree.hand_over_presses(false)
+  ui::set_tree_theme(sf_ui_theme_now)
+  load_prefs()
+  ask_system(root)
+  keep_theme(root)
+  load_settings()
+  root.ground(view::Live::By(c_s2)) |> ignore
+  let gone = fn() { hostapi::exit(0) }
+  // Warm mode: record current note.json id so stale prior notifications are ignored.
+  let first : NoteAsk = if note_mode() == "warm" {
+    let id = match note_file_ask() {
+      Option::Some(f) => f.id
+      Option::None => -1
+    }
+    NoteAsk::{ id: id, mode: "", path: "", text: "", warn: false }
+  } else {
+    NoteAsk::{
+      // Seed id from note.json so the launching request isn't re-handled.
+      id: match note_file_ask() {
+        Option::Some(f) => f.id
+        Option::None => 0
+      },
+      mode: note_mode(),
+      path: ui::env("REPLAY_NOTE_PATH"),
+      text: ui::env("REPLAY_NOTE_TEXT"),
+      warn: ui::env("REPLAY_NOTE_WARN") == "1",
+    }
+  }
+  let ask : signals::Signal[NoteAsk] = signals::signal_ref(first)
+  let leave_gen : mbt_compat::Ref[Int] = mbt_compat::ref_new(0)
+  let schedule_leave = fn(ms : Double) -> Unit {
+    leave_gen.v += 1
+    let mine = leave_gen.v
+    let check = fn() -> Unit { __mbt_local_note_window_check_8(gone, leave_gen, mine, root) }
+    again(root, ms, check)
+  }
+  root.reacts(fn() { note_copied.get() }, fn(v) {
+    if v != "" {
+      schedule_leave(4000.0)
+    }
+  })
+  let height = fn(a : NoteAsk) -> Double { if a.mode == "saved" && a.path != "" { note_clip_h } else { note_line_h } }
+  let shown_at : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0)
+  let show = fn(a : NoteAsk) -> Unit {
+    rp_note_window(note_w, height(a), 1) |> ignore
+    again(root, 60.0, fn() { rp_note_reveal() })
+    shown_at.v = rp_now()
+    if a.mode != "saved" || a.path != "" {
+      schedule_leave(if a.mode == "saved" { 8000.0 } else if a.warn { 7000.0 } else { 4000.0 })
+    } else {
+      leave_gen.v += 1
+    }
+  }
+  if first.mode != "" {
+    root.at_moment(now() + 1.0, fn() { show(first) }) |> ignore
+  } else {
+    root.at_moment(now() + 1.0, fn() { rp_note_window(note_w, note_line_h, 1) |> ignore }) |> ignore
+    root.at_moment(now() + 2500.0, fn() { if ask.untracked().mode == "" { rp_note_hide() } }) |> ignore
+  }
+  __mbt_local_note_window_look_9(ask, gone, show, height, root, schedule_leave, shown_at)
+  root.box(fn(card) {
+    card.grow(view::Live::Is(1.0)) |> ignore
+    card.pick(fn() { ask.get() }, fn(b, a) {
+      b.grow(view::Live::Is(1.0)) |> ignore
+      if a.mode == "saved" && a.path == "" {
+        note_pending(b, fn() { tf("正在保存最近 {0} 秒…", [settings.last_seconds.to_string()]) }, gone)
+      } else if a.mode == "saved" {
+        let path = a.path
+        note_body(b, fn() { tf("已保存最近 {0} 秒", [settings.last_seconds.to_string()]) }, path, fn() {
+          rp_launch(cstr(path)) |> ignore
+          gone()
+        }, fn() {
+          rp_reveal(cstr(path))
+          gone()
+        }, gone)
+      } else if a.mode == "text" {
+        note_body(b, fn() { a.text }, "", gone, gone, gone, warning=a.warn)
+      }
+    }, at_once=true)
+  })
+  |> ignore}
+fn __mbt_local_note_popup_window_check_6(leave_gen : mbt_compat::Ref[Int], mine : Int, gone : () -> Unit, root : view::View, wid : Int) -> Unit {
+      if leave_gen.v != mine || inproc_note_wid.v != wid {
+        return
+      }
+      if root.pointer_within() || root.pointed() {
+        again(root, 2000.0, fn() { __mbt_local_note_popup_window_check_6(leave_gen, mine, gone, root, wid) })
+      } else {
+        gone()
+      }
+    }
+
+fn __mbt_local_note_popup_window_look_7(gone : () -> Unit, root : view::View, shown_at : mbt_compat::Ref[Double], wid : Int) -> Unit {
+    if inproc_note_wid.v != wid {
+      return
+    }
+    match (inproc_note_ask.untracked(), note_file_ask()) {
+      (Some(was), Some(a)) if a.mode != "" && a.id == was.id && a.path != was.path =>
+        inproc_note_ask.set(Some(a))
+      (Some(was), Some(a)) if a.mode != "" && a.id > was.id =>
+        inproc_note_ask.set(Some(a))
+      _ => ()
+    }
+    match inproc_note_ask.untracked() {
+      Some(a) if a.mode == "saved" && a.path == "" && rp_now() - shown_at.v > 30000.0 => gone()
+      _ => again(root, 100.0, fn() { __mbt_local_note_popup_window_look_7(gone, root, shown_at, wid) })
+    }
+  }
+
+fn __mbt_local_note_window_check_8(gone : () -> Unit, leave_gen : mbt_compat::Ref[Int], mine : Int, root : view::View) -> Unit {
+      if leave_gen.v != mine {
+        return
+      }
+      if root.pointer_within() || root.pointed() {
+        again(root, 2000.0, fn() { __mbt_local_note_window_check_8(gone, leave_gen, mine, root) })
+      } else {
+        gone()
+      }
+    }
+
+fn __mbt_local_note_window_look_9(ask : signals::Signal[NoteAsk], gone : () -> Unit, show : (NoteAsk) -> Unit, height : (NoteAsk) -> Double, root : view::View, schedule_leave : (Double) -> Unit, shown_at : mbt_compat::Ref[Double]) -> Unit {
+    let was = ask.untracked()
+    match note_file_ask() {
+      Option::Some(a) if a.mode != "" && (a.id > was.id || (a.id == was.id && was.mode != "")) => {
+        if a.id != was.id {
+          ask.set(a)
+          show(a)
+        } else if a.path != was.path {
+          ask.set(a)
+          rp_note_window(note_w, height(a), 0) |> ignore
+          schedule_leave(8000.0)
+        }
+      }
+      _ => ()
+    }
+    let a = ask.untracked()
+    if a.mode == "saved" && a.path == "" && shown_at.v >= 0.0 && rp_now() - shown_at.v > 30000.0 {
+      gone()
+    }
+    again(root, 100.0, fn() { __mbt_local_note_window_look_9(ask, gone, show, height, root, schedule_leave, shown_at) })
+  }
+
+

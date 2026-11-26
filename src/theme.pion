@@ -1,0 +1,106 @@
+import "mbt_compat"
+import "motion"
+import "signals"
+import "view"
+
+fn viewer_path() -> String {
+  pjoin(root_dir(), "viewer.json")}
+
+fn is_dark() -> Bool {
+  match appearance.get() {
+    "dark" => true
+    "light" => false
+    _ => !system_light.get()
+  }}
+
+fn is_english() -> Bool {
+  match language.get() {
+    "en" => true
+    "zh" => false
+    _ => !system_chinese.get()
+  }}
+
+fn load_prefs() -> Unit {
+  match parse(read_text(viewer_path())) {
+    Option::Some(Object(o)) => {
+      match o.get("volume") {
+        Option::Some(Number(v, _)) => volume.set(clamp(v, 0.0, 1.0))
+        _ => ()
+      }
+      muted.set(o.get("muted") is Some(True))
+      fold_gaps.set(!(o.get("fold_gaps") is Some(False)))
+      hidden_from_capture.set(!(o.get("hide_from_capture") is Some(False)))
+      match o.get("appearance") {
+        Option::Some(String(v)) => appearance.set(v)
+        _ => ()
+      }
+      match o.get("language") {
+        Option::Some(String(v)) => language.set(v)
+        _ => ()
+      }
+      match o.get("export_format") {
+        Option::Some(String(v)) => export_format.set(index_of_text(format_names, v, 0))
+        _ => ()
+      }
+      match o.get("gif_fps") {
+        Option::Some(Number(v, _)) => gif_fps.set(if v.to_int() == 10 { 10 } else { 15 })
+        _ => ()
+      }
+    }
+    _ => ()
+  }}
+
+fn save_prefs() -> Unit {
+  signals::untracked(fn() {
+    rp_write(cstr(viewer_path()), mbt_compat::utf8_encode("{\"volume\":\{volume.get()},\"muted\":\{muted.get()},\"appearance\":\"\{appearance.get()}\",\"language\":\"\{language.get()}\",\"export_format\":\"\{format_names[export_format.get()]}\",\"gif_fps\":\{gif_fps.get()},\"hide_from_capture\":\{hidden_from_capture.get()},\"fold_gaps\":\{fold_gaps.get()}}"))
+  })
+  |> ignore}
+
+fn ask_system(root : view::View) -> Unit {
+  system_light.set(rp_system_light() == 1)
+  system_chinese.set(rp_system_chinese() == 1)
+  still_motion.set(rp_animations_off() == 1)
+  // Reload prefs/settings on mtime change so other processes (tray/note) stay in sync.
+  let written = rp_modified(cstr(viewer_path()))
+  if written != viewer_seen.v {
+    viewer_seen.v = written
+    match parse(read_text(viewer_path())) {
+      Option::Some(Object(o)) => {
+        hidden_from_capture.set(!(o.get("hide_from_capture") is Some(False)))
+        match o.get("appearance") {
+          Option::Some(String(v)) => appearance.set(v)
+          _ => ()
+        }
+        match o.get("language") {
+          Option::Some(String(v)) => language.set(v)
+          _ => ()
+        }
+      }
+      _ => ()
+    }
+  }
+  let set_written = rp_modified(cstr(settings_path()))
+  if set_written != settings_seen.v {
+    settings_seen.v = set_written
+    load_settings()
+  }
+  rp_hide_from_capture(if hidden_from_capture.untracked() { 1 } else { 0 })
+  again(root, 1000.0, fn() { ask_system(root) })}
+
+fn keep_theme(root : view::View) -> Unit {
+  let way = motion::NodeWay::new(if signals::untracked(is_dark) { 1.0 } else { 0.0 })
+  theme_way.v = Some(way)
+  root.reacts(is_dark, fn(dark) {
+    way.go_ms(root, if dark { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 160.0 })
+    sf_set_dark(Some(dark))
+    rp_window_dark(if dark { 1 } else { 0 })
+  })}
+
+fn apply_volume() -> Unit {
+  let v = volume_now()
+  ntrace("volume \{v}")
+  native().stream().audio_volume(v)
+  match clip_deck.v {
+    Some(d) => d.stream().audio_volume(v)
+    None => ()
+  }}

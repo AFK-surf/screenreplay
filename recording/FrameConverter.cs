@@ -4,12 +4,6 @@ using Vortice.DXGI;
 
 namespace Replay.Recording;
 
-/// <summary>
-/// The picture made ready for the encoder on the GPU: the capture's BGRA scaled to the recording's size and turned into
-/// NV12 (BT.709, studio range) by the device's video processor, in one pass. A source of another shape than the output
-/// (a window resized, a full-screen app's window captured in the monitor's stead) is fitted into it whole, centred, the
-/// rest black. An HDR desktop's FP16 picture is made SDR first (<see cref="HdrToSdr"/>).
-/// </summary>
 internal sealed class FrameConverter : IDisposable
 {
     private readonly Gpu gpu;
@@ -53,14 +47,12 @@ internal sealed class FrameConverter : IDisposable
             OutputFrameRate = new Rational((uint)frameRate, 1),
             OutputWidth = (uint)outWidth,
             OutputHeight = (uint)outHeight,
-            // (PlaybackNormal instead of OptimalQuality: auto-processing is disabled below, and OptimalQuality
-            // causes NVIDIA D3D11 to allocate extra internal reference/scratch surfaces at 4K)
+            // PlaybackNormal instead of OptimalQuality: auto-processing is disabled below, and OptimalQuality causes NVIDIA D3D11 to allocate extra internal reference/scratch surfaces at 4K.
             Usage = VideoUsage.PlaybackNormal,
         };
         videoDevice.CreateVideoProcessorEnumerator(ref desc, out enumerator).CheckError();
         videoDevice.CreateVideoProcessor(enumerator!, 0, out processor).CheckError();
 
-        // where the picture goes: the whole output, or centred in it keeping the source's shape
         var scale = Math.Min((double)outWidth / width, (double)outHeight / height);
         var w = Math.Min(outWidth, (int)Math.Round(width * scale));
         var h = Math.Min(outHeight, (int)Math.Round(height * scale));
@@ -87,9 +79,6 @@ internal sealed class FrameConverter : IDisposable
         }
     }
 
-    /// <summary>Converts <paramref name="source"/> (BGRA, or FP16 scRGB of a display as <paramref name="display"/>
-    /// says, <paramref name="width"/> × <paramref name="height"/>) into the NV12 texture's <paramref name="slice"/>.
-    /// Returns the SDR BGRA texture used as the video processor's input (valid until the next call).</summary>
     public ID3D11Texture2D Convert(ID3D11Texture2D source, int width, int height, DisplayColor display, ID3D11Texture2D target, uint slice)
     {
         if (source.Description.Format == Format.R16G16B16A16_Float)
@@ -110,7 +99,7 @@ internal sealed class FrameConverter : IDisposable
                 ViewDimension = VideoProcessorInputViewDimension.Texture2D,
                 Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 },
             }, out inputView).CheckError();
-            // (held so that its pointer is not reused by another texture while the view is cached)
+            // AddRef source so its COM pointer cannot be recycled while the cached inputView holds it.
             source.AddRef();
             inputTexture = new ID3D11Texture2D(source.NativePointer);
         }

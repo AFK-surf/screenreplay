@@ -1,0 +1,266 @@
+import "signals"
+import "ui"
+import "view"
+
+fn assert_true(ok : Bool, msg : String) -> Unit {
+  debug_assert(ok, msg)
+}
+
+fn assert_eq_int(a : Int, b : Int, msg : String) -> Unit {
+  debug_assert(a == b, msg + ": got " + a.to_string() + ", expected " + b.to_string())
+}
+
+fn assert_eq_i64(a : Int64, b : Int64, msg : String) -> Unit {
+  debug_assert(a == b, msg + ": got " + a.to_string() + ", expected " + b.to_string())
+}
+
+fn assert_eq_f64(a : Double, b : Double, msg : String) -> Unit {
+  debug_assert((a - b).abs() < 1.0e-6, msg + ": got " + a.to_string() + ", expected " + b.to_string())
+}
+
+fn assert_eq_str(a : String, b : String, msg : String) -> Unit {
+  debug_assert(a == b, msg + ": got [" + a + "], expected [" + b + "]")
+}
+
+fn assert_eq_bool(a : Bool, b : Bool, msg : String) -> Unit {
+  debug_assert(a == b, msg)
+}
+
+fn test_reset_fixture() -> Unit {
+  segs.clear()
+  marks.clear()
+  apps.clear()
+  snaps.clear()
+  clip_files.clear()
+  app_filter.set([])
+  appearance.set("dark")
+  language.set("zh")
+  still_motion.set(true)
+  settings_open.set(false)
+  settings_page.set(0)
+  library_open.set(false)
+  export_open.set(false)
+  export_out.set("")
+  export_error.set("")
+  export_mode.set(0)
+  export_format.set(0)
+  export_size.set(1)
+  export_height.set(0)
+  export_fps.set(0)
+  export_quality.set(2)
+  clipping.set(false)
+  clip_kind.set(0)
+  picked_hwnd.set(0L)
+  picked_name.set("")
+  picked_process.set("")
+  region.set(None)
+  region_selected.set(false)
+  saved.set("")
+  saved_path.set("")
+  clip_playing.set("")
+  clip_history_free()
+
+  let base = 1795600000000.0
+  segs.push(Seg::{ path: "seg1.mp4", start: base, dur: 30000.0, size: 15000000.0, fps: 30 })
+  segs.push(Seg::{ path: "seg2.mp4", start: base + 30000.0, dur: 30000.0, size: 15000000.0, fps: 30 })
+  segs.push(Seg::{ path: "seg3.mp4", start: base + 60000.0, dur: 30000.0, size: 15000000.0, fps: 30 })
+  apps.push((base, "Code"))
+  apps.push((base + 25000.0, "Chrome"))
+  apps.push((base + 50000.0, "WindowsTerminal"))
+  apps.push((base + 72000.0, "Code"))
+  marks.push(base + 15000.0)
+  marks.push(base + 75000.0)
+  snaps.push(Snap::{
+    at: base,
+    sx: 0.0,
+    sy: 0.0,
+    sw: 1280.0,
+    sh: 720.0,
+    wins: [
+      Win::{ hwnd: 101L, owner: 0L, process: "Code", title: "screenreplay — Visual Studio Code", x: 40.0, y: 40.0, w: 620.0, h: 620.0, state: 0 },
+      Win::{ hwnd: 102L, owner: 0L, process: "Chrome", title: "GitHub", x: 680.0, y: 60.0, w: 560.0, h: 600.0, state: 0 },
+    ],
+  })
+  play.set(Play::{ pos: 0.0, at: 0.0, rate: 1.0, going: false })
+  clip_a.set(0.0)
+  clip_b.set(30000.0)
+  data_changed()
+}
+
+test "export dialog modes, size_slider ticks, and bounded node count" {
+  test_reset_fixture()
+  clipping.set(true)
+  export_open.set(true)
+  let t = ui::Tester::tree(fn(root : view::View) {
+    the_root.v = Some(root)
+    ui::set_tree_theme(sf_ui_theme_now)
+    export_dialog(root)
+  }, width=1440.0, height=900.0)
+  t.frame()
+  assert_true(t.find("保存片段").is_some(), "export dialog title missing")
+  assert_true(t.find("原样").is_some(), "lossless tab missing")
+  assert_true(t.find("按大小").is_some(), "by-size tab missing")
+  assert_true(t.find("自定义").is_some(), "custom tab missing")
+
+  // Guard against size_slider loop-var shadowing infinite allocation regression.
+  export_mode.set(1)
+  t.frame()
+  for label in ["10 MB", "25 MB", "35 MB", "50 MB", "100 MB", "250 MB", "500 MB", "1 GB"] {
+    assert_true(t.find(label).is_some(), "missing size_slider tick: " + label)
+  }
+  assert_true(t.drawn().length() < 400, "unexpectedly large node count in size_slider")
+
+  export_mode.set(2)
+  t.frame()
+  assert_true(t.find("H.264").is_some(), "custom H.264 missing")
+  assert_true(t.find("H.265").is_some(), "custom H.265 missing")
+  assert_true(t.find("GIF").is_some(), "custom GIF missing")
+
+  export_format.set(3)
+  t.frame()
+  assert_true(t.find("15").is_some(), "GIF 15fps option missing")
+  assert_true(t.find("10").is_some(), "GIF 10fps option missing")
+
+  t.dispose()
+}
+
+test "apps filter folds timeline into seams and clip_spans skips filtered gaps" {
+  test_reset_fixture()
+  assert_eq_f64(span(), 90000.0, "span")
+  assert_true(axis().is_none(), "unfiltered timeline should have no folded axis")
+
+  app_filter.set(["Code"])
+  match axis() {
+    Some(ax) => {
+      assert_eq_int(ax.ks.length(), 2, "kept spans")
+      assert_eq_f64(ax.ks[0].0, 0.0, "ks0 start")
+      assert_eq_f64(ax.ks[0].1, 25000.0, "ks0 end")
+      assert_eq_f64(ax.ks[1].0, 72000.0, "ks1 start")
+      assert_eq_f64(ax.ks[1].1, 90000.0, "ks1 end")
+    }
+    None => assert_true(false, "expected folded axis for Code filter")
+  }
+  clip_a.set(0.0)
+  clip_b.set(90000.0)
+  let spans = clip_spans(0.0, 90000.0)
+  assert_eq_int(spans.length(), 2, "clip_spans count")
+  assert_eq_f64(clip_kept(), 43000.0, "clip_kept")
+
+  app_filter.set([])
+  assert_true(axis().is_none(), "clearing app filter should restore full axis")
+}
+
+test "window picker, region crop, mode auto-upgrade, and clip undo/redo" {
+  test_reset_fixture()
+  clipping.set(true)
+  export_mode.set(0)
+  assert_eq_bool(cropping(), false, "not cropping initially")
+  assert_eq_int(mode(), 0, "mode lossless initially")
+
+  clip_mark()
+  picked_hwnd.set(101L)
+  picked_name.set("Code · screenreplay")
+  picked_process.set("Code")
+  clip_kind.set(1)
+  assert_eq_bool(cropping(), true, "cropping with window pick")
+  assert_eq_int(mode(), 2, "mode upgraded to custom when cropping")
+  let (_, cw, ch) = crop_now(1280.0, 720.0)
+  assert_eq_int(cw, 620, "picked window width")
+  assert_eq_int(ch, 620, "picked window height")
+
+  clip_mark()
+  picked_hwnd.set(0L)
+  clip_kind.set(2)
+  region.set(Some((100.0, 80.0, 400.0, 240.0)))
+  let (_, rw, rh) = crop_now(1280.0, 720.0)
+  assert_eq_int(rw, 400, "region width")
+  assert_eq_int(rh, 240, "region height")
+
+  assert_eq_bool(clip_can_undo(), true, "can undo")
+  clip_undo()
+  assert_eq_i64(picked_hwnd.untracked(), 101L, "undo restores hwnd")
+  assert_true(region.untracked().is_none(), "undo should restore window pick")
+  assert_eq_bool(clip_can_redo(), true, "can redo")
+  clip_redo()
+  assert_true(region.untracked().is_some(), "redo should restore region crop")
+}
+
+test "settings dialog renders all 6 tabs including version in about" {
+  test_reset_fixture()
+  settings_open.set(true)
+  let t = ui::Tester::tree(fn(root : view::View) {
+    the_root.v = Some(root)
+    ui::set_tree_theme(sf_ui_theme_now)
+    settings_dialog(root)
+  }, width=1440.0, height=900.0)
+
+  let pages = [
+    (0, "后台录制"),
+    (1, "编码"),
+    (2, "保留多久"),
+    (3, "主题"),
+    (4, "打开回放"),
+    (5, "版本 " + app_version),
+  ]
+  for entry in pages {
+    settings_page.set(entry.0)
+    t.frame()
+    assert_true(t.find(entry.1).is_some(), "settings page " + entry.0.to_string() + " missing: " + entry.1)
+  }
+  t.dispose()
+}
+
+test "library multi-card grid, tray panel, and zh/en + dark/light switching" {
+  test_reset_fixture()
+  clip_files.push("回放 2026-11-26 09-31-51.mp4")
+  clip_files.push("回放 2026-11-26 09-31-51.gif")
+  clips_rev.set(clips_rev.untracked() + 1)
+  library_open.set(true)
+
+  let t = ui::Tester::tree(fn(root : view::View) {
+    the_root.v = Some(root)
+    ui::set_tree_theme(sf_ui_theme_now)
+    library_layer(root)
+  }, width=1440.0, height=900.0)
+  t.frame()
+  assert_true(t.find("11月26日 09:31:51").is_some(), "first clip card missing")
+  assert_true(t.find("11月26日 09:31:51 · GIF").is_some(), "second GIF clip card missing")
+
+  let dark_bg = c_bg()
+  appearance.set("light")
+  language.set("en")
+  assert_true(c_bg() != dark_bg, "light theme should change c_bg")
+  assert_eq_str(t("保存片段"), "Save clip", "en translation")
+  t.frame()
+  t.dispose()
+
+  let t_tray = ui::Tester::tree(fn(root : view::View) {
+    the_root.v = Some(root)
+    ui::set_tree_theme(sf_ui_theme_now)
+    tray_window(root)
+  }, width=tray_w, height=tray_h)
+  t_tray.frame()
+  assert_true(t_tray.find("ScreenReplay").is_some(), "tray panel header missing")
+  assert_true(t_tray.find("Quit").is_some(), "tray panel English Quit missing")
+  t_tray.dispose()
+}
+
+test "clip_plan trim offsets and export math helpers" {
+  test_reset_fixture()
+  let plan = clip_plan(10000.0, 45000.0)
+  let lines = plan.split("\n")
+  assert_eq_int(lines.length(), 2, "plan lines")
+  assert_eq_str(lines[0], "seg1.mp4\t0\t10000\t30000", "plan line 0")
+  assert_eq_str(lines[1], "seg2.mp4\t30000\t0\t15000", "plan line 1")
+  assert_eq_f64(gif_scale(1920.0), 0.5, "gif_scale 1920")
+  assert_eq_f64(gif_scale(640.0), 1.0, "gif_scale 640")
+  assert_eq_int(h264_fps(0, 3840, 2160, 120), 60, "h264_fps 4k")
+  assert_eq_int(h264_fps(0, 1280, 720, 60), 60, "h264_fps 720p")
+  assert_eq_str(size_label(25.0), "25 MB", "size_label 25")
+  assert_eq_str(size_label(1024.0), "1 GB", "size_label 1024")
+  assert_true(!app_name_usable("browser:77E192590581671DB4E1B10DC762FFC2"), "reject internal scheme:id title")
+  assert_true(!app_name_usable("Page - Google Chrome"), "reject document title")
+  assert_true(app_name_usable("youdid.wtf"), "allow dotted app name")
+  assert_true(app_name_usable("沉星之序"), "allow game title")
+  assert_true(app_name_usable("Cyberpunk 2077: Phantom Liberty"), "allow titled colon with space")
+}

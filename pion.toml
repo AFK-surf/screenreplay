@@ -1,0 +1,87 @@
+[package]
+name = "screenreplay"
+version = "0.1.24"
+license = "GPL-3.0-only"
+
+[dependencies]
+dmath = { path = "../invar/packages/dmath" }
+headless = { path = "../invar/packages/headless" }
+host = { path = "../invar/packages/host" }
+hostapi = { path = "../invar/packages/hostapi" }
+icons = { path = "../invar/packages/icons" }
+kit = { path = "../invar/packages/kit" }
+lg = { path = "../invar/packages/lg" }
+mbt_compat = { path = "../invar/packages/mbt_compat" }
+motion = { path = "../invar/packages/motion" }
+paint = { path = "../invar/packages/paint" }
+pixels = { path = "../invar/packages/pixels" }
+signals = { path = "../invar/packages/signals" }
+text = { path = "../invar/packages/text" }
+ui = { path = "../invar/packages/ui" }
+view = { path = "../invar/packages/view" }
+json = { path = "../pion-packages/packages/json" }
+
+[link.windows]
+c_sources = [
+  "native/pion_rp_bridge.c",
+  "native/replay_win.c",
+  "native/replay_mf.cpp",
+  "native/replay_index.cpp",
+  "native/replay_export.cpp",
+  "native/replay_play.cpp",
+  "native/replay_gif.cpp",
+]
+rc_sources = ["assets/replay.rc"]
+cc_flags = ["-O2", "-D_CRT_SECURE_NO_WARNINGS", "-Inative"]
+libs = [
+  "user32",
+  "gdi32",
+  "dwmapi",
+  "shell32",
+  "ole32",
+  "oleaut32",
+  "uuid",
+  "advapi32",
+  "shlwapi",
+  "winmm",
+  "d3d11",
+  "dxgi",
+  "windowscodecs",
+  "propsys",
+  "strmiids",
+  "mfplat",
+  "mfreadwrite",
+  "mfuuid",
+  "wmcodecdspuuid",
+]
+flags = ["-mwindows"]
+
+[link.macos]
+c_sources = [
+  "native/pion_rp_bridge.c",
+  "native/replay_mac.mm",
+  "native/replay_media_mac.mm",
+  "native/replay_export_mac.mm",
+  "native/replay_gif_mac.mm",
+  "native/replay_index_mac.mm",
+  "native/replay_play_mac.mm",
+]
+cc_flags = ["-O2", "-fobjc-arc", "-Inative"]
+libs = ["c++"]
+frameworks = [
+  "AppKit",
+  "Foundation",
+  "WebKit",
+  "AVFoundation",
+  "AudioToolbox",
+  "VideoToolbox",
+  "CoreMedia",
+  "CoreVideo",
+  "CoreImage",
+  "ImageIO",
+  "Metal",
+  "QuartzCore",
+  "UniformTypeIdentifiers",
+  "IOKit",
+  "Accelerate",
+]

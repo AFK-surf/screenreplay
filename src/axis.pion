@@ -1,0 +1,278 @@
+import "mbt_compat"
+import "pixels"
+import "signals"
+import "view"
+
+// Buffer stretches (ks/kb/kept in ms) interleaved with folded gap seams (g/gb/seams in pt at ax_ref, scaled by len/ax_ref to keep constant screen width).
+pub struct Axis {
+  ks : Array[(Double, Double)]
+  g : Array[Double]
+  kb : Array[Double]
+  gb : Array[Double]
+  kept : Double
+  seams : Double
+}
+pub fn __mbt_eq_axis(a : Axis, b : Axis) -> Bool {
+  ({ let mut __aeq_0 = a.ks.length() == b.ks.length(); if __aeq_0 { let mut __ai_0 = 0; while __ai_0 < a.ks.length() { if !(((a.ks[__ai_0]).0 == (b.ks[__ai_0]).0) && ((a.ks[__ai_0]).1 == (b.ks[__ai_0]).1)) { __aeq_0 = false; break }; __ai_0 = __ai_0 + 1 } }; __aeq_0 }) && ({ let mut __aeq_1 = a.g.length() == b.g.length(); if __aeq_1 { let mut __ai_1 = 0; while __ai_1 < a.g.length() { if !(a.g[__ai_1] == b.g[__ai_1]) { __aeq_1 = false; break }; __ai_1 = __ai_1 + 1 } }; __aeq_1 }) && ({ let mut __aeq_2 = a.kb.length() == b.kb.length(); if __aeq_2 { let mut __ai_2 = 0; while __ai_2 < a.kb.length() { if !(a.kb[__ai_2] == b.kb[__ai_2]) { __aeq_2 = false; break }; __ai_2 = __ai_2 + 1 } }; __aeq_2 }) && ({ let mut __aeq_3 = a.gb.length() == b.gb.length(); if __aeq_3 { let mut __ai_3 = 0; while __ai_3 < a.gb.length() { if !(a.gb[__ai_3] == b.gb[__ai_3]) { __aeq_3 = false; break }; __ai_3 = __ai_3 + 1 } }; __aeq_3 }) && (a.kept == b.kept) && (a.seams == b.seams)
+}
+
+fn seam_w(skip : Double) -> Double {
+  clamp(8.0 + 5.6 * mbt_compat::math_ln(dmax(1.0, skip) / 300000.0) / mbt_compat::math_ln(2.0), 5.0, 28.0)}
+
+fn axis() -> Option[Axis] {
+  axis_now.get()}
+
+fn ax_on() -> Bool {
+  axis_now.get() is Some(_)}
+
+fn ax_find(a : Axis, t : Double) -> Int {
+  let mut lo = 0
+  let mut hi = a.ks.length() - 1
+  if t < a.ks[0].0 {
+    return -1
+  }
+  while lo < hi {
+    let mid = (lo + hi + 1) / 2
+    if a.ks[mid].0 <= t {
+      lo = mid
+    } else {
+      hi = mid - 1
+    }
+  }
+  lo}
+
+fn ax_start(a : Axis, i : Int, len : Double) -> Double {
+  a.kb[i] + a.gb[i] * len / ax_ref}
+
+fn ax_d(t : Double, len : Double) -> Double {
+  match axis() {
+    Option::None => t
+    Option::Some(a) => {
+      let i = ax_find(a, t)
+      if i < 0 {
+        return 0.0
+      }
+      let s = ax_start(a, i, len)
+      let l = a.ks[i].1 - a.ks[i].0
+      if t <= a.ks[i].1 {
+        s + (t - a.ks[i].0)
+      } else if i + 1 < a.ks.length() {
+        s + l + a.g[i + 1] * len / ax_ref / 2.0
+      } else {
+        s + l
+      }
+    }
+  }}
+
+fn ax_b(d : Double, len : Double) -> Double {
+  match axis() {
+    Option::None => d
+    Option::Some(a) => {
+      let n = a.ks.length()
+      let mut lo = 0
+      let mut hi = n - 1
+      while lo < hi {
+        let mid = (lo + hi + 1) / 2
+        if ax_start(a, mid, len) <= d {
+          lo = mid
+        } else {
+          hi = mid - 1
+        }
+      }
+      let i = lo
+      let s = ax_start(a, i, len)
+      let l = a.ks[i].1 - a.ks[i].0
+      if d <= s {
+        a.ks[i].0
+      } else if d <= s + l || i + 1 >= n {
+        a.ks[i].0 + dmin(d - s, l)
+      } else {
+        let mid = s + l + a.g[i + 1] * len / ax_ref / 2.0
+        if d < mid {
+          a.ks[i].1
+        } else {
+          a.ks[i + 1].0
+        }
+      }
+    }
+  }}
+
+fn ax_span(len : Double) -> Double {
+  match axis() {
+    Option::None => span()
+    Option::Some(a) => a.kept + a.seams * len / ax_ref
+  }}
+
+fn view_total() -> Double {
+  match axis() {
+    Option::None => span()
+    Option::Some(a) => a.kept / (1.0 - a.seams / ax_ref)
+  }}
+
+fn ax_picture(w : Double, from : Double, len : Double, make : (Double, Double, Double) -> Option[pixels::Vector]) -> Option[pixels::Vector] {
+  match axis() {
+    Option::None => make(w, from, len)
+    Option::Some(a) => {
+      if w <= 0.0 || len <= 0.0 {
+        return Option::None
+      }
+      let vlen = signals::untracked(view_len)
+      let layers : Array[pixels::VectorPath] = []
+      let mut h = 0.0
+      for i, k in a.ks {
+        let s = ax_start(a, i, vlen)
+        let e = s + (k.1 - k.0)
+        let v0 = dmax(s, from)
+        let v1 = dmin(e, from + len)
+        if v1 - v0 <= 0.0 {
+          continue
+        }
+        let pw = (v1 - v0) / len * w
+        if pw < 0.25 {
+          continue
+        }
+        match make(pw, k.0 + (v0 - s), v1 - v0) {
+          Option::Some(p) => {
+            h = p.h
+            let x0 = (v0 - from) / len * w
+            for l in p.layers {
+              layers.push({ ..l, tx: l.tx + x0 })
+            }
+          }
+          Option::None => ()
+        }
+      }
+      if layers.is_empty() {
+        Option::None
+      } else {
+        Option::Some({ w: w, h: h, layers: layers })
+      }
+    }
+  }}
+
+fn seams_picture(w : Double, from : Double, len : Double, h : Double) -> Option[pixels::Vector] {
+  guard axis() is Option::Some(a) else { return Option::None }
+  if w <= 0.0 || len <= 0.0 {
+    return Option::None
+  }
+  let vlen = signals::untracked(view_len)
+  let d = StringBuilder()
+  for i in 1..<a.ks.length() {
+    let s = ax_start(a, i, vlen)
+    let mid = s - a.g[i] * vlen / ax_ref / 2.0
+    if mid < from || mid > from + len {
+      continue
+    }
+    let x = (mid - from) / len * w
+    d.write_string(rect_d(x - 0.5, 9.0, 1.0, h - 18.0))
+  }
+  let ds = d.to_string()
+  if ds == "" {
+    Option::None
+  } else {
+    Option::Some({ w: w, h: h, layers: [layer(ds, tone(0xFFFFFF24L, 0x00000024L))] })
+  }}
+
+fn filter_summary() -> String {
+  match axis_now.get() {
+    Option::Some(a) => tf("{0} 段 · 共 {1}", [a.ks.length().to_string(), front_words(a.kept)])
+    Option::None => ""
+  }}
+
+fn seam_under(v : view::View, x : Double, w : Double) -> Option[Int] {
+  guard axis_now.get() is Option::Some(a) else { return Option::None }
+  if w <= 0.0 {
+    return Option::None
+  }
+  let (from, len) = shown(v)
+  let vl = view_len()
+  let x_of = fn(d : Double) { (d - from) / len * w }
+  for i in 1..<a.ks.length() {
+    let right = x_of(ax_start(a, i, vl))
+    let left = right - a.g[i] * vl / ax_ref / len * w
+    if x >= left - 2.0 && x <= right + 2.0 {
+      return Option::Some(i)
+    }
+    if left > x + 2.0 {
+      break
+    }
+  }
+  Option::None}
+
+fn seam_hovered(v : view::View) -> Option[Int] {
+  match seam_x.get() {
+    Option::Some(x) if grabbed.get() == 0 && !apps_open.get() => seam_under(v, x, (band_w.v)())
+    _ => Option::None
+  }}
+
+fn seam_tip(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    band_w.v = w
+    o.reacts(hover_now, fn(h) {
+      match h {
+        Some(x) => {
+          seam_seen.v = now()
+          seam_x.set(Some(x))
+        }
+        None => {
+          // Debounce 120 ms to match hover_card and avoid flashing hover_card during pointer jitter.
+          let t = now()
+          o.at_moment(t + 120.0, fn() {
+            if hover_now_untracked() is None && now() - seam_seen.v >= 119.0 {
+              seam_x.set(None)
+            }
+          })
+          |> ignore
+        }
+      }
+    })
+    let at = fn() -> Option[(String, Double)] {
+      guard seam_hovered(o) is Some(i) else { return None }
+      guard axis_now.get() is Some(a) else { return None }
+      let (from, len) = shown(o)
+      let vl = view_len()
+      let right = (ax_start(a, i, vl) - from) / len * w()
+      let mid = right - a.g[i] * vl / ax_ref / len * w() / 2.0
+      let (b, e) = (a.ks[i - 1].1, a.ks[i].0)
+      Some(
+        (
+          tf(if app_filter.get().is_empty() { "未录制 {0} · {1} – {2}" } else { "跳过 {0} · {1} – {2}" }, [front_words(e - b), wall(t0() + b, short=true), wall(t0() + e, short=true)]),
+          mid,
+        ),
+      )
+    }
+    o.box(fn(tag) {
+      tag
+      .padding(view::Live::Is((8.0, 3.0, 8.0, 3.0)))
+      .radius(view::Live::Is(6.0))
+      .ground(view::Live::By(c_s1))
+      .edge(view::Live::By(fn() { (1.0, hair2()) }))
+      .presses(view::Live::Is(false))
+      .laid_nowhere(view::Live::By(fn() { at() is None }))
+      .offset(view::Live::By(fn() {
+        let (s, m) = at().unwrap_or(("", 0.0))
+        let tw = sf_node_words_w(s, 11.5).ceil() + 16.0
+        (clamp(m - tw / 2.0, 0.0, dmax(0.0, w() - tw)), -30.0)
+      }))
+      |> ignore
+      words(tag, fn() { opt_map(at(), fn(p) { p.0 }).unwrap_or("") }, 11.5, ui_text) |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn hover_now_untracked() -> Option[Double] {
+  signals::untracked(hover_now)}
+
+fn set_fold_gaps(on : Bool) -> Unit {
+  let p = pos_now()
+  let len0 = signals::untracked(view_len)
+  let frac = (ax_d(p, len0) - view_from.untracked()) / len0
+  fold_gaps.set(on)
+  save_prefs()
+  let len = signals::untracked(view_len)
+  if !follow_latest.untracked() {
+    view_from.set(ax_d(p, len) - clamp(frac, 0.0, 1.0) * len)
+  }
+  keep_view()}

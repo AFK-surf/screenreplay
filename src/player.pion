@@ -1,0 +1,53 @@
+fn locate(at : Double) -> (Int, Double) {
+  let base = t0()
+  // Upper-bound binary search: pick the later segment on overlap so frame-stepping cannot get stuck at the previous segment's end.
+  let mut lo = 0
+  let mut hi = segs.length()
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if segs[mid].start - base <= at {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  let i = lo - 1
+  if i < 0 {
+    return (0, 0.0)
+  }
+  let a = segs[i].start - base
+  if at < a + segs[i].dur {
+    return (i, at - a)
+  }
+  if i + 1 < segs.length() {
+    return (i + 1, 0.0)
+  }
+  let last = segs.length() - 1
+  (last, dmax(0.0, segs[last].dur - 100.0))}
+
+fn go(at : Double, near : Bool) -> Unit {
+  fine_time.set(false)
+  head_jump(at)
+  native().go(at, near)
+  if native().seg >= 0 && native().seg < segs.length() {
+    current.v = native().seg
+  }}
+
+fn seek_to(at : Double) -> Unit {
+  go(at, false)}
+
+fn scrub_to(at : Double) -> Unit {
+  fine_time.set(false)
+  native().scrub(at)}
+
+fn set_playing(on : Bool) -> Unit {
+  if on {
+    fine_time.set(false)
+  }
+  tell_playing(want_play.untracked(), on)
+  want_play.set(on)
+  native().set_playing(on)}
+
+fn set_speed(r : Double) -> Unit {
+  speed.set(r)
+  native().set_rate(r)}

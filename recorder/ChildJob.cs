@@ -3,14 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// The programs the recorder starts and keeps (the resident replay window, the tray's panel, the note card kept warm)
-/// held in a job of its own that ends them as the recorder ends, however it ends: quit, killed, crashed. Before, one
-/// killed from Task Manager left its viewers running with nobody to show them (each 100-300 MB). Only these three are
-/// put in it, each as it starts (the recorder itself is not in it, so the installer an update starts is never ended with
-/// it); what they start in turn (a folder opened, a clip played in another program) leaves the job silently
-/// (JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK) and outlives them as before.
-/// </summary>
 internal static class ChildJob
 {
     private const int JobObjectExtendedLimitInformation = 9;
@@ -65,8 +57,6 @@ internal static class ChildJob
     private static IntPtr job;
     private static bool tried;
 
-    /// <summary>`process` (just started by the recorder) ended with the recorder from now on; false where it could not
-    /// be (logged by the caller where it matters: it then runs as before, unbound).</summary>
     public static bool Hold(Process? process)
     {
         if (process is null)

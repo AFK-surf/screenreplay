@@ -4,15 +4,7 @@ using Replay.Recording;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// How busy the mouse, the keyboard and game controllers are, while recording (the replay window's timeline marks it):
-/// Raw Input on the recorder's window (RIDEV_INPUTSINK: told whichever window has the focus), not low-level hooks,
-/// which every key and move would wait on (a game's input delayed) and which antivirus programs take for a keylogger.
-/// Only counts go on to <see cref="Activity"/>: a key's press (not its repeats while held: which keys are down is
-/// known here for that alone, never kept), mouse buttons pressed and the wheel's notches (not its movement); a gamepad's
-/// or joystick's HID reports to <see cref="HidPads"/>, XInput's pads read by <see cref="XInputPads"/>. Listening only
-/// while recording: paused, locked or off, nothing is asked of Windows.
-/// </summary>
+// Uses Raw Input (RIDEV_INPUTSINK) instead of LL hooks to avoid input latency and AV false positives.
 internal sealed class RawInput : IDisposable
 {
     public const uint WmInput = 0x00FF;
@@ -49,17 +41,13 @@ internal sealed class RawInput : IDisposable
     private nuint padCheck;
     private bool padsOn;
 
-    // keys down now, by scan code (and E0's): a make while down is the key repeating
     private readonly bool[] down = new bool[512];
     private bool listening;
 
-    // (what WM_INPUT brings read into: a mouse's or a key's 48 bytes at most, a gamepad's reports more; made larger
-    // only the first time one does not fit)
     private byte[] buffer = new byte[1024];
 
     public InputActivity Activity { get; } = new();
 
-    /// <summary>Game controllers that are not XInput's, from their HID reports.</summary>
     public HidPads Pads { get; }
 
     public RawInput(MessageWindow window, Action<string> log)
@@ -69,7 +57,6 @@ internal sealed class RawInput : IDisposable
         Pads = new HidPads(Activity, log);
     }
 
-    /// <summary>Listening while recording, not otherwise.</summary>
     public bool Listening
     {
         get => listening;
@@ -80,7 +67,6 @@ internal sealed class RawInput : IDisposable
                 return;
             }
 
-            // (mouse 1/2 and keyboard 1/6; removing takes no window)
             if (!Register(value, RidevInputSink, 0x02, 0x06))
             {
                 return;
@@ -106,8 +92,6 @@ internal sealed class RawInput : IDisposable
         }
     }
 
-    /// <summary>Generic Desktop's <paramref name="a"/> and <paramref name="b"/> registered with <paramref name="flags"/>
-    /// to the window, or removed.</summary>
     private bool Register(bool on, uint flags, ushort a, ushort b)
     {
         var f = on ? flags : RidevRemove;
@@ -126,11 +110,7 @@ internal sealed class RawInput : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Gamepads' and joysticks' reports (1/5, 1/4) asked for only while one that is not XInput's is there, looked for
-    /// every 2 s in the list of devices: an XInput pad's own HID side sends ~1000 reports a second even at rest, which
-    /// cost the recorder some 2% of a core taken and passed over (2026-11-14), and XInputPads reads it anyway.
-    /// </summary>
+    // Only subscribe to HID gamepad/joystick reports when a non-XInput pad is present; XInput HID interfaces spam ~1000 reports/s at rest.
     private void CheckPads()
     {
         var want = Pads.AnyToRead();
@@ -146,8 +126,6 @@ internal sealed class RawInput : IDisposable
         }
     }
 
-    /// <summary>A WM_INPUT's lParam: what came counted. (Read into a buffer kept, nothing allocated; the window
-    /// procedure hands the message on to DefWindowProc after it.)</summary>
     public void Handle(IntPtr lParam)
     {
         if (!listening)
@@ -159,7 +137,6 @@ internal sealed class RawInput : IDisposable
         var got = GetRawInputData(lParam, RidInput, ref buffer[0], ref size, (uint)HeaderSize);
         if (got == uint.MaxValue)
         {
-            // (larger than any before: the buffer made to fit, once)
             size = 0;
             GetRawInputData(lParam, RidInput, IntPtr.Zero, ref size, (uint)HeaderSize);
             if (size <= buffer.Length || size > 1 << 20)
@@ -177,7 +154,6 @@ internal sealed class RawInput : IDisposable
         }
 
         var data = buffer.AsSpan(0, (int)got);
-        // (how long ago it came: the window's thread may have been busy a moment)
         var lag = Math.Clamp(unchecked(Environment.TickCount - GetMessageTime()), 0, 5000);
         var type = BinaryPrimitives.ReadUInt32LittleEndian(data);
         if (type == 0 && got >= HeaderSize + 24)
@@ -194,7 +170,6 @@ internal sealed class RawInput : IDisposable
         }
     }
 
-    /// <summary>A WM_INPUT_DEVICE_CHANGE: a gamepad or joystick came (GIDC_ARRIVAL, 1) or went.</summary>
     public void DeviceChanged(IntPtr wParam, IntPtr lParam)
     {
         if (listening)
@@ -203,8 +178,6 @@ internal sealed class RawInput : IDisposable
         }
     }
 
-    /// <summary>A mouse's buttons pressed and its wheel; its movement not (the user, 2026-11-14): a report that only
-    /// moves (nearly all of them) is let go of at its first look.</summary>
     private void Mouse(Span<byte> m, int lag)
     {
         var buttons = BinaryPrimitives.ReadUInt16LittleEndian(m[4..]);
@@ -243,7 +216,6 @@ internal sealed class RawInput : IDisposable
         var key = (make & 0xFF) | ((flags & 0x02) != 0 ? 0x100 : 0);
         if ((flags & 0x01) != 0)
         {
-            // RI_KEY_BREAK: let go
             down[key] = false;
             return;
         }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the complete macOS ScreenReplay.app bundle:
-#   - ScreenReplayViewer (MoonBit + mbui Metal/VideoToolbox + replay_*_mac.mm)
+#   - ScreenReplayViewer (Pion + Invar Metal/VideoToolbox + native/replay_*_mac.mm)
 #   - ScreenReplay (Swift menu bar host & launcher)
 #   - ScreenReplay Helper.app (standalone TCC-responsible ScreenCaptureKit + PermissionFlow helper)
 set -euo pipefail
@@ -8,23 +8,14 @@ set -euo pipefail
 unset SDKROOT
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${MODE:-release}"
-# (the version app/about.mbt names, the one the Windows build and the viewer show)
-VERSION="${VERSION:-$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' "$ROOT/app/about.mbt")}"
+VERSION="${VERSION:-$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' "$ROOT/src/about.pion")}"
 BUILD_NUM="${BUILD_NUM:-${VERSION##*.}}"
 
-# Locate MoonBit toolchain
-if ! command -v moon >/dev/null 2>&1; then
-  if [ -n "${MOON_HOME:-}" ] && [ -x "$MOON_HOME/bin/moon" ]; then
-    export PATH="$MOON_HOME/bin:$PATH"
-  elif [ -x "$HOME/.moon/bin/moon" ]; then
-    export PATH="$HOME/.moon/bin:$PATH"
-  else
-    echo "build-mac.sh: moon toolchain not found on PATH, MOON_HOME, or ~/.moon/bin" >&2
-    exit 1
-  fi
+PIONC="${PIONC:-pionc}"
+if ! command -v "$PIONC" >/dev/null 2>&1 && [ ! -x "$PIONC" ]; then
+  echo "build-mac.sh: pionc not found (set PIONC or add pionc to PATH)" >&2
+  exit 1
 fi
-
-bash "$ROOT/scripts/fetch-stillfail.sh"
 
 OUT="$ROOT/out/mac"
 mkdir -p "$OUT"
@@ -82,88 +73,13 @@ SWIFT_EOF
   rm -rf "$ICONSET"
 fi
 
-# 2. Assemble MoonBit macOS viewer module and build ScreenReplayViewer
-APPMOD="$ROOT/out/appmod-mac"
-rm -rf "$APPMOD"
-mkdir -p "$APPMOD/src/replay"
-cat > "$APPMOD/moon.mod" << 'EOF'
-name = "screenreplay"
-version = "0.1.0"
-source = "src"
-preferred_target = "native"
-warnings = "@a-33-79-29"
-
-import {
-  "mbui@0.1.0",
-  "stillfail/sf@0.1.0",
-}
-EOF
-cat > "$APPMOD/moon.work" << 'EOF'
-members = [
-  ".",
-  "../../deps/stillfail/libs/mbui",
-  "../../deps/stillfail/libs/sf-ui",
-]
-EOF
-
-cp "$ROOT"/app/*.mbt "$APPMOD/src/replay/"
-for f in "$ROOT"/app/*_mac*.mm "$ROOT"/app/*_mac*.h "$ROOT"/app/replay_mac.mm; do
-  [ -f "$f" ] && cp "$f" "$APPMOD/src/replay/"
-done
-
-STUBS=""
-for mm in "$APPMOD"/src/replay/*.mm; do
-  [ -f "$mm" ] || continue
-  base="$(basename "$mm")"
-  if [ -z "$STUBS" ]; then
-    STUBS="\"$base\""
-  else
-    STUBS="$STUBS, \"$base\""
-  fi
-done
-
-if [ -z "$STUBS" ]; then
-  echo "build-mac.sh: no macOS .mm native stubs found in app/" >&2
-  exit 1
-fi
-
-cat > "$APPMOD/src/replay/moon.pkg" << EOF
-import {
-  "mbui/host",
-  "mbui/hostapi",
-  "mbui/ui",
-  "mbui/view",
-  "mbui/signals",
-  "mbui/kit",
-  "mbui/headless",
-  "mbui/pixels",
-  "mbui/motion",
-  "stillfail/sf",
-  "moonbitlang/core/json",
-  "moonbitlang/core/cmp",
-  "moonbitlang/core/math",
-  "moonbitlang/core/encoding/utf8",
-}
-
-options(
-  "is-main": true,
-  link: {
-    "native": {
-      "stub-cc-flags": "-ObjC++ -std=c++17 -fobjc-arc -O2",
-      "cc-link-flags": "-lc++ -framework AppKit -framework Foundation -framework WebKit -framework AVFoundation -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework CoreImage -framework ImageIO -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers -framework IOKit -framework Accelerate",
-    },
-  },
-  "native-stub": [ $STUBS ],
-)
-EOF
-
+# 2. Build Pion + Invar macOS viewer (ScreenReplayViewer)
 echo "build-mac.sh: building ScreenReplayViewer ($MODE)..."
-(
-  cd "$ROOT/deps/stillfail/libs/mbui"
-  MODE="$MODE" MBUI_APP_MOD="$APPMOD" MBUI_OUT="$OUT/mbui-build" APP=replay bash scripts/mac.sh build
-)
-VIEWER_BIN="$APPMOD/_build/native/$MODE/build/screenreplay/replay/replay.exe"
-cp "$VIEWER_BIN" "$OUT/ScreenReplayViewer"
+if [ "$MODE" = "release" ]; then
+  (cd "$ROOT" && "$PIONC" build --release . -o "$OUT/ScreenReplayViewer")
+else
+  (cd "$ROOT" && "$PIONC" build . -o "$OUT/ScreenReplayViewer")
+fi
 chmod +x "$OUT/ScreenReplayViewer"
 
 # 3. Build Swift macOS Helper & Menu Bar Host

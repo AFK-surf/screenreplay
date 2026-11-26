@@ -2,12 +2,8 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recording;
 
-/// <summary>Win32 entry points and the Media Foundation / Core Audio identifiers this library uses (values as the
-/// Windows SDK's headers define them: mfapi.h, mfidl.h, mfreadwrite.h, mfobjects.h, codecapi.h, Audioclient.h,
-/// mmdeviceapi.h, Windows.Graphics.Capture.Interop.h, windows.graphics.directx.direct3d11.interop.h).</summary>
 internal static partial class Native
 {
-    // --- Media Foundation attributes ---
     public static readonly Guid MT_MAJOR_TYPE = new("48eba18e-f8c9-4687-bf11-0a74c9f96a8f");
     public static readonly Guid MT_SUBTYPE = new("f7e34c9a-42e8-4714-b74b-cb29d72c35e5");
     public static readonly Guid MT_AVG_BITRATE = new("20332624-fb0d-4d9e-bd0d-cbf6786c102e");
@@ -48,7 +44,6 @@ internal static partial class Native
     public static readonly Guid SampleExtension_Discontinuity = new("9cdf01d9-a0f0-43ba-b077-eaa06cbd728a");
     public static readonly Guid MFT_CATEGORY_VIDEO_DECODER = new("d6c02d4b-6833-45b4-971a-05a4b04bab91");
 
-    // --- encoder properties (ICodecAPI's, given to the sink writer with the input type) ---
     public static readonly Guid AVEncCommonRateControlMode = new("1c0608e9-370c-4710-8a58-cb6181c42423");
     public static readonly Guid AVEncCommonMeanBitRate = new("f7222374-2144-4815-b550-a37f8e12ee52");
     public static readonly Guid AVEncCommonMaxBitRate = new("9651eae4-39b9-4ebf-85ef-d7f444ec7465");
@@ -59,7 +54,6 @@ internal static partial class Native
     public static readonly Guid AVEncVideoForceKeyFrame = new("398c1b98-8353-475a-9ef2-8f265d260345");
     public static readonly Guid IID_ICodecAPI = new("901db4c7-31ce-41a2-85dc-8fa0bf41b8da");
 
-    // --- Core Audio ---
     public static readonly Guid CLSID_MMDeviceEnumerator = new("bcde0395-e52f-467c-8e3d-c4579291692e");
     public static readonly Guid IID_IMMDeviceEnumerator = new("a95664d2-9614-4f35-a746-de8db63617e6");
     public static readonly Guid IID_IAudioClient = new("1cb9ad4c-dbfa-4c32-b178-c2f568a703b2");
@@ -68,7 +62,6 @@ internal static partial class Native
     public static readonly Guid IID_IAgileObject = new("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90");
     public static readonly Guid IID_IUnknown = new("00000000-0000-0000-c000-000000000046");
 
-    // --- capture interop ---
     public static readonly Guid IID_IGraphicsCaptureItemInterop = new("3628e81b-3cac-4c60-b7f4-23ce0e0c3356");
     public static readonly Guid IID_IGraphicsCaptureItem = new("79c3f95b-31f7-4ec2-a464-632ef5d30760");
     public static readonly Guid IID_IDirect3DDxgiInterfaceAccess = new("a9b3d012-3df2-4ee3-b8d1-8695f457d3c1");
@@ -82,7 +75,6 @@ internal static partial class Native
 
     public static ulong Pack(uint high, uint low) => (ulong)high << 32 | low;
 
-    // --- Win32 ---
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect
     {
@@ -177,8 +169,6 @@ internal static partial class Native
     [LibraryImport("mfplat.dll")]
     public static partial int MFTEnum2(Guid category, uint flags, IntPtr input, IntPtr output, IntPtr attributes, out IntPtr activates, out uint count);
 
-    /// <summary>Now, in the 100 ns units of the performance counter (the clock capture frames and WASAPI packets are
-    /// stamped with).</summary>
     public static long NowHns()
     {
         var t = System.Diagnostics.Stopwatch.GetTimestamp();

@@ -2,15 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Replay.Recorder;
 
-/// <summary>
-/// Where NVIDIA's driver has Fast Sync on (its vertical sync setting, VSYNCMODE, at "Fast"), read from its settings
-/// (NVAPI's DRS), never changed. With Fast Sync a game's frames reach the screen in a way the system's capture then
-/// gives every other frame stale (2026-11-15: Psycho Sleuth's recording flickered, and ended with Fast Sync off; the
-/// same in Discord's share, OBS's display capture and the taskbar's preview, the one report found). The replay window
-/// says so (state.json's fastSync) with how to turn it off; nothing is left out or changed for it.
-/// <para>Said as "global" where the global profile has it, and the names of the program profiles the person set it
-/// in (about 270 ms for the driver's 8000 profiles). "" where it is on nowhere, there is no NVIDIA driver, or it cannot be read.</para>
-/// </summary>
+// Detects NVIDIA Fast Sync via NVAPI DRS, which causes WGC/DXGI capture to deliver alternating stale frames.
 internal static class NvidiaSync
 {
     private const uint VsyncMode = 0x00A879CF;
@@ -45,8 +37,6 @@ internal static class NvidiaSync
     // 0 not tried, 1 NvAPI ready, -1 none (no NVIDIA driver)
     private static int state;
 
-    /// <summary>Where Fast Sync is on ("global", program profiles' names, joined by "; "), "" nowhere or not known.
-    /// REPLAY_TEST_FASTSYNC: what it says instead (a test of the window's words).</summary>
     public static unsafe string Where()
     {
         var test = Environment.GetEnvironmentVariable("REPLAY_TEST_FASTSYNC");

@@ -6,7 +6,6 @@ import Foundation
 import ScreenReplayKit
 import ServiceManagement
 
-/// Installs and supervises `ScreenReplay Helper.app` in `<REPLAY_ROOT>/helper/`, modeled after Monoid's `helper_app.mbt`.
 /// Launched via `/usr/bin/open -n -g` so LaunchServices makes `ScreenReplay Helper.app` its own TCC responsible process.
 final class HelperSupervisor: @unchecked Sendable {
   let paths: RecorderPaths
@@ -36,7 +35,6 @@ final class HelperSupervisor: @unchecked Sendable {
     "Contents/_CodeSignature/CodeResources",
   ]
 
-  /// Finds the release's `ScreenReplay Helper.app` (env override or `ScreenReplay.app/Contents/Helpers/ScreenReplay Helper.app`).
   func bundledHelperApp() -> String? {
     let env = ProcessInfo.processInfo.environment
     if let override = env["SR_BUNDLED_HELPER_APP"], !override.isEmpty,
@@ -51,7 +49,6 @@ final class HelperSupervisor: @unchecked Sendable {
     return nil
   }
 
-  /// Copies `ScreenReplay Helper.app` to `<REPLAY_ROOT>/helper/ScreenReplay Helper.app` atomically if changed.
   func installHelperIfNeeded() throws -> String? {
     guard let srcApp = bundledHelperApp() else { return nil }
     let dstApp = paths.installedHelperApp
@@ -295,7 +292,6 @@ final class HelperSupervisor: @unchecked Sendable {
   }
 }
 
-/// Coordinates `REPLAY_ROOT` state/requests, Helper RPC, Instant Replay saves, Launch at Login, menu bar, and Carbon hotkeys.
 final class HostCoordinator: NSObject, @unchecked Sendable {
   let paths: RecorderPaths
   let logger: RecorderLogger
@@ -317,7 +313,6 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
   private var viewerProcess: Process?
   private var lastPermissionPrompted = false
 
-  // Menu bar UI (MainActor)
   @MainActor private var statusItem: NSStatusItem?
   @MainActor private var statusSummaryItem: NSMenuItem?
   @MainActor private var pauseResumeItem: NSMenuItem?
@@ -333,8 +328,6 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     self.updater = Updater(paths: paths, logger: logger, headlessTest: headlessTest)
     super.init()
 
-    // (an update waits while the replay window is open; before the new app takes this one's place, the helper and the
-    // window this run started end with it)
     updater.isReplayShown = { [weak self] in self?.viewerProcess?.isRunning ?? false }
     updater.beforeQuit = { [weak self] in
       guard let self else { return }
@@ -488,7 +481,6 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
       headlessTest: headlessTest
     )
 
-    // Determine desired recording state
     var desiredRecord = false
     var statusCode = "disabled"
     var statusArg = ""
@@ -754,8 +746,6 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     }
   }
 
-  // MARK: - Menu Bar & Carbon Hotkeys
-
   @MainActor
   private func setupMenuBar() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -896,9 +886,9 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
 
     let mods = UInt32(controlKey | optionKey)
     let bindings: [(UInt32, UInt32)] = [
-      (1, UInt32(kVK_ANSI_R)), // ⌃⌥R Open Replay
-      (2, UInt32(kVK_ANSI_S)), // ⌃⌥S Save Instant Replay
-      (3, UInt32(kVK_ANSI_M)), // ⌃⌥M Add Marker
+      (1, UInt32(kVK_ANSI_R)),
+      (2, UInt32(kVK_ANSI_S)),
+      (3, UInt32(kVK_ANSI_M)),
     ]
     for (id, keyCode) in bindings {
       var ref: EventHotKeyRef?
@@ -909,8 +899,6 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     }
   }
 }
-
-// MARK: - Entry Point
 
 let args = Set(CommandLine.arguments.dropFirst())
 let env = ProcessInfo.processInfo.environment
@@ -941,7 +929,6 @@ if !headlessTest && !args.contains("--background") && !args.contains("--updated"
 }
 
 if lockFD >= 0 && flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
-  // Another ScreenReplayMac instance is already running for this REPLAY_ROOT; open.request (if any) wakes its viewer.
   close(lockFD)
   exit(0)
 }
