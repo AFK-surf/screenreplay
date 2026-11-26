@@ -126,6 +126,13 @@ jobs:
           PION_QBE: ${{ github.workspace }}\pion\out\qbe.exe
         run: .\screenreplay\scripts\build.ps1
 
+      - name: Run viewer regression tests
+        shell: pwsh
+        env:
+          PIONC: ${{ github.workspace }}\pion\out\pionc_release.exe
+          PION_QBE: ${{ github.workspace }}\pion\out\qbe.exe
+        run: .\screenreplay\scripts\build-viewer.ps1 -Test
+
       - name: The replay window's build log
         if: failure()
         shell: pwsh

@@ -45,11 +45,13 @@ fn clip_title(name : String) -> String {
   if stem.ends_with(".gif") {
     return clip_title(str_replace_all(stem, ".gif", "")) + " · GIF"
   }
-  let stem = if stem.starts_with("Replay ") { "回放 " + stem.slice(7, stem.length()) } else { stem }
-  if !stem.starts_with("回放 ") {
+  let pfx = "回放 "
+  let stem = if stem.starts_with("Replay ") { pfx + stem.slice(7, stem.length()) } else { stem }
+  if !stem.starts_with(pfx) {
     return stem
   }
-  match (digits(stem, 8, 2), digits(stem, 11, 2), digits(stem, 14, 2), digits(stem, 17, 2), digits(stem, 20, 2)) {
+  let o = pfx.length() + 5
+  match (digits(stem, o, 2), digits(stem, o + 3, 2), digits(stem, o + 6, 2), digits(stem, o + 9, 2), digits(stem, o + 12, 2)) {
     (Some(m), Some(d), Some(h), Some(mi), Some(s)) => month_day(m, d) + " \{two(h)}:\{two(mi)}:\{two(s)}"
     _ => stem
   }}

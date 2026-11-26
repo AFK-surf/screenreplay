@@ -87,6 +87,13 @@ jobs:
           PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s1" "$OUT_DIR/pionc0" build -o "$OUT_DIR/pionc1" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
           PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s2" "$OUT_DIR/pionc1" build -o "$OUT_DIR/pionc2" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
 
+      - name: Run viewer regression tests
+        env:
+          PIONC: ${{ github.workspace }}/pion/out/pionc2
+          PION_QBE: ${{ github.workspace }}/pion/out/qbe
+          PION_RT_LIB: ${{ github.workspace }}/pion/out/libpionrt.a
+        run: (cd screenreplay && "$PIONC" test .)
+
       - name: Build ScreenReplay.app
         env:
           PIONC: ${{ github.workspace }}/pion/out/pionc2
