@@ -1610,13 +1610,14 @@ internal sealed class RecorderApp : IDisposable
     }
 
     private static bool TitleLike(string text) =>
-        text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ");
+        text.Contains(" - ") || text.Contains(" — ") || text.Contains(" – ") || text.Contains(" | ") ||
+        (!text.Contains(' ') && text.Contains(':'));
 
     private static string OwnName(string exe, string name)
     {
         var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(exe);
         bool bare(string? s) => string.IsNullOrEmpty(s) ||
-            (string.Equals(s, name, StringComparison.OrdinalIgnoreCase) && (s.Contains('_') || s == s.ToLowerInvariant()));
+            (string.Equals(s, name, StringComparison.OrdinalIgnoreCase) && !s.Contains('.') && (s.Contains('_') || s == s.ToLowerInvariant()));
         var description = info.FileDescription?.Trim();
         if (bare(description))
         {

@@ -5,6 +5,11 @@ import "signals"
 import "ui"
 import "view"
 
+fn app_name_usable(text : String) -> Bool {
+  text != "" && !text.contains(" - ") && !text.contains(" — ") && !text.contains(" – ") && !text.contains(" | ") &&
+  (text.contains(" ") || !text.contains(":"))
+}
+
 fn app_name(process : String) -> String {
   let key = str_to_ascii_lower(process)
   match app_names.get(key) {
@@ -16,8 +21,8 @@ fn app_name(process : String) -> String {
     return process
   }
   let text = read_text(pjoin(pjoin(root_dir(), "AppIcons"), key + ".txt")).trim()
-  // Ignore legacy AppIcons .txt entries containing document/page window titles.
-  if text == "" || text.contains(" - ") || text.contains(" — ") || text.contains(" – ") || text.contains(" | ") {
+  // Ignore legacy AppIcons .txt entries containing document/page or internal scheme:id window titles.
+  if !app_name_usable(text) {
     app_names_missed.set(key, now)
     return process
   }

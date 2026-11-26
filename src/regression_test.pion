@@ -258,4 +258,9 @@ test "clip_plan trim offsets and export math helpers" {
   assert_eq_int(h264_fps(0, 1280, 720, 60), 60, "h264_fps 720p")
   assert_eq_str(size_label(25.0), "25 MB", "size_label 25")
   assert_eq_str(size_label(1024.0), "1 GB", "size_label 1024")
+  assert_true(!app_name_usable("browser:77E192590581671DB4E1B10DC762FFC2"), "reject internal scheme:id title")
+  assert_true(!app_name_usable("Page - Google Chrome"), "reject document title")
+  assert_true(app_name_usable("youdid.wtf"), "allow dotted app name")
+  assert_true(app_name_usable("沉星之序"), "allow game title")
+  assert_true(app_name_usable("Cyberpunk 2077: Phantom Liberty"), "allow titled colon with space")
 }
