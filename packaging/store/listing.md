@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.24):** The timeline now shows the time of day, centred under each moment and spaced to suit the zoom, with no extra height. App stretches too narrow to show are joined when zoomed far out, so no more dense separator lines. The tray panel and save card now share the resident replay process (one background process instead of three, less memory and video memory). Fixed an app occasionally keeping a file's name on the timeline.
+**What's new in this version (0.1.25):** Fixed playback frames and the hover preview card not following the pointer in real time while pressing on the timeline and scrolling the wheel or dragging near the window edge. Clipped the timeline activity heat lane to the track bounds. Migrated the replay viewer to the Pion + Invar stack for smoother rendering.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.24）：** 时间轴上直接标出钟点，居中对准对应时刻、间隔随缩放调整，不增加高度；缩小时过窄的应用片段合并显示，不再出现密集分隔线；托盘面板和保存卡片并入常驻回放程序，后台进程由三个减为一个，内存和显存占用更低；修复程序名偶尔被记成文件名的问题。
+**此版本新增内容（0.1.25）：** 修复在时间轴上按住鼠标滚轮或拖动到窗口边缘附近时，回放画面和缩略图预览不实时跟随指针变化的问题；修复时间轴活跃热力条超出轨道起点的裁剪问题；回放窗口迁移至 Pion + Invar 运行时，渲染更轻快。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

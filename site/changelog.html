@@ -51,6 +51,15 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.25</h2><span>2026-11-27</span></div>
+      <ul>
+        <li data-zh="修复在时间轴上按住鼠标滚轮或拖动到窗口边缘附近时，回放画面和缩略图预览不实时跟随指针变化（或回弹到开头）的问题。" data-en="Fixed playback frames and the hover preview card failing to follow the pointer in real time while holding the mouse on the timeline and scrolling the wheel, or snapping back to the start when dragging near the window edge.">修复在时间轴上按住鼠标滚轮或拖动到窗口边缘附近时，回放画面和缩略图预览不实时跟随指针变化（或回弹到开头）的问题。</li>
+        <li data-zh="回放窗口迁移至 Pion + Invar 运行时，渲染更轻快；修复时间轴活跃热力条偶尔超出轨道起点的裁剪问题。" data-en="Migrated the replay viewer to the Pion + Invar runtime for lighter, smoother rendering, and clipped the timeline activity heat lane cleanly to the track bounds.">回放窗口迁移至 Pion + Invar 运行时，渲染更轻快；修复时间轴活跃热力条偶尔超出轨道起点的裁剪问题。</li>
+        <li data-zh="macOS 版支持 Developer ID 签名与公证、内置自动更新和官网直接下载。" data-en="Added Developer ID signing, notarization, built-in auto-updates, and direct download on macOS.">macOS 版支持 Developer ID 签名与公证、内置自动更新和官网直接下载。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.24</h2><span>2026-11-24</span></div>
       <ul>
         <li data-zh="时间轴上直接标出钟点：居中写在对应时刻下方，间隔随缩放自动调整（看 2 小时时标整点和半点），不增加时间轴高度。" data-en="The timeline now shows the time of day: centred under each moment, spaced to suit the zoom (hours and half hours across a 2-hour view), with no extra height.">时间轴上直接标出钟点：居中写在对应时刻下方，间隔随缩放自动调整（看 2 小时时标整点和半点），不增加时间轴高度。</li>
