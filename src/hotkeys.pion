@@ -52,11 +52,8 @@ fn hotkey_text(spec : String) -> String {
   }
   b.to_string()}
 
-// What a menu or hint shows for it: nothing while global shortcuts are off or it has none.
+// What a menu or hint shows for it ("" where it has none).
 fn hotkey_shown(which : String) -> String {
-  if !sets().hotkeys_on {
-    return ""
-  }
   hotkey_text(hotkey_spec(which))}
 
 fn hotkey_capture_file() -> String {
@@ -180,31 +177,32 @@ fn hotkey_field(c : view::View, which : String) -> Unit {
     }, weight=500)
     |> ignore
   })
+  |> ignore
+  c.box(fn(slot) {
+    slot.width(view::Live::Is(Some(26.0))).height(view::Live::Is(Some(26.0))) |> ignore
+    slot.show(fn() { hotkey_spec(which) != "" && !listening() }, fn(x) {
+      icon_button(x, fn() { "close" }, fn() { t("移除") }, fn() {
+        hk_note_text.set("")
+        hotkey_set(which, "")
+      }, w=26.0, h=26.0, size=12.0)
+      |> ignore
+    }, at_once=true)
+  })
   |> ignore}
 
 fn shortcuts_page(p : view::View) -> Unit {
   setting_group(p, fn() { t("全局快捷键") }, fn(g) {
-    toggle_row(g, true, fn() { t("启用全局快捷键") }, fn() {
-      t(if is_mac() { "在任何应用里都能用；关掉后可以从菜单栏图标操作" } else { "在任何应用里都能用；关掉后可以从托盘图标操作" })
-    }, fn() { sets().hotkeys_on }, fn(v) {
-      hotkey_stop()
-      settings.hotkeys_on = v
-    })
-    g.show(fn() { sets().hotkeys_on }, fn(rows) {
-      for which in ["open", "mark", "save"] {
-        setting_row(rows, false, fn() { hotkey_title(which) }, fn() { hotkey_note(which) }, fn(c) { hotkey_field(c, which) }, note_ink=warn)
-      }
-    }, at_once=true)
+    for i, which in ["open", "mark", "save"] {
+      setting_row(g, i == 0, fn() { hotkey_title(which) }, fn() { hotkey_note(which) }, fn(c) { hotkey_field(c, which) }, note_ink=warn)
+    }
   })
-  p.show(fn() { sets().hotkeys_on }, fn(n) {
-    n.box(fn(w) {
-      w.padding(view::Live::Is((2.0, 0.0, 2.0, 0.0))) |> ignore
-      w.words(view::Live::By(fn() {
-        t(if is_mac() { "点按键可以更换；Esc 取消，Delete 清除" } else { "点按键可以更换；Esc 取消，Backspace 清除" })
-      }), look={ ..view::words_plain, size: 12.0, line: 17.0, wrap: true }).ink(view::Live::By(ui_subtle)) |> ignore
-    })
-    |> ignore
-  }, at_once=true)
+  p.box(fn(w) {
+    w.padding(view::Live::Is((2.0, 0.0, 2.0, 0.0))) |> ignore
+    w.words(view::Live::By(fn() {
+      t(if is_mac() { "在任何应用里都能用。点按键可以更换（Esc 取消），× 移除；移除后可以从菜单栏图标操作" } else { "在任何应用里都能用。点按键可以更换（Esc 取消），× 移除；移除后可以从托盘图标操作" })
+    }), look={ ..view::words_plain, size: 12.0, line: 17.0, wrap: true }).ink(view::Live::By(ui_subtle)) |> ignore
+  })
+  |> ignore
   setting_group(p, fn() { t("回放窗口内") }, fn(g) {
     g.each(fn() { shortcut_rows() }, fn(r : (String, Array[String])) -> String { r.0 }, fn(row, r) {
       let (label, keys) = r.untracked()

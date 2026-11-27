@@ -897,7 +897,7 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
 
   }
 
-  // Registers what settings.json asks for, again only when that changes; none while off, before consent, or while the
+  // Registers what settings.json asks for, again only when that changes; none before consent, or while the
   // viewer's shortcut field is taking a new combination (hotkeys.capture), so the old one reaches it instead of firing.
   private func applyHotKeys(_ settings: RecorderSettings) {
     if headlessTest { return }
@@ -908,14 +908,13 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     {
       capturing = Date().timeIntervalSince(written) < 120
     }
-    let on = settings.consented && settings.hotkeys && !capturing
+    let on = settings.consented && !capturing
     let said = on ? "\(settings.hotkeyOpen)|\(settings.hotkeyMark)|\(settings.hotkeySave)" : ""
     if said == hotkeysSaid { return }
     hotkeysSaid = said
     let wanted: [(UInt32, String, String)] = on
       ? [(1, "open", settings.hotkeyOpen), (2, "save", settings.hotkeySave), (3, "mark", settings.hotkeyMark)]
       : []
-    let shown = settings.hotkeys && !capturing
     let menuSpecs = (settings.hotkeyOpen, settings.hotkeySave, settings.hotkeyMark)
     DispatchQueue.main.async {
       MainActor.assumeIsolated {
@@ -938,7 +937,7 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
         if !capturing {
           for (item, spec) in [(self.openMenuItem, menuSpecs.0), (self.saveMenuItem, menuSpecs.1), (self.markMenuItem, menuSpecs.2)] {
             guard let item else { continue }
-            let hk = shown ? HotkeySpec.parse(spec) : nil
+            let hk = HotkeySpec.parse(spec)
             item.keyEquivalent = hk?.menuKey ?? ""
             var mask: NSEvent.ModifierFlags = []
             if let m = hk?.carbonModifiers {

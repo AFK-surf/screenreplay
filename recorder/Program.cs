@@ -1424,7 +1424,7 @@ internal sealed class RecorderApp : IDisposable
     private string hotkeysTaken = "";
     private TrayMenuItem? openItem, markItem, saveItem;
 
-    // Registers what settings.json asks for, again only when that changes; none while off, before consent, or while the
+    // Registers what settings.json asks for, again only when that changes; none before consent, or while the
     // viewer is taking a new combination (hotkeys.capture, so the old one reaches it instead of firing).
     private void RegisterHotkeys(RecorderSettings wanted)
     {
@@ -1438,7 +1438,7 @@ internal sealed class RecorderApp : IDisposable
         {
         }
 
-        var on = wanted.Consented && wanted.Hotkeys && !capturing;
+        var on = wanted.Consented && !capturing;
         var said = on ? $"{wanted.HotkeyOpen}|{wanted.HotkeyMark}|{wanted.HotkeySave}" : "";
         if (said == hotkeysSaid)
         {
@@ -1465,10 +1465,9 @@ internal sealed class RecorderApp : IDisposable
         hotkeysTaken = string.Join(",", taken);
         if (!capturing && openItem is not null && markItem is not null && saveItem is not null)
         {
-            var shown = wanted.Hotkeys;
-            openItem.Keys = shown ? wanted.HotkeyOpen : "";
-            markItem.Keys = shown ? wanted.HotkeyMark : "";
-            saveItem.Keys = shown ? wanted.HotkeySave : "";
+            openItem.Keys = wanted.HotkeyOpen;
+            markItem.Keys = wanted.HotkeyMark;
+            saveItem.Keys = wanted.HotkeySave;
         }
     }
 
@@ -2226,7 +2225,6 @@ internal sealed record RecorderSettings(
     string BufferDir = "",
     bool Consented = false,
     bool AutoUpdate = true,
-    bool Hotkeys = true,
     string HotkeyOpen = "Ctrl+Alt+R",
     string HotkeyMark = "Ctrl+Alt+M",
     string HotkeySave = "Ctrl+Alt+S")
@@ -2322,7 +2320,6 @@ internal sealed record RecorderSettings(
                 root.TryGetProperty("consent", out var consent) && consent.ValueKind == System.Text.Json.JsonValueKind.Object &&
                     consent.TryGetProperty("version", out var version) && version.TryGetInt32(out var v) && v >= ConsentVersion,
                 Flag("autoUpdate", true),
-                Flag("hotkeys", true),
                 Text("hotkeyOpen", Default.HotkeyOpen).Trim(),
                 Text("hotkeyMark", Default.HotkeyMark).Trim(),
                 Text("hotkeySave", Default.HotkeySave).Trim());

@@ -17,7 +17,6 @@ pub struct Settings {
   mut consent_version : Int
   mut consent_at : Double
   mut auto_update : Bool
-  mut hotkeys_on : Bool
   mut hotkey_open : String
   mut hotkey_mark : String
   mut hotkey_save : String
@@ -95,7 +94,6 @@ fn load_settings() -> Unit {
         Option::Some(False) => settings.auto_update = false
         _ => settings.auto_update = true
       }
-      settings.hotkeys_on = !(o.get("hotkeys") is Some(False))
       let spec = fn(name : String, which : String) {
         match o.get(name) {
           Option::Some(String(v)) => v
@@ -141,7 +139,7 @@ fn json_escaped(text : String) -> String {
 
 fn save_settings() -> Unit {
   settings_rev.set(settings_rev.untracked() + 1)
-  let text = "{\"enabled\":\{settings.enabled},\"windowMinutes\":\{settings.window_minutes},\"maxGB\":\{settings.max_gb},\"autostart\":\{settings.autostart},\"systemAudio\":\{settings.system_audio},\"microphone\":\{settings.microphone},\"pauseInFullscreen\":\{settings.pause_in_fullscreen},\"autoUpdate\":\{settings.auto_update},\"codec\":\"\{settings.codec}\",\"maxHeight\":\{settings.max_height},\"fps\":\{settings.fps},\"quality\":\"\{settings.quality}\",\"lastSeconds\":\{settings.last_seconds},\"bufferDir\":\"\{json_escaped(settings.buffer_dir)}\",\"hotkeys\":\{settings.hotkeys_on},\"hotkeyOpen\":\"\{settings.hotkey_open}\",\"hotkeyMark\":\"\{settings.hotkey_mark}\",\"hotkeySave\":\"\{settings.hotkey_save}\"" +
+  let text = "{\"enabled\":\{settings.enabled},\"windowMinutes\":\{settings.window_minutes},\"maxGB\":\{settings.max_gb},\"autostart\":\{settings.autostart},\"systemAudio\":\{settings.system_audio},\"microphone\":\{settings.microphone},\"pauseInFullscreen\":\{settings.pause_in_fullscreen},\"autoUpdate\":\{settings.auto_update},\"codec\":\"\{settings.codec}\",\"maxHeight\":\{settings.max_height},\"fps\":\{settings.fps},\"quality\":\"\{settings.quality}\",\"lastSeconds\":\{settings.last_seconds},\"bufferDir\":\"\{json_escaped(settings.buffer_dir)}\",\"hotkeyOpen\":\"\{settings.hotkey_open}\",\"hotkeyMark\":\"\{settings.hotkey_mark}\",\"hotkeySave\":\"\{settings.hotkey_save}\"" +
     (if settings.consent_version > 0 {
       ",\"consent\":{\"version\":\{settings.consent_version},\"at\":\{settings.consent_at.to_int64()}}"
     } else {
