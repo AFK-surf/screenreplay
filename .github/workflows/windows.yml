@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AFK-surf/invar
-          ref: 8396c24e479c8375c8bbff88781917b9918bf16c
+          ref: e838c54f3a923794cd6731cabe5468a47798793a
           path: invar
 
       - name: Checkout pion-packages
@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AFK-surf/pion
-          ref: 9ecbda462c5790e23c02d6d5a7bec7160c13f519
+          ref: aa55758fb3db593eca12195cec495eaf8a65e329
           path: pion
 
       - uses: actions/setup-dotnet@v4
@@ -59,7 +59,7 @@ jobs:
           path: |
             pion/out/pionc_release.exe
             pion/out/qbe.exe
-          key: pion-win-x64-9ecbda462c5790e23c02d6d5a7bec7160c13f519
+          key: pion-win-x64-aa55758fb3db593eca12195cec495eaf8a65e329
 
       - name: Setup MSYS2 for pion bootstrap
         if: steps.pion-cache.outputs.cache-hit != 'true'
