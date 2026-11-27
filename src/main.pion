@@ -877,20 +877,19 @@ fn main() -> Unit {
   if note_mode() != "" {
     rp_start_hidden()
     hostapi::window_setup(note_w, note_h(), note_w, note_h(), inset=true)
-    ui::run("ScreenReplay", note_window, theme=sf_ui_theme_now)
+    ui::run("ScreenReplay", note_window, theme=sf_ui_theme_popup)
     return
   }
   if tray_mode() {
     rp_start_hidden()
     hostapi::window_setup(tray_w, tray_h, tray_w, tray_h, inset=true)
-    ui::run("ScreenReplay", tray_window, theme=sf_ui_theme_now)
+    ui::run("ScreenReplay", tray_window, theme=sf_ui_theme_popup)
     return
   }
   rp_set_bg_rgb(((signals::untracked(c_bg) >> 8) & 0xFFFFFFL).to_int())
   start_hidden()
   hostapi::window_setup(1000.0, 720.0, 1440.0, 900.0, inset=true)
-  // Pass theme to ui::run so host clear color matches dark background instead of white.
-  ui::run("ScreenReplay", make_window, theme=sf_ui_theme_now)
+  ui::run("ScreenReplay", make_window, theme=sf_ui_theme_main)
 }
 fn __mbt_local_title_bar_measure_5(bar : view::View, left_box : mbt_compat::Ref[Option[view::View]], right_box : mbt_compat::Ref[Option[view::View]], side_need : signals::Signal[Double]) -> Unit {
       match (left_box.v, right_box.v) {

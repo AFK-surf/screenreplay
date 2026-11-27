@@ -897,5 +897,9 @@ int32_t rp_style_note_win(int32_t wid, double w_pt, double h_pt) {
   (void)wid; (void)w_pt; (void)h_pt;
   return 0;
 }
+int32_t rp_title_win(int32_t wid, int32_t which) {
+  (void)wid; (void)which;
+  return 0;
+}
 
 }

@@ -316,3 +316,10 @@ test "timeline wheel while held, drag hover_now, and mouse leave during drag" {
 
   t.dispose()
 }
+
+test "app badge letter takes a whole first character" {
+  debug_assert(badge_letter("chrome") == "C", "ascii upper")
+  debug_assert(badge_letter("微信") == "微", "CJK whole character")
+  debug_assert(badge_letter("Ärger") == "Ä", "two-byte character")
+  debug_assert(badge_letter("") == "·", "empty name")
+}

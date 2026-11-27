@@ -1132,6 +1132,14 @@ int32_t rp_style_tray_win(int32_t wid, double w_pt, double h_pt, int32_t px, int
   return 1;
 }
 
+// The in-process tray panel's and note card's titles, which the recorder finds them by (Program.cs
+// HasOtherVisibleWindow; TopWindowOf takes the one titled "ScreenReplay"): window_open_here gives them the run's.
+int32_t rp_title_win(int32_t wid, int32_t which) {
+  HWND h = (HWND)mb_app_hwnd_of((int)wid);
+  if (!h) return 0;
+  return SetWindowTextW(h, which == 1 ? L"ScreenReplay Tray" : L"ScreenReplay Note") ? 1 : 0;
+}
+
 int32_t rp_style_note_win(int32_t wid, double w_pt, double h_pt) {
   HWND h = (HWND)mb_app_hwnd_of((int)wid);
   if (!h) return 0;

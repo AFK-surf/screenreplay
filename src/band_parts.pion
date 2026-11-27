@@ -105,7 +105,7 @@ fn app_icon(parent : view::View, process : String, size? : Double) -> Unit {
     |> ignore
   } else {
     let name = app_name(process)
-    let letter = if name.length() > 0 { str_to_ascii_upper(name.slice(0, 1)) } else { "·" }
+    let letter = badge_letter(name)
     parent.box(fn(i) {
       i
       .width(view::Live::Is(Some(size)))
@@ -676,3 +676,11 @@ fn picture_time(key : String, at : Double) -> Double {
     }
   }
   at}
+
+fn badge_letter(name : String) -> String {
+  if name.length() == 0 {
+    return "·"
+  }
+  let n = utf8_lead_len(name.code_unit_at(0))
+  str_to_ascii_upper(name.slice(0, if n < name.length() { n } else { name.length() }))
+}

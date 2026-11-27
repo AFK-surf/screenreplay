@@ -48,6 +48,7 @@ fn check_popup_requests() -> Unit {
       let wid = ui::window_open_here("tray")
       rp_prepare_popup(0)
       if wid > 0 {
+        rp_title_win(wid, 1) |> ignore
         inproc_tray_wid.v = wid
         rp_style_tray_win(wid, tray_w, h, px, py) |> ignore
       }
@@ -71,6 +72,7 @@ fn check_popup_requests() -> Unit {
           let wid = ui::window_open_here("note")
           rp_prepare_popup(0)
           if wid > 0 {
+            rp_title_win(wid, 2) |> ignore
             inproc_note_wid.v = wid
             rp_style_note_win(wid, note_w, h) |> ignore
           }
