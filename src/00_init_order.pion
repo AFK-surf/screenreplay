@@ -1,3 +1,4 @@
+import "kit"
 import "mbt_compat"
 import "motion"
 import "signals"
@@ -243,9 +244,7 @@ let inproc_note_wid : mbt_compat::Ref[Int] = mbt_compat::ref_new(0)
 
 let last_note_id_closed : mbt_compat::Ref[Int] = mbt_compat::ref_new(-1)
 
-let tips_layer : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
-
-let tips : TipLayer = TipLayer::new(fn() { tips_layer.v})
+let tips : kit::TipLayer = kit::TipLayer::new()
 
 let menu_shown : signals::Signal[Option[(Double, Double, Array[Option[MenuEntry]])]] = signals::signal_by(None, fn(a, b) {
   physical_equal(a, b)})

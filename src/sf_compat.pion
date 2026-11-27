@@ -1,11 +1,7 @@
-import "headless"
 import "hostapi"
 import "lg"
 import "mbt_compat"
-import "motion"
-import "signals"
 import "ui"
-import "view"
 
 let sf_shortcut_keys_of : mbt_compat::Ref[(String) -> String] = mbt_compat::ref_new(fn(_ : String) -> String { "" })
 
@@ -98,124 +94,6 @@ fn sf_ui_theme_now() -> ui::Theme {
 fn sf_node_words_w(s : String, size : Double, weight~ : Int = 400) -> Double {
   let style = if ui::tree_theme().tabular { hostapi::style_tabular } else { 0 }
   ui::measure_text_width(s, size, weight=weight, style_bits=style)
-}
-
-struct TipLayer {
-  layer : () -> Option[view::View]
-  active : signals::Signal[Option[headless::TipOwner]]
-  group : headless::TooltipGroup[headless::TipOwner]
-}
-
-fn TipLayer::new(layer : () -> Option[view::View]) -> TipLayer {
-  let active : signals::Signal[Option[headless::TipOwner]] = signals::signal_by(None, fn(a, b) { a == b })
-  let group = headless::TooltipGroup::new(
-    fn() { active.get() },
-    fn(k) { active.set(k) },
-    open_delay_ms=420.0,
-    warmup_ms=headless::tooltip_skip_ms,
-  )
-  TipLayer::{ layer, active, group }
-}
-
-fn sf_tip_node(
-  tips : TipLayer,
-  anchor : view::View,
-  label : () -> String,
-  side~ : view::Side = view::Side::Bottom,
-  shortcut~ : String = "",
-) -> Unit {
-  let open : signals::Signal[Bool] = signals::signal(false)
-  let shut : signals::Signal[Bool] = signals::signal(false)
-  let anchor_id = anchor.id()
-  let owner = headless::tip_node_owner()
-  let over_now = fn() -> Bool {
-    match ui::pointing() {
-      ui::Pointing::Mouse => anchor.pointed()
-      _ => false
-    }
-  }
-  anchor.reacts(fn() { (anchor.pressed(), over_now(), anchor.focus_shown()) }, at_start=false, fn(st) {
-    let (down, over, focused) = st
-    if down {
-      shut.set(true)
-    } else if !over && !focused {
-      shut.set(false)
-    }
-  })
-  let group_disabled = fn() -> Bool {
-    label() == "" || shut.get() || anchor.pressed()
-  }
-  tips.group.trigger(anchor, owner, disabled=group_disabled)
-  let made : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
-  let holder_v : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
-  let make = fn() -> Bool {
-    match (tips.layer)() {
-      None => false
-      Some(l) => {
-        let holder = l.box(fn(h) {
-          let _ = h.transitions_only().over(view::Live::Is(true))
-        }).lives_with(anchor)
-        holder_v.v = Some(holder)
-        holder.show(fn() { open.get() }, leave=motion::tip_out_ms, fn(t) {
-          let _ = t.over(view::Live::Is(true))
-          let _ = headless::tooltip_bubble(t, label, fn(b) {
-            let (ov_look, _) = motion::overlay_presence(b, enter=motion::tip_in, exit=motion::tip_out)
-            let _ = b
-              .over(view::Live::Is(true))
-              .points(view::Live::Is(false))
-              .beside(anchor_id, side=side, offset=6.0)
-              .row(view::Live::Is(true))
-              .lines_up(view::Live::Is(Some(view::Along::Middle)))
-              .gap(view::Live::Is(6.0))
-              .padding(view::Live::Is((8.0, 5.0, 8.0, 5.0)))
-              .corners(view::Live::Is(Some((6.0, 6.0, 6.0, 6.0))))
-              .ground(view::Live::By(fn() -> Int64 { tone(0x2B2D32FFL, 0x17181BFFL) }))
-              .edge(view::Live::By(fn() -> (Double, Int64) { (1.0, tone(0xFFFFFF24L, 0x00000024L)) }))
-              .alpha(view::Live::By(fn() -> Double { ov_look().alpha }))
-            let _ = b.box(fn(w) {
-              let _ = w
-                .words(view::Live::By(label))
-                .words_look(view::Live::Is(lg::words_at(11.5, weight=500)))
-                .ink(view::Live::Is(0xF5F6F8FFL))
-            })
-            b.show(fn() { sf_shortcut_keys(shortcut) != "" }, fn(k) {
-              let _ = k
-                .padding(view::Live::Is((4.0, 1.0, 4.0, 1.0)))
-                .corners(view::Live::Is(Some((4.0, 4.0, 4.0, 4.0))))
-                .ground(view::Live::Is(0xFFFFFF1FL))
-                .words(view::Live::By(fn() { sf_shortcut_keys(shortcut) }))
-                .words_look(view::Live::Is(lg::words_at(10.5, weight=600)))
-                .ink(view::Live::Is(0xD4D7DDFFL))
-            })
-          })
-        })
-        true
-      }
-    }
-  }
-  anchor.reacts(fn() { tips.group.is_open(owner) && !group_disabled() }, fn(on) {
-    if on == open.untracked() {
-      return
-    }
-    if on {
-      if !made.v {
-        made.v = make()
-      }
-      if made.v {
-        headless::tip_claim(owner)
-      }
-    }
-    match holder_v.v {
-      Some(h) => {
-        if h.alive() {
-          view::transition(within=h, fn() { open.set(on) })
-        } else {
-          open.set(on)
-        }
-      }
-      None => open.set(on)
-    }
-  })
 }
 
 fn utf8_encode(s : String) -> Bytes {
