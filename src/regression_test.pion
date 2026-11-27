@@ -264,3 +264,55 @@ test "clip_plan trim offsets and export math helpers" {
   assert_true(app_name_usable("沉星之序"), "allow game title")
   assert_true(app_name_usable("Cyberpunk 2077: Phantom Liberty"), "allow titled colon with space")
 }
+
+test "timeline wheel while held, drag hover_now, and mouse leave during drag" {
+  test_reset_fixture()
+  view_duration.set(30000.0)
+  view_from.set(0.0)
+  follow_latest.set(false)
+  let t = ui::Tester::tree(fn(root : view::View) {
+    the_root.v = Some(root)
+    ui::set_tree_theme(sf_ui_theme_now)
+    timeline(root)
+  }, width=1000.0, height=160.0)
+  t.frame()
+
+  let y = 34.0
+  ui::view_host_pointer(0, 500.0, y, 0, 10.0)
+  t.frame()
+  assert_eq_int(grabbed.untracked(), 3, "grabbed on timeline down")
+  assert_true((play.untracked().pos - 15000.0).abs() < 50.0, "seek on timeline down")
+  assert_true(hover_now() == Some(500.0), "hover_now at down")
+
+  ui::view_host_pointer(1, 700.0, y, 0, 20.0)
+  t.frame()
+  assert_true((play.untracked().pos - 21000.0).abs() < 50.0, "scrub on drag move")
+  assert_true(hover_now() == Some(700.0), "hover_now follows drag x")
+
+  ui::view_host_pointer(7, -1.0, -1.0, 0, 25.0)
+  t.frame()
+  assert_true((play.untracked().pos - 21000.0).abs() < 50.0, "mouse leave must not snap drag to 0")
+
+  let pos_before_wheel = play.untracked().pos
+  ui::view_wheel(700.0, y, 0.0, 400.0, 30.0)
+  t.frame()
+  assert_true(view_from.untracked() > 1000.0, "wheel panned timeline")
+  assert_true(play.untracked().pos > pos_before_wheel + 1000.0, "play pos followed wheel pan while held")
+
+  ui::view_host_pointer(2, 700.0, y, 0, 40.0)
+  t.frame()
+  assert_eq_int(grabbed.untracked(), 0, "grabbed cleared on up")
+  assert_true(band_drag_x.untracked().is_none(), "band_drag_x cleared on up")
+
+  ui::view_host_pointer(0, 400.0, y, 0, 50.0)
+  t.frame()
+  let pos_down2 = play.untracked().pos
+  ui::view_wheel(400.0, y, 0.0, 400.0, 60.0)
+  t.frame()
+  assert_true(scrub_dragged.untracked(), "wheel while held sets scrub_dragged")
+  assert_true(play.untracked().pos > pos_down2 + 1000.0, "wheel while held without prior drag scrubs pos")
+  ui::view_host_pointer(2, 400.0, y, 0, 70.0)
+  t.frame()
+
+  t.dispose()
+}

@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AFK-surf/invar
-          ref: 8eeef28c3715a10e7cf8dd8c3fbf5992bf3069b1
+          ref: 9ec427f203950b97e33611c78fe55454d9cf5bff
           path: invar
 
       - name: Checkout pion-packages

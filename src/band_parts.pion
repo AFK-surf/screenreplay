@@ -9,6 +9,12 @@ fn hover_now() -> Option[Double] {
   if view_dragging.get() {
     return Option::None
   }
+  if grabbed.get() == 3 {
+    match band_drag_x.get() {
+      Option::Some(x) => return Option::Some(x)
+      Option::None => ()
+    }
+  }
   let b = match hover_node.v {
     Some(h) => h
     None => band
