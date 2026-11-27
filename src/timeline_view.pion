@@ -629,11 +629,17 @@ fn band_drag(d : view::Drag, w : Double) -> Unit {
       grabbed.set(if edge != 0 { edge } else if inside { 4 } else { 3 })
       follow_latest.set(false)
       if grabbed.untracked() == 3 {
+        band_drag_x.set(Some((clamp(d.x, 0.0, w) * 4.0).round() / 4.0))
         seek_to(at)
+      } else {
+        band_drag_x.set(None)
       }
     }
     Moved => {
       edge_x.v = d.x
+      if grabbed.untracked() == 3 {
+        band_drag_x.set(Some((clamp(d.x, 0.0, w) * 4.0).round() / 4.0))
+      }
       band_moved(d.x, w)
       edge_scroll(w)
     }
@@ -641,6 +647,7 @@ fn band_drag(d : view::Drag, w : Double) -> Unit {
       let was = grabbed.untracked()
       let dragged = scrub_dragged.untracked()
       grabbed.set(0)
+      band_drag_x.set(None)
       scrub_dragged.set(false)
       // Do not re-seek on simple click release (already sought on Down; re-seeking replays ~100 ms of audio).
       if d.kind == view::DragIs::Up && ((was == 3 && dragged) || (was == 4 && !clip_moved.v)) {
@@ -655,13 +662,29 @@ fn block_wheel(e : view::Wheel, x : Double, w : Double) -> Unit {
   if w <= 0.0 || (e.dx == 0.0 && e.dy == 0.0) {
     return
   }
+  let g = grabbed.untracked()
+  let at_before = if g != 0 { at_x(x, w) } else { 0.0 }
   let len = signals::untracked(view_len)
   if (e.mods & (ui::wheel_mod_ctrl | ui::wheel_mod_cmd | ui::wheel_mod_pinch)) != 0 && e.dy != 0.0 {
     let (from, slen) = shown_now()
     zoom_about(mbt_compat::math_exp(-e.dy * 0.001), from + clamp(x / w, 0.0, 1.0) * slen)
   } else {
     pan_timeline((if e.dx != 0.0 { e.dx } else { e.dy }) * 0.0005 * len)
-  }}
+  }
+  if g != 0 {
+    let at_after = at_x(x, w)
+    if (at_after - at_before).abs() > 0.5 {
+      edge_x.v = x
+      if g == 3 {
+        scrub_dragged.set(true)
+        band_drag_x.set(Some((clamp(x, 0.0, w) * 4.0).round() / 4.0))
+      } else if g == 1 || g == 2 || g == 4 {
+        clip_moved.v = true
+      }
+      band_moved(x, w)
+    }
+  }
+}
 
 fn timeline(parent : view::View) -> Unit {
   parent.by_room(fn(held, room) {

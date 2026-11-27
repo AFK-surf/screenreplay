@@ -639,6 +639,8 @@ let clip_moved : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let band_down_x : mbt_compat::Ref[Double] = mbt_compat::ref_new(0.0)
 
+let band_drag_x : signals::Signal[Option[Double]] = signals::signal_by(None, fn(a, b) { a == b })
+
 let scrub_dragged : signals::Signal[Bool] = signals::signal(false)
 
 let band_down_at : mbt_compat::Ref[Double] = mbt_compat::ref_new(0.0)
