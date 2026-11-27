@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.25):** Fixed playback frames and the hover preview card not following the pointer in real time while pressing on the timeline and scrolling the wheel or dragging near the window edge. Clipped the timeline activity heat lane to the track bounds. Migrated the replay viewer to the Pion + Invar stack for smoother rendering.
+**What's new in this version (0.1.26):** Global shortcuts (open replay, mark this moment, save the last moments) can each be changed or removed in Settings › Shortcuts, which now lists global shortcuts and those inside the replay window separately; a shortcut another app already holds is flagged there. Fixed Settings… and Open replay in the tray panel sometimes doing nothing. Fixed the first character of Chinese app names on the timeline badges.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.25）：** 修复在时间轴上按住鼠标滚轮或拖动到窗口边缘附近时，回放画面和缩略图预览不实时跟随指针变化的问题；修复时间轴活跃热力条超出轨道起点的裁剪问题；回放窗口迁移至 Pion + Invar 运行时，渲染更轻快。
+**此版本新增内容（0.1.26）：** 全局快捷键（打开回放、标记此刻、保存最近一段）可以在「设置 › 快捷键」里逐个更换或移除，快捷键列表分成全局和回放窗口内两组，被其他程序占用的会直接标出；修复托盘面板里点「设置…」「打开回放」有时没有反应的问题；修复时间轴上中文应用名首字显示不全的问题。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

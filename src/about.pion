@@ -2,7 +2,7 @@ import "mbt_compat"
 import "signals"
 import "view"
 
-let app_version : String = "0.1.25"
+let app_version : String = "0.1.26"
 
 pub struct UpdateStatus {
   state : String
