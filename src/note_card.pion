@@ -197,7 +197,7 @@ fn note_ask_height(a : NoteAsk) -> Double {
 
 fn note_popup_window(wid : Int, root : view::View) -> Unit {
   root.tree.hand_over_presses(false)
-  ui::set_tree_theme(sf_ui_theme_now)
+  ui::set_tree_theme(sf_ui_theme_popup)
   root.ground(view::Live::By(c_s2)) |> ignore
   let gone = fn() {
     match inproc_note_ask.untracked() {
@@ -268,7 +268,7 @@ fn note_popup_window(wid : Int, root : view::View) -> Unit {
 fn note_window(root : view::View) -> Unit {
   the_root.v = Some(root)
   root.tree.hand_over_presses(false)
-  ui::set_tree_theme(sf_ui_theme_now)
+  ui::set_tree_theme(sf_ui_theme_popup)
   load_prefs()
   ask_system(root)
   keep_theme(root)

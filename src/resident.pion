@@ -5,8 +5,15 @@ import "view"
 fn resident() -> Bool {
   ui::env("REPLAY_RESIDENT") == "1"}
 
+// The popup's window spec (the hosts read a `what` that is JSON as one): its title is what the recorder finds it by
+// (Program.cs HasOtherVisibleWindow; TopWindowOf takes the one titled "ScreenReplay"), set as it is made.
+fn popup_spec(role : String, title : String, w : Double, h : Double, min_w : Double, min_h : Double) -> String {
+  "{\"role\":\"" + role + "\",\"title\":\"" + title + "\",\"w\":" + w.to_string() + ",\"h\":" + h.to_string() +
+  ",\"minW\":" + min_w.to_string() + ",\"minH\":" + min_h.to_string() + ",\"inset\":true}"
+}
+
 fn make_popup_window(wid : Int, what : String) -> (view::View) -> Unit {
-  if what == "tray" {
+  if what == "tray" || what.contains("\"role\":\"tray\"") {
     fn(root) { tray_popup_window(wid, root) }
   } else {
     fn(root) { note_popup_window(wid, root) }
@@ -45,10 +52,9 @@ fn check_popup_requests() -> Unit {
       rp_style_tray_win(inproc_tray_wid.v, tray_w, h, px, py) |> ignore
     } else if ui::windows_here() {
       rp_prepare_popup(1)
-      let wid = ui::window_open_here("tray")
+      let wid = ui::window_open_here(popup_spec("tray", "ScreenReplay Tray", tray_w, h, tray_w, 304.0))
       rp_prepare_popup(0)
       if wid > 0 {
-        rp_title_win(wid, 1) |> ignore
         inproc_tray_wid.v = wid
         rp_style_tray_win(wid, tray_w, h, px, py) |> ignore
       }
@@ -69,10 +75,9 @@ fn check_popup_requests() -> Unit {
           rp_style_note_win(inproc_note_wid.v, note_w, h) |> ignore
         } else if ui::windows_here() {
           rp_prepare_popup(2)
-          let wid = ui::window_open_here("note")
+          let wid = ui::window_open_here(popup_spec("note", "ScreenReplay Note", note_w, h, note_w, note_line_h))
           rp_prepare_popup(0)
           if wid > 0 {
-            rp_title_win(wid, 2) |> ignore
             inproc_note_wid.v = wid
             rp_style_note_win(wid, note_w, h) |> ignore
           }

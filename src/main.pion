@@ -811,7 +811,7 @@ fn make_window(root : view::View) -> Unit {
   the_root.v = Some(root)
   root.tree.hand_over_presses(false)
   // Must set theme after tree creation; pre-run theme is overwritten when the window is constructed.
-  ui::set_tree_theme(sf_ui_theme_now)
+  ui::set_tree_theme(sf_ui_theme_main)
   load_prefs()
   ask_system(root)
   keep_theme(root)
