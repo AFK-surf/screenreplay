@@ -316,3 +316,69 @@ test "timeline wheel while held, drag hover_now, and mouse leave during drag" {
 
   t.dispose()
 }
+
+test "app badge letter takes a whole first character" {
+  debug_assert(badge_letter("chrome") == "C", "ascii upper")
+  debug_assert(badge_letter("微信") == "微", "CJK whole character")
+  debug_assert(badge_letter("Ärger") == "Ä", "two-byte character")
+  debug_assert(badge_letter("") == "·", "empty name")
+}
+
+test "tip uses upstream kit::tip_node with 400ms delay, Esc priority, and menu dismiss" {
+  test_reset_fixture()
+  sf_set_shortcuts(shortcut_words)
+  let root_esc = mbt_compat::ref_new(false)
+  let t = ui::Tester::tree(fn(root : view::View) {
+    the_root.v = Some(root)
+    ui::set_tree_theme(sf_ui_theme_main)
+    let _ = root.keymap(view::Live::Is(view::Keymap::new([
+      view::Binding::{ keys: [view::Stroke::{ code: ui::key_escape, mods: 0 }], action: "close", when: view::KeyWhen::Always },
+    ])))
+    let _ = root.on_action("close", fn(_) {
+      root_esc.v = true
+      true
+    })
+    let _ = root.box(fn(row) {
+      let _ = row.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).padding(view::Live::Is((40.0, 40.0, 0.0, 0.0)))
+      let _ = row.box(fn(b1) {
+        let _ = b1.width(view::Live::Is(Some(40.0))).height(view::Live::Is(Some(32.0))).presses(view::Live::Is(true))
+        tip(b1, fn() { "播放" }, shortcut="play", side=view::Side::Bottom)
+      })
+      let _ = row.box(fn(b2) {
+        let _ = b2.width(view::Live::Is(Some(40.0))).height(view::Live::Is(Some(32.0))).presses(view::Live::Is(true))
+        tip(b2, fn() { "全屏" }, shortcut="full", side=view::Side::Bottom)
+      })
+    })
+    menu_layer(root)
+  }, width=400.0, height=200.0)
+  t.frame()
+
+  t.move_to(60.0, 56.0)
+  t.frame(ms=350.0)
+  assert_true(t.find("播放").is_none(), "tip hidden before 400ms")
+  t.frame(ms=80.0)
+  t.frame(ms=150.0)
+  assert_true(t.find("播放").is_some(), "tip shown after 400ms")
+
+  t.move_to(108.0, 56.0)
+  t.frame(ms=20.0)
+  assert_true(t.find("全屏").is_some(), "neighbour tip shown immediately while warm")
+
+  t.key(ui::key_escape)
+  t.frame(ms=200.0)
+  assert_true(!root_esc.v, "Esc closed tip before root keymap")
+  assert_true(t.find("全屏").is_none(), "tip gone after Esc")
+
+  t.move_to(10.0, 10.0)
+  t.frame(ms=20.0)
+  t.move_to(60.0, 56.0)
+  t.frame(ms=450.0)
+  t.frame(ms=150.0)
+  assert_true(t.find("播放").is_some(), "tip reopened")
+  open_menu(100.0, 100.0, [])
+  t.frame()
+  assert_true(t.find("播放").is_none(), "open_menu dismisses tip immediately")
+
+  close_menu()
+  t.dispose()
+}

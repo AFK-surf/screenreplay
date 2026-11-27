@@ -1,13 +1,52 @@
+import "kit"
 import "mbt_compat"
 import "motion"
 import "signals"
 import "view"
 
+fn sr_tip_look() -> kit::TipLook {
+  kit::TipLook::{
+    ground: tone(0x2B2D32FFL, 0x17181BFFL),
+    ink: 0xF5F6F8FFL,
+    edge: (1.0, tone(0xFFFFFF24L, 0x00000024L)),
+    shadow: (10.0, 3.0, tone(0x00000066L, 0x0000002EL)),
+    radius: 6.0,
+    size: 11.5,
+    line: 15.0,
+    weight: 500,
+    wrap: true,
+    pad_x: 8.0,
+    pad_y: 5.0,
+    max_width: 300.0,
+    cap_ground: 0xFFFFFF1FL,
+    cap_ink: 0xD4D7DDFFL,
+    cap_radius: 4.0,
+    cap_size: 10.5,
+    cap_line: 14.0,
+    cap_weight: 600,
+    cap_pad_x: 4.0,
+    cap_over: 1.0,
+    cap_in: 4.0,
+    cap_gap: 2.0,
+    cap_label_gap: 6.0,
+    scale_from: 1.0,
+    exit_scale: 1.0,
+  }
+}
+
 fn tip(anchor : view::View, label : () -> String, shortcut? : String, side? : view::Side) -> Unit {
   let shortcut = match shortcut { Some(__mbt_v) => __mbt_v, None => "" }
   let side = match side { Some(__mbt_v) => __mbt_v, None => view::Side::Top }
 
-  sf_tip_node(tips, anchor, label, side=side, shortcut=shortcut) |> ignore}
+  let _ = kit::tip_node(
+    tips,
+    anchor,
+    label,
+    side=side,
+    shortcut=fn() { sf_shortcut_keys(shortcut) },
+    look=sr_tip_look,
+  )
+}
 
 fn shortcut_words(action : String) -> String {
   let mac = is_mac()
@@ -36,6 +75,7 @@ pub struct MenuEntry {
 }
 
 fn open_menu(x : Double, y : Double, entries : Array[Option[MenuEntry]]) -> Unit {
+  tips.dismiss()
   menu_anchor.v = None
   menu_shown.set(Some((x, y, entries)))
   menu_up.set(true)}
@@ -43,6 +83,7 @@ fn open_menu(x : Double, y : Double, entries : Array[Option[MenuEntry]]) -> Unit
 fn open_menu_under(anchor : view::View, entries : Array[Option[MenuEntry]], above? : Bool) -> Unit {
   let above = match above { Some(__mbt_v) => __mbt_v, None => false }
 
+  tips.dismiss()
   menu_shown.set(Some((0.0, 0.0, entries)))
   menu_anchor.v = Some(anchor.id())
   menu_above.v = above
@@ -218,11 +259,7 @@ fn menu_layer(root : view::View) -> Unit {
     }, at_once=true)
   })
   |> ignore
-  root.box(fn(t) {
-    t.over(view::Live::Is(true)).over_all(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
-    tips_layer.v = Some(t)
-  })
-  |> ignore}
+  tips.mount(root).over_all(view::Live::Is(true)) |> ignore}
 
 fn tell(words : String, icon? : String) -> Unit {
   let icon = match icon { Some(__mbt_v) => __mbt_v, None => "info" }

@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AFK-surf/invar
-          ref: 9ec427f203950b97e33611c78fe55454d9cf5bff
+          ref: 8396c24e479c8375c8bbff88781917b9918bf16c
           path: invar
 
       - name: Checkout pion-packages
@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AFK-surf/pion
-          ref: f3b58d706826fc74df277150f6e22729f3af5ec5
+          ref: 685d9fe60240f08fb2bf535dc2c3f51ba2d467d4
           path: pion
 
       # (vendor/PermissionFlow needs Swift tools 6.2: the newest Xcode on the runner, not its default)
@@ -59,7 +59,7 @@ jobs:
             pion/out/pionc2
             pion/out/qbe
             pion/out/libpionrt.a
-          key: pion-macos-arm64-f3b58d706826fc74df277150f6e22729f3af5ec5
+          key: pion-macos-arm64-685d9fe60240f08fb2bf535dc2c3f51ba2d467d4
 
       - name: Bootstrap pionc2
         if: steps.pion-cache.outputs.cache-hit != 'true'
