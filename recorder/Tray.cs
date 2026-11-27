@@ -6,7 +6,7 @@ internal sealed class TrayMenuItem(string text, Action? click = null, string key
 {
     public string Text { get; set; } = text;
 
-    public string Keys { get; } = keys;
+    public string Keys { get; set; } = keys;
 
     public bool Enabled { get; init; } = true;
 

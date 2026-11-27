@@ -136,6 +136,9 @@ fn open_moment_menu(x : Double, y : Double, at : Double, at_playhead : Bool) -> 
   ])}
 
 fn kbd(parent : view::View, key : String) -> Unit {
+  kbd_by(parent, fn() { key })}
+
+fn kbd_by(parent : view::View, key : () -> String) -> Unit {
   parent.box(fn(k) {
     k
     .height(view::Live::Is(Some(20.0)))
@@ -147,7 +150,7 @@ fn kbd(parent : view::View, key : String) -> Unit {
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     |> ignore
-    words(k, fn() { key }, 12.0, ui_muted, weight=500) |> ignore
+    words(k, key, 12.0, ui_muted, weight=500) |> ignore
   })
   |> ignore}
 

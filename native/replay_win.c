@@ -685,7 +685,97 @@ int32_t rp_stay_resident(void) {
 // Rewrite Alt+Arrow WM_SYSKEYDOWN to WM_KEYDOWN so mbui does not swallow it as back/forward.
 static WNDPROC rp_alt_prev;
 
+// Shortcut field (settings): while it listens, keys go to it as "Ctrl+Alt+R" and the page sees none of them.
+static volatile LONG rp_hk_listening;
+static char rp_hk_said[48];
+static WPARAM rp_hk_held;
+
+static const char *rp_hk_key_name(WPARAM vk, char *buf) {
+  if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+    buf[0] = (char)vk;
+    buf[1] = 0;
+    return buf;
+  }
+  if (vk >= VK_F1 && vk <= VK_F24) {
+    snprintf(buf, 8, "F%d", (int)(vk - VK_F1 + 1));
+    return buf;
+  }
+  if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) {
+    snprintf(buf, 8, "Num%d", (int)(vk - VK_NUMPAD0));
+    return buf;
+  }
+  switch (vk) {
+  case VK_SPACE: return "Space";
+  case VK_PRIOR: return "PageUp";
+  case VK_NEXT: return "PageDown";
+  case VK_END: return "End";
+  case VK_HOME: return "Home";
+  case VK_LEFT: return "Left";
+  case VK_UP: return "Up";
+  case VK_RIGHT: return "Right";
+  case VK_DOWN: return "Down";
+  case VK_INSERT: return "Insert";
+  case VK_DELETE: return "Delete";
+  case VK_PAUSE: return "Pause";
+  case VK_SNAPSHOT: return "PrintScreen";
+  default: return NULL;
+  }
+}
+
+static void rp_hk_key(WPARAM vk) {
+  if (vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || vk == VK_LWIN || vk == VK_RWIN ||
+      (vk >= VK_LSHIFT && vk <= VK_RMENU) || vk == VK_CAPITAL || vk == VK_NUMLOCK) return;
+  int ctrl = GetKeyState(VK_CONTROL) < 0, alt = GetKeyState(VK_MENU) < 0, shift = GetKeyState(VK_SHIFT) < 0;
+  int win = GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0;
+  char said[48];
+  char buf[8];
+  const char *name = rp_hk_key_name(vk, buf);
+  if (!ctrl && !alt && !shift && !win && vk == VK_ESCAPE) {
+    strcpy(said, "esc");
+  } else if (!ctrl && !alt && !shift && !win && (vk == VK_BACK || vk == VK_DELETE)) {
+    strcpy(said, "clear");
+  } else if (!name) {
+    strcpy(said, "bad");
+  } else if (!ctrl && !alt && !win) {
+    strcpy(said, "mod");
+  } else {
+    snprintf(said, sizeof said, "%s%s%s%s%s", ctrl ? "Ctrl+" : "", alt ? "Alt+" : "", shift ? "Shift+" : "", win ? "Win+" : "", name);
+  }
+  memcpy(rp_hk_said, said, sizeof said);
+  rp_hk_held = vk;
+  InterlockedExchange(&rp_hk_listening, 0);
+  mb_app_wake();
+}
+
+void rp_hotkey_listen(int32_t on) {
+  rp_hk_said[0] = 0;
+  InterlockedExchange(&rp_hk_listening, on ? 1 : 0);
+}
+
+moonbit_bytes_t rp_hotkey_take(void) {
+  char out[48];
+  memcpy(out, rp_hk_said, sizeof out);
+  out[sizeof out - 1] = 0;
+  rp_hk_said[0] = 0;
+  return rp_bytes(out, (int)strlen(out));
+}
+
 static LRESULT CALLBACK rp_alt_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+  if (rp_hk_listening) {
+    if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+      rp_hk_key(wp);
+      return 0;
+    }
+    if (msg == WM_KEYUP || msg == WM_SYSKEYUP || msg == WM_CHAR || msg == WM_SYSCHAR) return 0;
+  } else if (rp_hk_held) {
+    // the taken key's own characters and release stay out of the page too
+    if (msg == WM_CHAR || msg == WM_SYSCHAR || msg == WM_DEADCHAR) return 0;
+    if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
+      if (wp == rp_hk_held) rp_hk_held = 0;
+      return 0;
+    }
+    if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN || msg == WM_KILLFOCUS) rp_hk_held = 0;
+  }
   if (msg == WM_SYSKEYDOWN && (wp == VK_LEFT || wp == VK_RIGHT || wp == VK_UP || wp == VK_DOWN))
     return CallWindowProcW(rp_alt_prev, h, WM_KEYDOWN, wp, lp);
   return CallWindowProcW(rp_alt_prev, h, msg, wp, lp);
@@ -1164,6 +1254,11 @@ int32_t rp_tray_tell(int32_t command) {
   if (n == 0 || n >= 32) return 0;
   HWND recorder = (HWND)(INT_PTR)wcstoll(v, NULL, 16);
   if (!IsWindow(recorder)) return 0;
+  // The panel holds the foreground; the recorder only gets a posted message, so without this its
+  // SetForegroundWindow is refused and an already open replay window stays behind other windows.
+  DWORD recorder_pid = 0;
+  GetWindowThreadProcessId(recorder, &recorder_pid);
+  if (recorder_pid) AllowSetForegroundWindow(recorder_pid);
   return PostMessageW(recorder, WM_APP + 0x51, (WPARAM)command, 0) ? 1 : 0;
 }
 

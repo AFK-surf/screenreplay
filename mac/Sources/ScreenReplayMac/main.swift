@@ -318,6 +318,11 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
   @MainActor private var pauseResumeItem: NSMenuItem?
   @MainActor private var permissionItem: NSMenuItem?
   private var hotKeyRefs: [EventHotKeyRef?] = []
+  @MainActor private var openMenuItem: NSMenuItem?
+  @MainActor private var saveMenuItem: NSMenuItem?
+  @MainActor private var markMenuItem: NSMenuItem?
+  private var hotkeysSaid: String?
+  private var hotkeysTaken = ""
 
   init(paths: RecorderPaths, headlessTest: Bool, directHelper: Bool, syntheticOverride: Bool) {
     self.paths = paths
@@ -474,6 +479,7 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     }
 
     let settings = RecorderSettings.read(from: paths.settingsPath, defaultConsentIfPresent: headlessTest)
+    applyHotKeys(settings)
     applyLaunchAtLoginIfNeeded(settings.autostart)
     updater.poll(
       autoUpdateEnabled: settings.autoUpdate,
@@ -604,6 +610,7 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
       "audioTrouble": (recorderInfo["audioTrouble"] as? String) ?? "",
       "diskTight": (recorderInfo["diskTight"] as? Bool) ?? false,
       "fastSync": "",
+      "hotkeysTaken": hotkeysTaken,
       "sharedGpu": false,
       "framesEncoded": (recorderInfo["framesEncoded"] as? Int) ?? 0,
       "framesSkipped": (recorderInfo["framesSkipped"] as? Int) ?? 0,
@@ -762,17 +769,21 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
     let openItem = NSMenuItem(title: SRStrings.t("打开回放窗口", "Open Replay Window", english: english), action: #selector(onMenuOpenReplay), keyEquivalent: "r")
     openItem.keyEquivalentModifierMask = [.control, .option]
     openItem.target = self
+    self.openMenuItem = openItem
     menu.addItem(openItem)
 
     let saveItem = NSMenuItem(title: SRStrings.t("保存最近回放", "Save Instant Replay", english: english), action: #selector(onMenuSaveInstant), keyEquivalent: "s")
     saveItem.keyEquivalentModifierMask = [.control, .option]
     saveItem.target = self
+    self.saveMenuItem = saveItem
     menu.addItem(saveItem)
 
     let markItem = NSMenuItem(title: SRStrings.t("添加时间线标记", "Add Timeline Marker", english: english), action: #selector(onMenuAddMarker), keyEquivalent: "m")
     markItem.keyEquivalentModifierMask = [.control, .option]
     markItem.target = self
+    self.markMenuItem = markItem
     menu.addItem(markItem)
+    queue.async { self.hotkeysSaid = nil }
 
     menu.addItem(.separator())
 
@@ -884,17 +895,62 @@ final class HostCoordinator: NSObject, @unchecked Sendable {
       nil
     )
 
-    let mods = UInt32(controlKey | optionKey)
-    let bindings: [(UInt32, UInt32)] = [
-      (1, UInt32(kVK_ANSI_R)),
-      (2, UInt32(kVK_ANSI_S)),
-      (3, UInt32(kVK_ANSI_M)),
-    ]
-    for (id, keyCode) in bindings {
-      var ref: EventHotKeyRef?
-      let hkID = EventHotKeyID(signature: OSType(0x5352_4D43), id: id)
-      if RegisterEventHotKey(keyCode, mods, hkID, GetApplicationEventTarget(), 0, &ref) == noErr {
-        hotKeyRefs.append(ref)
+  }
+
+  // Registers what settings.json asks for, again only when that changes; none before consent, or while the
+  // viewer's shortcut field is taking a new combination (hotkeys.capture), so the old one reaches it instead of firing.
+  private func applyHotKeys(_ settings: RecorderSettings) {
+    if headlessTest { return }
+    let capture = paths.requestPath("hotkeys.capture")
+    var capturing = false
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: capture),
+       let written = attrs[.modificationDate] as? Date
+    {
+      capturing = Date().timeIntervalSince(written) < 120
+    }
+    let on = settings.consented && !capturing
+    let said = on ? "\(settings.hotkeyOpen)|\(settings.hotkeyMark)|\(settings.hotkeySave)" : ""
+    if said == hotkeysSaid { return }
+    hotkeysSaid = said
+    let wanted: [(UInt32, String, String)] = on
+      ? [(1, "open", settings.hotkeyOpen), (2, "save", settings.hotkeySave), (3, "mark", settings.hotkeyMark)]
+      : []
+    let menuSpecs = (settings.hotkeyOpen, settings.hotkeySave, settings.hotkeyMark)
+    DispatchQueue.main.async {
+      MainActor.assumeIsolated {
+        for ref in self.hotKeyRefs {
+          if let ref { UnregisterEventHotKey(ref) }
+        }
+        self.hotKeyRefs.removeAll()
+        var taken: [String] = []
+        for (id, name, spec) in wanted {
+          guard let hk = HotkeySpec.parse(spec) else { continue }
+          var ref: EventHotKeyRef?
+          let hkID = EventHotKeyID(signature: OSType(0x5352_4D43), id: id)
+          if RegisterEventHotKey(hk.keyCode, hk.carbonModifiers, hkID, GetApplicationEventTarget(), 0, &ref) == noErr {
+            self.hotKeyRefs.append(ref)
+          } else {
+            taken.append(name)
+            self.logger.log("hotkey \(spec) is taken by another app")
+          }
+        }
+        if !capturing {
+          for (item, spec) in [(self.openMenuItem, menuSpecs.0), (self.saveMenuItem, menuSpecs.1), (self.markMenuItem, menuSpecs.2)] {
+            guard let item else { continue }
+            let hk = HotkeySpec.parse(spec)
+            item.keyEquivalent = hk?.menuKey ?? ""
+            var mask: NSEvent.ModifierFlags = []
+            if let m = hk?.carbonModifiers {
+              if m & 0x1000 != 0 { mask.insert(.control) }
+              if m & 0x0800 != 0 { mask.insert(.option) }
+              if m & 0x0200 != 0 { mask.insert(.shift) }
+              if m & 0x0100 != 0 { mask.insert(.command) }
+            }
+            item.keyEquivalentModifierMask = mask
+          }
+        }
+        let joined = taken.joined(separator: ",")
+        self.queue.async { self.hotkeysTaken = joined }
       }
     }
   }
