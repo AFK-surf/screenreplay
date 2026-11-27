@@ -25,6 +25,15 @@ fn sf_set_dark(dark : Option[Bool]) -> Unit {
   lg::set_dark(dark)
 }
 
+// (the host clears each frame to the theme's bg: ScreenReplay's own ground there, as run_legacy_ctx's set_clear had it)
+fn sf_ui_theme_main() -> ui::Theme {
+  ui::Theme::{ ..sf_ui_theme_now(), bg: c_bg() }
+}
+
+fn sf_ui_theme_popup() -> ui::Theme {
+  ui::Theme::{ ..sf_ui_theme_now(), bg: c_s2() }
+}
+
 fn sf_ui_theme_now() -> ui::Theme {
   let th = lg::ui_theme()
   ui::Theme::{
@@ -339,6 +348,11 @@ fn str_to_ascii_lower(s : String) -> String {
     i += 1
   }
   sb.to_string()
+}
+
+// The bytes of the UTF-8 character that starts with `b` (String is UTF-8 here: one byte is not one character)
+fn utf8_lead_len(b : Int) -> Int {
+  if b < 0xC0 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 }
 }
 
 fn str_to_ascii_upper(s : String) -> String {
