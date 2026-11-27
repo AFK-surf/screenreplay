@@ -153,12 +153,13 @@ fn hotkey_field(c : view::View, which : String) -> Unit {
     }
   }, fn(b) {
     b
-    .height(view::Live::Is(Some(26.0)))
-    .min_width(view::Live::Is(Some(96.0)))
-    .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+    .row(view::Live::Is(true))
+    .height(view::Live::Is(Some(28.0)))
+    .width(view::Live::Is(Some(150.0)))
+    .padding(view::Live::Is((10.0, 0.0, 4.0, 0.0)))
+    .gap(view::Live::Is(4.0))
     .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
-    .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() { if listening() || b.pointed() { c_s3() } else { tone(c_s1(), 0xFFFFFFFFL) } }))
     .edge(view::Live::By(fn() {
       if listening() || b.focus_shown() {
@@ -175,16 +176,15 @@ fn hotkey_field(c : view::View, which : String) -> Unit {
         ui_text()
       }
     }, weight=500)
+    .grow(view::Live::Is(1.0))
+    .min_width(view::Live::Is(Some(0.0)))
+    .allow_ellipsis(view::Live::Is(true))
     |> ignore
-  })
-  |> ignore
-  c.box(fn(slot) {
-    slot.width(view::Live::Is(Some(26.0))).height(view::Live::Is(Some(26.0))) |> ignore
-    slot.show(fn() { hotkey_spec(which) != "" && !listening() }, fn(x) {
+    b.show(fn() { hotkey_spec(which) != "" && !listening() }, fn(x) {
       icon_button(x, fn() { "close" }, fn() { t("移除") }, fn() {
         hk_note_text.set("")
         hotkey_set(which, "")
-      }, w=26.0, h=26.0, size=12.0)
+      }, w=20.0, h=20.0, size=10.0)
       |> ignore
     }, at_once=true)
   })
@@ -199,7 +199,7 @@ fn shortcuts_page(p : view::View) -> Unit {
   p.box(fn(w) {
     w.padding(view::Live::Is((2.0, 0.0, 2.0, 0.0))) |> ignore
     w.words(view::Live::By(fn() {
-      t(if is_mac() { "在任何应用里都能用。点按键可以更换（Esc 取消），× 移除；移除后可以从菜单栏图标操作" } else { "在任何应用里都能用。点按键可以更换（Esc 取消），× 移除；移除后可以从托盘图标操作" })
+      t(if is_mac() { "在任何应用里都能用。点按键可以更换（Esc 取消），点 × 移除；移除后可以从菜单栏图标操作" } else { "在任何应用里都能用。点按键可以更换（Esc 取消），点 × 移除；移除后可以从托盘图标操作" })
     }), look={ ..view::words_plain, size: 12.0, line: 17.0, wrap: true }).ink(view::Live::By(ui_subtle)) |> ignore
   })
   |> ignore
