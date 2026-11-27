@@ -1,0 +1,224 @@
+import "signals"
+import "view"
+
+// Global shortcuts: kept in settings.json as "Ctrl+Alt+R" ("" none) and registered by the recorder (recorder/Hotkey.cs,
+// mac HotkeySpec); the field below takes a new one from native/replay_*.{c,mm} rp_hotkey_take.
+
+fn hotkey_default(which : String) -> String {
+  match which {
+    "open" => "Ctrl+Alt+R"
+    "mark" => "Ctrl+Alt+M"
+    _ => "Ctrl+Alt+S"
+  }}
+
+fn hotkey_title(which : String) -> String {
+  match which {
+    "open" => t("打开回放")
+    "mark" => t("标记此刻")
+    _ => t("保存最近一段")
+  }}
+
+fn hotkey_spec(which : String) -> String {
+  let s = sets()
+  match which {
+    "open" => s.hotkey_open
+    "mark" => s.hotkey_mark
+    _ => s.hotkey_save
+  }}
+
+fn hotkey_set(which : String, spec : String) -> Unit {
+  match which {
+    "open" => settings.hotkey_open = spec
+    "mark" => settings.hotkey_mark = spec
+    _ => settings.hotkey_save = spec
+  }
+  save_settings()}
+
+fn hotkey_text(spec : String) -> String {
+  if !is_mac() {
+    return spec
+  }
+  let b = StringBuilder()
+  for part in spec.split("+") {
+    let p = part.to_string()
+    b.write_string(match p {
+      "Ctrl" => "⌃"
+      "Alt" => "⌥"
+      "Shift" => "⇧"
+      "Cmd" => "⌘"
+      "Win" => "⌘"
+      _ => p
+    })
+  }
+  b.to_string()}
+
+// What a menu or hint shows for it: nothing while global shortcuts are off or it has none.
+fn hotkey_shown(which : String) -> String {
+  if !sets().hotkeys_on {
+    return ""
+  }
+  hotkey_text(hotkey_spec(which))}
+
+fn hotkey_capture_file() -> String {
+  pjoin(root_dir(), "hotkeys.capture")}
+
+fn hotkey_listen(v : view::View, which : String) -> Unit {
+  hk_note_which.set(which)
+  hk_note_text.set("")
+  hk_listening.set(which)
+  rp_write(cstr(hotkey_capture_file()), cstr("1")) |> ignore
+  rp_hotkey_listen(1)
+  hotkey_wait(v)}
+
+fn hotkey_stop() -> Unit {
+  if hk_listening.untracked() == "" {
+    return
+  }
+  hk_listening.set("")
+  rp_hotkey_listen(0)
+  rp_delete(cstr(hotkey_capture_file()))}
+
+fn hotkey_wait(v : view::View) -> Unit {
+  again(v, 50.0, fn() {
+    let which = hk_listening.untracked()
+    if which == "" {
+      return
+    }
+    if !settings_open.untracked() {
+      hotkey_stop()
+      return
+    }
+    let said = text_of(rp_hotkey_take())
+    if said == "" {
+      hotkey_wait(v)
+      return
+    }
+    hotkey_stop()
+    hotkey_took(which, said)
+  })}
+
+fn hotkey_took(which : String, said : String) -> Unit {
+  match said {
+    "esc" => ()
+    "clear" => hotkey_set(which, "")
+    "bad" => hk_note_text.set(t("不支持这个键"))
+    "mod" => hk_note_text.set(t(if is_mac() { "要带 ⌃、⌥ 或 ⌘ 中的一个" } else { "要带 Ctrl、Alt 或 Win 中的一个" }))
+    _ => {
+      for other in ["open", "mark", "save"] {
+        if other != which && hotkey_spec(other) == said {
+          hk_note_text.set(tf("已被「{0}」使用", [hotkey_title(other)]))
+          return
+        }
+      }
+      hotkey_set(which, said)
+    }
+  }}
+
+fn hotkey_note(which : String) -> String {
+  if hk_note_which.get() == which && hk_note_text.get() != "" {
+    return hk_note_text.get()
+  }
+  let taken = info().hotkeys_taken
+  if taken != "" && hk_listening.get() == "" {
+    for name in taken.split(",") {
+      if name.to_string() == which {
+        return t("被其他程序占用，换一个组合")
+      }
+    }
+  }
+  ""}
+
+fn hotkey_field(c : view::View, which : String) -> Unit {
+  c.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+  c.show(fn() { hotkey_spec(which) != hotkey_default(which) && hk_listening.get() != which }, fn(x) {
+    text_button(x, fn() { t("恢复默认") }, fn() {
+      hk_note_text.set("")
+      hotkey_set(which, hotkey_default(which))
+    }, ghost=true, small=true)
+    |> ignore
+  }, at_once=true)
+  let listening = fn() { hk_listening.get() == which }
+  let shown = fn() {
+    if listening() {
+      t("按下新的快捷键…")
+    } else if hotkey_spec(which) == "" {
+      t("未设置")
+    } else {
+      hotkey_text(hotkey_spec(which))
+    }
+  }
+  pressable(c, fn() { hotkey_title(which) }, fn() {
+    if listening() {
+      hotkey_stop()
+    } else {
+      hotkey_stop()
+      hotkey_listen(c, which)
+    }
+  }, fn(b) {
+    b
+    .height(view::Live::Is(Some(26.0)))
+    .min_width(view::Live::Is(Some(96.0)))
+    .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
+    .radius(view::Live::Is(6.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .ground(view::Live::By(fn() { if listening() || b.pointed() { c_s3() } else { tone(c_s1(), 0xFFFFFFFFL) } }))
+    .edge(view::Live::By(fn() {
+      if listening() || b.focus_shown() {
+        (1.5, focus_ring())
+      } else {
+        (1.0, hair())
+      }
+    }))
+    |> ignore
+    words(b, shown, 12.0, fn() {
+      if listening() || hotkey_spec(which) == "" {
+        ui_subtle()
+      } else {
+        ui_text()
+      }
+    }, weight=500)
+    |> ignore
+  })
+  |> ignore}
+
+fn shortcuts_page(p : view::View) -> Unit {
+  setting_group(p, fn() { t("全局快捷键") }, fn(g) {
+    toggle_row(g, true, fn() { t("启用全局快捷键") }, fn() {
+      t(if is_mac() { "在任何应用里都能用；关掉后可以从菜单栏图标操作" } else { "在任何应用里都能用；关掉后可以从托盘图标操作" })
+    }, fn() { sets().hotkeys_on }, fn(v) {
+      hotkey_stop()
+      settings.hotkeys_on = v
+    })
+    g.show(fn() { sets().hotkeys_on }, fn(rows) {
+      for which in ["open", "mark", "save"] {
+        setting_row(rows, false, fn() { hotkey_title(which) }, fn() { hotkey_note(which) }, fn(c) { hotkey_field(c, which) }, note_ink=warn)
+      }
+    }, at_once=true)
+  })
+  p.show(fn() { sets().hotkeys_on }, fn(n) {
+    n.box(fn(w) {
+      w.padding(view::Live::Is((2.0, 0.0, 2.0, 0.0))) |> ignore
+      w.words(view::Live::By(fn() {
+        t(if is_mac() { "点按键可以更换；Esc 取消，Delete 清除" } else { "点按键可以更换；Esc 取消，Backspace 清除" })
+      }), look={ ..view::words_plain, size: 12.0, line: 17.0, wrap: true }).ink(view::Live::By(ui_subtle)) |> ignore
+    })
+    |> ignore
+  }, at_once=true)
+  setting_group(p, fn() { t("回放窗口内") }, fn(g) {
+    g.each(fn() { shortcut_rows() }, fn(r : (String, Array[String])) -> String { r.0 }, fn(row, r) {
+      let (label, keys) = r.untracked()
+      if label != shortcut_rows()[0].0 {
+        rule(row, hair)
+      }
+      row.box(fn(b) {
+        b.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).padding(view::Live::Is((14.0, 0.0, 14.0, 0.0))).gap(view::Live::Is(4.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        words(b, fn() { label }, 13.0, ui_text) |> ignore
+        spring(b)
+        for k in keys {
+          kbd(b, k)
+        }
+      })
+      |> ignore
+    }, at_once=true)
+  })}

@@ -781,6 +781,66 @@ int32_t rp_stay_resident(void) {
 
 int32_t rp_alt_arrows(void) { return 1; }
 
+// Shortcut field (settings): while it listens, the next key goes to it as "Ctrl+Alt+R" (the names the host's
+// HotkeySpec reads) and the page sees none of it.
+static std::atomic<bool> rp_hk_listening{false};
+static std::string rp_hk_said;
+static id rp_hk_monitor;
+
+static const char *rp_hk_key_name(unsigned short code) {
+  static const struct { unsigned short code; const char *name; } names[] = {
+    {0x00, "A"}, {0x0B, "B"}, {0x08, "C"}, {0x02, "D"}, {0x0E, "E"}, {0x03, "F"}, {0x05, "G"}, {0x04, "H"},
+    {0x22, "I"}, {0x26, "J"}, {0x28, "K"}, {0x25, "L"}, {0x2E, "M"}, {0x2D, "N"}, {0x1F, "O"}, {0x23, "P"},
+    {0x0C, "Q"}, {0x0F, "R"}, {0x01, "S"}, {0x11, "T"}, {0x20, "U"}, {0x09, "V"}, {0x0D, "W"}, {0x07, "X"},
+    {0x10, "Y"}, {0x06, "Z"}, {0x1D, "0"}, {0x12, "1"}, {0x13, "2"}, {0x14, "3"}, {0x15, "4"}, {0x17, "5"},
+    {0x16, "6"}, {0x1A, "7"}, {0x1C, "8"}, {0x19, "9"}, {0x31, "Space"}, {0x73, "Home"}, {0x77, "End"},
+    {0x74, "PageUp"}, {0x79, "PageDown"}, {0x7B, "Left"}, {0x7C, "Right"}, {0x7D, "Down"}, {0x7E, "Up"},
+    {0x7A, "F1"}, {0x78, "F2"}, {0x63, "F3"}, {0x76, "F4"}, {0x60, "F5"}, {0x61, "F6"}, {0x62, "F7"},
+    {0x64, "F8"}, {0x65, "F9"}, {0x6D, "F10"}, {0x67, "F11"}, {0x6F, "F12"}, {0x69, "F13"}, {0x6B, "F14"},
+    {0x71, "F15"}, {0x6A, "F16"}, {0x40, "F17"}, {0x4F, "F18"}, {0x50, "F19"}, {0x5A, "F20"},
+  };
+  for (const auto &n : names) {
+    if (n.code == code) return n.name;
+  }
+  return nullptr;
+}
+
+void rp_hotkey_listen(int32_t on) {
+  rp_hk_said.clear();
+  rp_hk_listening.store(on != 0);
+  if (!on || rp_hk_monitor) return;
+  rp_hk_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *e) {
+    if (!rp_hk_listening.load()) return e;
+    NSEventModifierFlags f = e.modifierFlags;
+    bool ctrl = f & NSEventModifierFlagControl, alt = f & NSEventModifierFlagOption;
+    bool shift = f & NSEventModifierFlagShift, cmd = f & NSEventModifierFlagCommand;
+    unsigned short code = e.keyCode;
+    const char *name = rp_hk_key_name(code);
+    std::string said;
+    if (!ctrl && !alt && !shift && !cmd && code == 0x35) {
+      said = "esc";
+    } else if (!ctrl && !alt && !shift && !cmd && (code == 0x33 || code == 0x75)) {
+      said = "clear";
+    } else if (!name) {
+      said = "bad";
+    } else if (!ctrl && !alt && !cmd) {
+      said = "mod";
+    } else {
+      said = std::string(ctrl ? "Ctrl+" : "") + (alt ? "Alt+" : "") + (shift ? "Shift+" : "") + (cmd ? "Cmd+" : "") + name;
+    }
+    rp_hk_said = said;
+    rp_hk_listening.store(false);
+    rp_wake_host();
+    return nil;
+  }];
+}
+
+moonbit_bytes_t rp_hotkey_take(void) {
+  std::string out = rp_hk_said;
+  rp_hk_said.clear();
+  return rp_bytes_str(out);
+}
+
 int32_t rp_window_turns(void) {
   int32_t h = rp_hides.load() & 0x7FFF;
   int32_t s = rp_shows.load() & 0xFFFF;

@@ -237,11 +237,11 @@ internal sealed class RecorderApp : IDisposable
         {
             statusItem,
             null,
-            Item("打开回放", "Open replay", () => OpenReplay(), "Ctrl+Alt+R"),
+            (openItem = Item("打开回放", "Open replay", () => OpenReplay(), "Ctrl+Alt+R")),
             Item("设置…", "Settings…", () => OpenReplay(showSettings: true)),
             Item("已保存片段文件夹", "Saved clips folder", OpenClipsFolder),
-            Item("标记此刻", "Mark this moment", Mark, "Ctrl+Alt+M"),
-            Item("保存最近一段", "Save the last moments", async () => await SaveLastAsync(), "Ctrl+Alt+S"),
+            (markItem = Item("标记此刻", "Mark this moment", Mark, "Ctrl+Alt+M")),
+            (saveItem = Item("保存最近一段", "Save the last moments", async () => await SaveLastAsync(), "Ctrl+Alt+S")),
             null,
         };
         pause15Item = Item("暂停 15 分钟", "Pause for 15 minutes", () => PauseFor(TimeSpan.FromMinutes(15)));
@@ -353,7 +353,7 @@ internal sealed class RecorderApp : IDisposable
         FileSystemEventHandler asked = (_, e) =>
         {
             if (e.Name is "pause.request" or "settings.json" or "viewer.json" or "purge.request" or "quit.request" or "update.request" or
-                "open.request" or "save.request" or "flush.request" or "capture-diag.request")
+                "open.request" or "save.request" or "flush.request" or "capture-diag.request" or "hotkeys.capture")
             {
                 ui?.Post(_ => _ = CheckAsync(), null);
             }
@@ -551,10 +551,7 @@ internal sealed class RecorderApp : IDisposable
         var wanted = RecorderSettings.ReadCached(paths.Settings);
         updater.Poll(wanted.AutoUpdate, DateTimeOffset.UtcNow - startedAt >= TimeSpan.FromSeconds(60));
         ApplyAutostart(wanted.Consented && wanted.Autostart);
-        if (wanted.Consented)
-        {
-            RegisterHotkeys();
-        }
+        RegisterHotkeys(wanted);
         var (bufferDir, trouble) = ResolveBuffer(wanted.BufferDir);
         bufferTrouble = trouble;
         if (!string.Equals(Path.GetFullPath(bufferDir), Path.GetFullPath(paths.Buffer), StringComparison.OrdinalIgnoreCase))
@@ -1382,7 +1379,7 @@ internal sealed class RecorderApp : IDisposable
             var body =
                 $"\"codec\":{Json(recorder?.ActualCodec ?? "")},\"codecWhy\":{Json(recorder?.FellBack == true ? "fallback" : EffectiveCodec().Why)},\"width\":{size?.Width ?? 0},\"height\":{size?.Height ?? 0},\"fps\":{recorder?.ActualFrameRate ?? settings.FrameRate},\"fpsAsked\":{settings.FrameRate},\"fpsWhy\":{Json(recorder?.FrameRateFellBack == true ? "fallback" : "")},\"displayHz\":{DisplayHz()}," +
                 $"\"bitrate\":{bitrate},\"diskFree\":{free},\"screenWidth\":{recorder?.Target?.Width ?? 0},\"screenHeight\":{recorder?.Target?.Height ?? 0}," +
-                $"\"bufferDir\":{Json(paths.Buffer)},\"bufferTrouble\":{Json(bufferTrouble)},\"diskTight\":{(diskTight ? "true" : "false")},\"fastSync\":{Json(fastSync)}," +
+                $"\"bufferDir\":{Json(paths.Buffer)},\"bufferTrouble\":{Json(bufferTrouble)},\"diskTight\":{(diskTight ? "true" : "false")},\"fastSync\":{Json(fastSync)},\"hotkeysTaken\":{Json(hotkeysTaken)}," +
                 $"\"sharedGpu\":{(Replay.Recording.Graphics.Shared ? "true" : "false")},\"framesEncoded\":{pace.Encoded},\"framesSkipped\":{pace.Skipped}}}";
             // Rewrite on change or every 5 s; viewer treats state.json older than 10 s as recorder offline.
             var now = DateTimeOffset.UtcNow;
@@ -1423,22 +1420,55 @@ internal sealed class RecorderApp : IDisposable
         }
     }
 
-    private bool hotkeysOn;
+    private string hotkeysSaid = "";
+    private string hotkeysTaken = "";
+    private TrayMenuItem? openItem, markItem, saveItem;
 
-    private void RegisterHotkeys()
+    // Registers what settings.json asks for, again only when that changes; none while off, before consent, or while the
+    // viewer is taking a new combination (hotkeys.capture, so the old one reaches it instead of firing).
+    private void RegisterHotkeys(RecorderSettings wanted)
     {
-        if (hotkeysOn)
+        var capture = Path.Combine(paths.Root, "hotkeys.capture");
+        var capturing = false;
+        try
+        {
+            capturing = File.Exists(capture) && DateTime.UtcNow - File.GetLastWriteTimeUtc(capture) < TimeSpan.FromMinutes(2);
+        }
+        catch (Exception)
+        {
+        }
+
+        var on = wanted.Consented && wanted.Hotkeys && !capturing;
+        var said = on ? $"{wanted.HotkeyOpen}|{wanted.HotkeyMark}|{wanted.HotkeySave}" : "";
+        if (said == hotkeysSaid)
         {
             return;
         }
 
-        hotkeysOn = true;
-        // MOD_CONTROL | MOD_ALT, and the letter's virtual-key code
-        window.RegisterHotkey(HotkeyOpen, 0x2 | 0x1, 'R');
-        window.RegisterHotkey(HotkeyMark, 0x2 | 0x1, 'M');
-        if (!window.RegisterHotkey(HotkeySaveLast, 0x2 | 0x1, 'S'))
+        hotkeysSaid = said;
+        window.UnregisterHotkeys();
+        var taken = new List<string>();
+        foreach (var (id, name, spec) in new[] { (HotkeyOpen, "open", wanted.HotkeyOpen), (HotkeyMark, "mark", wanted.HotkeyMark), (HotkeySaveLast, "save", wanted.HotkeySave) })
         {
-            Log("Ctrl+Alt+S is taken by another app");
+            if (!on || !Hotkey.TryParse(spec, out var mods, out var key))
+            {
+                continue;
+            }
+
+            if (!window.RegisterHotkey(id, mods, key))
+            {
+                taken.Add(name);
+                Log($"{spec} is taken by another app");
+            }
+        }
+
+        hotkeysTaken = string.Join(",", taken);
+        if (!capturing && openItem is not null && markItem is not null && saveItem is not null)
+        {
+            var shown = wanted.Hotkeys;
+            openItem.Keys = shown ? wanted.HotkeyOpen : "";
+            markItem.Keys = shown ? wanted.HotkeyMark : "";
+            saveItem.Keys = shown ? wanted.HotkeySave : "";
         }
     }
 
@@ -2195,7 +2225,11 @@ internal sealed record RecorderSettings(
     int LastSeconds = 30,
     string BufferDir = "",
     bool Consented = false,
-    bool AutoUpdate = true)
+    bool AutoUpdate = true,
+    bool Hotkeys = true,
+    string HotkeyOpen = "Ctrl+Alt+R",
+    string HotkeyMark = "Ctrl+Alt+M",
+    string HotkeySave = "Ctrl+Alt+S")
 {
     public const int ConsentVersion = 1;
 
@@ -2287,7 +2321,11 @@ internal sealed record RecorderSettings(
                 Text("bufferDir", "").Trim(),
                 root.TryGetProperty("consent", out var consent) && consent.ValueKind == System.Text.Json.JsonValueKind.Object &&
                     consent.TryGetProperty("version", out var version) && version.TryGetInt32(out var v) && v >= ConsentVersion,
-                Flag("autoUpdate", true));
+                Flag("autoUpdate", true),
+                Flag("hotkeys", true),
+                Text("hotkeyOpen", Default.HotkeyOpen).Trim(),
+                Text("hotkeyMark", Default.HotkeyMark).Trim(),
+                Text("hotkeySave", Default.HotkeySave).Trim());
             return true;
         }
         catch (Exception)
@@ -2728,6 +2766,7 @@ internal static class ForegroundApp
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
 
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
 
@@ -2737,7 +2776,8 @@ internal static class ForegroundApp
         EnumWindows((h, _) =>
         {
             GetWindowThreadProcessId(h, out var owner);
-            if (owner != (uint)pid || GetWindow(h, 4) != IntPtr.Zero)
+            // Tool + topmost: the viewer's in-process tray panel and note card, which share the title.
+            if (owner != (uint)pid || GetWindow(h, 4) != IntPtr.Zero || (GetWindowLongW(h, -20) & 0x88) == 0x88)
             {
                 return true;
             }

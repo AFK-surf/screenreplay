@@ -17,6 +17,10 @@ pub struct Settings {
   mut consent_version : Int
   mut consent_at : Double
   mut auto_update : Bool
+  mut hotkeys_on : Bool
+  mut hotkey_open : String
+  mut hotkey_mark : String
+  mut hotkey_save : String
 }
 
 fn sets() -> Settings {
@@ -91,6 +95,16 @@ fn load_settings() -> Unit {
         Option::Some(False) => settings.auto_update = false
         _ => settings.auto_update = true
       }
+      settings.hotkeys_on = !(o.get("hotkeys") is Some(False))
+      let spec = fn(name : String, which : String) {
+        match o.get(name) {
+          Option::Some(String(v)) => v
+          _ => hotkey_default(which)
+        }
+      }
+      settings.hotkey_open = spec("hotkeyOpen", "open")
+      settings.hotkey_mark = spec("hotkeyMark", "mark")
+      settings.hotkey_save = spec("hotkeySave", "save")
       match o.get("consent") {
         Option::Some(mbt_compat::MbtJson::Object(c)) => {
           settings.consent_version = match c.get("version") {
@@ -127,7 +141,7 @@ fn json_escaped(text : String) -> String {
 
 fn save_settings() -> Unit {
   settings_rev.set(settings_rev.untracked() + 1)
-  let text = "{\"enabled\":\{settings.enabled},\"windowMinutes\":\{settings.window_minutes},\"maxGB\":\{settings.max_gb},\"autostart\":\{settings.autostart},\"systemAudio\":\{settings.system_audio},\"microphone\":\{settings.microphone},\"pauseInFullscreen\":\{settings.pause_in_fullscreen},\"autoUpdate\":\{settings.auto_update},\"codec\":\"\{settings.codec}\",\"maxHeight\":\{settings.max_height},\"fps\":\{settings.fps},\"quality\":\"\{settings.quality}\",\"lastSeconds\":\{settings.last_seconds},\"bufferDir\":\"\{json_escaped(settings.buffer_dir)}\"" +
+  let text = "{\"enabled\":\{settings.enabled},\"windowMinutes\":\{settings.window_minutes},\"maxGB\":\{settings.max_gb},\"autostart\":\{settings.autostart},\"systemAudio\":\{settings.system_audio},\"microphone\":\{settings.microphone},\"pauseInFullscreen\":\{settings.pause_in_fullscreen},\"autoUpdate\":\{settings.auto_update},\"codec\":\"\{settings.codec}\",\"maxHeight\":\{settings.max_height},\"fps\":\{settings.fps},\"quality\":\"\{settings.quality}\",\"lastSeconds\":\{settings.last_seconds},\"bufferDir\":\"\{json_escaped(settings.buffer_dir)}\",\"hotkeys\":\{settings.hotkeys_on},\"hotkeyOpen\":\"\{settings.hotkey_open}\",\"hotkeyMark\":\"\{settings.hotkey_mark}\",\"hotkeySave\":\"\{settings.hotkey_save}\"" +
     (if settings.consent_version > 0 {
       ",\"consent\":{\"version\":\{settings.consent_version},\"at\":\{settings.consent_at.to_int64()}}"
     } else {
@@ -163,6 +177,7 @@ pub struct RecordingInfo {
   buffer_trouble : String
   disk_tight : Bool
   fast_sync : String
+  hotkeys_taken : String
   display_hz : Int
   fps_fell_back : Bool
   shared_gpu : Bool
@@ -203,6 +218,7 @@ fn recording_info() -> RecordingInfo {
     buffer_trouble: "",
     disk_tight: false,
     fast_sync: "",
+    hotkeys_taken: "",
     display_hz: 0,
     fps_fell_back: false,
     shared_gpu: false,
@@ -241,6 +257,10 @@ fn recording_info() -> RecordingInfo {
         },
         disk_tight: o.get("diskTight") is Some(True),
         fast_sync: match o.get("fastSync") {
+          Option::Some(String(v)) => v
+          _ => ""
+        },
+        hotkeys_taken: match o.get("hotkeysTaken") {
           Option::Some(String(v)) => v
           _ => ""
         },
@@ -295,9 +315,6 @@ fn bytes_text(bytes : Double) -> String {
 fn shortcut_rows() -> Array[(String, Array[String])] {
   let mac = is_mac()
   [
-    (t("打开回放"), [if mac { "⌃⌥R" } else { "Ctrl+Alt+R" }]),
-    (t("标记此刻"), [if mac { "⌃⌥M" } else { "Ctrl+Alt+M" }]),
-    (t("保存最近一段"), [if mac { "⌃⌥S" } else { "Ctrl+Alt+S" }]),
     (t("播放 / 暂停"), ["Space", "K"]),
     (t("逐帧"), ["←", "→"]),
     (t("前后 5 秒"), [if mac { "⇧←" } else { "Shift+←" }, if mac { "⇧→" } else { "Shift+→" }]),

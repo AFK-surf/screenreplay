@@ -222,6 +222,16 @@ internal sealed class MessageWindow : IDisposable
         return ok;
     }
 
+    public void UnregisterHotkeys()
+    {
+        foreach (var id in hotkeys)
+        {
+            UnregisterHotKey(Handle, id);
+        }
+
+        hotkeys.Clear();
+    }
+
     private IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
         // (nothing thrown may leave a window procedure: it would end the process; written to recorder.log instead, where

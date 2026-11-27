@@ -156,5 +156,8 @@ extern "C" fn c_rp_append(path : Ptr, path_len : Int64, data : Ptr, data_len : I
 fn rp_append(path : Bytes, data : Bytes) -> Int { c_rp_append(bytes_data_ptr(path), path.length().to_int64(), bytes_data_ptr(data), data.length().to_int64()) }
 extern "C" fn rp_tray_window(w : Double, h : Double) -> Int = "rp_tray_window"
 extern "C" fn rp_tray_hide() -> Unit = "rp_tray_hide"
+extern "C" fn rp_hotkey_listen(on : Int) -> Unit = "rp_hotkey_listen"
+extern "C" fn c_rp_hotkey_take() -> Ptr = "rp_hotkey_take"
+fn rp_hotkey_take() -> Bytes { take_mb_bytes(c_rp_hotkey_take()) }
 extern "C" fn rp_tray_tell(command : Int) -> Int = "rp_tray_tell"
 extern "C" fn rp_window_shown() -> Int = "rp_window_shown"

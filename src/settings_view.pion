@@ -318,7 +318,12 @@ fn settings_page_body(p : view::View, i : Int) -> Unit {
       })
       setting_group(p, fn() { t("保存最近一段") }, fn(g) {
         choice_row(g, true, fn() { t("长度") }, fn() {
-          t(if is_mac() { "按 ⌃⌥S，不开窗口直接存成片段" } else { "按 Ctrl+Alt+S，不开窗口直接存成片段" })
+          let keys = hotkey_shown("save")
+          if keys != "" {
+            tf("按 {0}，不开窗口直接存成片段", [keys])
+          } else {
+            t(if is_mac() { "从菜单栏图标保存，不开窗口直接存成片段" } else { "从托盘图标保存，不开窗口直接存成片段" })
+          }
         }, fn() {
           [t("15 秒"), t("30 秒"), t("1 分钟"), t("2 分钟")]
         }, fn() { index_of(last_choices, sets().last_seconds, 1) }, fn(i) { settings.last_seconds = last_choices[i] })
@@ -409,24 +414,7 @@ fn settings_page_body(p : view::View, i : Int) -> Unit {
       })
     }
     5 => about_page(p)
-    _ =>
-      setting_group(p, fn() { "" }, fn(g) {
-        g.each(fn() { shortcut_rows() }, fn(r : (String, Array[String])) -> String { r.0 }, fn(row, r) {
-          let (label, keys) = r.untracked()
-          if label != shortcut_rows()[0].0 {
-            rule(row, hair)
-          }
-          row.box(fn(b) {
-            b.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).padding(view::Live::Is((14.0, 0.0, 14.0, 0.0))).gap(view::Live::Is(4.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
-            words(b, fn() { label }, 13.0, ui_text) |> ignore
-            spring(b)
-            for k in keys {
-              kbd(b, k)
-            }
-          })
-          |> ignore
-        }, at_once=true)
-      })
+    _ => shortcuts_page(p)
   }}
 
 fn buffer_place(p : view::View) -> Unit {

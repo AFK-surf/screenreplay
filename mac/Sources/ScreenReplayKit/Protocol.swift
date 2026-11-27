@@ -103,6 +103,10 @@ public struct RecorderSettings: Sendable, Equatable {
   public var consentAt: Int64
   public var autoUpdate: Bool
   public var displayID: UInt32
+  public var hotkeys: Bool
+  public var hotkeyOpen: String
+  public var hotkeyMark: String
+  public var hotkeySave: String
 
   public var windowSeconds: TimeInterval { TimeInterval(windowMinutes) * 60.0 }
   public var maxBytes: Int64 { maxGB > 0 ? (Int64(maxGB) << 30) : 0 }
@@ -126,7 +130,11 @@ public struct RecorderSettings: Sendable, Equatable {
     consentVersion: Int = 0,
     consentAt: Int64 = 0,
     autoUpdate: Bool = true,
-    displayID: UInt32 = 0
+    displayID: UInt32 = 0,
+    hotkeys: Bool = true,
+    hotkeyOpen: String = "Ctrl+Alt+R",
+    hotkeyMark: String = "Ctrl+Alt+M",
+    hotkeySave: String = "Ctrl+Alt+S"
   ) {
     self.enabled = enabled
     self.windowMinutes = min(24 * 60, max(5, windowMinutes))
@@ -147,6 +155,10 @@ public struct RecorderSettings: Sendable, Equatable {
     self.consentAt = consentAt
     self.autoUpdate = autoUpdate
     self.displayID = displayID
+    self.hotkeys = hotkeys
+    self.hotkeyOpen = hotkeyOpen.trimmingCharacters(in: .whitespaces)
+    self.hotkeyMark = hotkeyMark.trimmingCharacters(in: .whitespaces)
+    self.hotkeySave = hotkeySave.trimmingCharacters(in: .whitespaces)
   }
 
   public static func normalizeFPS(_ raw: Int) -> Int {
@@ -236,7 +248,11 @@ public struct RecorderSettings: Sendable, Equatable {
       consentVersion: consentVer,
       consentAt: consentAt,
       autoUpdate: flag("autoUpdate", true),
-      displayID: dispID
+      displayID: dispID,
+      hotkeys: flag("hotkeys", true),
+      hotkeyOpen: text("hotkeyOpen", "Ctrl+Alt+R"),
+      hotkeyMark: text("hotkeyMark", "Ctrl+Alt+M"),
+      hotkeySave: text("hotkeySave", "Ctrl+Alt+S")
     )
   }
 
