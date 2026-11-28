@@ -481,7 +481,7 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
       if strong() {
         mix(ui_accent(), ui_accent_hover(), hand.shown(b))
       } else {
-        let on = if stage { stage_hover } else { c_s3() }
+        let on = if stage { stage_hover } else { c_hover() }
         mix(clear(on), on, hand.shown(b))
       }
     }))
@@ -539,7 +539,7 @@ fn zoom_key(parent : view::View) -> Unit {
     .height(view::Live::Is(Some(28.0)))
     .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
-    .ground(view::Live::By(fn() { mix(clear(c_s3()), c_s3(), hand.shown(b)) }))
+    .ground(view::Live::By(fn() { mix(clear(c_hover()), c_hover(), hand.shown(b)) }))
     .laid_nowhere(view::Live::By(fn() { !has_segs() }))
     |> ignore
     b.box(fn(g) {

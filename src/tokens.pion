@@ -28,6 +28,9 @@ fn c_s2() -> Int64 {
 fn c_s3() -> Int64 {
   tone(0x383A40FFL, 0xDADDE2FFL)}
 
+fn c_hover() -> Int64 {
+  tone(0xFFFFFF14L, 0x0000000DL)}
+
 fn c_s4() -> Int64 {
   tone(0x484A51FFL, 0xC9CDD4FFL)}
 

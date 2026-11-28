@@ -156,7 +156,7 @@ fn apps_key(parent : view::View) -> Unit {
       if filter_on() {
         mix(c_s3(), c_s4(), hand.shown(b))
       } else {
-        mix(clear(c_s3()), c_s3(), hand.shown(b))
+        mix(clear(c_hover()), c_hover(), hand.shown(b))
       }
     }))
     .laid_nowhere(view::Live::By(fn() { !has_segs() }))
