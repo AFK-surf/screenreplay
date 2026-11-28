@@ -514,7 +514,15 @@ let key_seeking : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let just_marked : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0)
 
-let strip_h : Double = 32.0
+let strip_h : Double = 44.0
+
+let app_h : Double = 24.0
+
+let wave_h : Double = 16.0
+
+let tick_lane : Double = 15.0
+
+let pin_scale : Double = 0.72
 
 let app_names : mbt_compat::OrderedMap[String, String] = mbt_compat::ordered_map_new()
 

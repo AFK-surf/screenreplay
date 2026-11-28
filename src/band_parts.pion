@@ -68,7 +68,7 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
         None
       }
       b
-      .height(view::Live::Is(Some(strip_h)))
+      .height(view::Live::Is(Some(app_h)))
       .ground(view::Live::By(c_s4))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
@@ -170,7 +170,7 @@ fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
         }
         b
         .row(view::Live::Is(true))
-        .height(view::Live::Is(Some(strip_h)))
+        .height(view::Live::Is(Some(app_h)))
         .padding(view::Live::Is((9.0, 0.0, 6.0, 0.0)))
         .gap(view::Live::Is(7.0))
         .lines_up(view::Live::Is(Some(view::Along::Middle)))
@@ -340,11 +340,8 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
           .width(view::Live::Is(Some(16.0)))
           .height(view::Live::Is(Some(21.0)))
           .picture(view::Live::By(fn() { Some(pin_picture(if covered() { pin_covered() } else { ui_text() }, c_bg())) }))
+          .scale(view::Live::By(fn() { pin_scale * (match grow { Option::Some(way) => way.shown(g); Option::None => 1.0 }) }), about=view::Pivot::At(0.5, 0.976))
           |> ignore
-          match grow {
-            Option::Some(way) => g.scale(view::Live::By(fn() { way.shown(g) }), about=view::Pivot::At(0.5, 0.976)) |> ignore
-            Option::None => ()
-          }
         })
         |> ignore
         tip(b, fn() { wall(abs) })
@@ -366,6 +363,7 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
         .laid_nowhere(view::Live::By(fn() { mark_pointed.get() is None || x() < 0.0 || x() > w() }))
         .offset(view::Live::By(fn() { (x() - 8.0, -21.5) }))
         .picture(view::Live::By(fn() { Some(pin_picture(ui_text(), c_bg())) }))
+        .scale(view::Live::Is(pin_scale), about=view::Pivot::At(0.5, 0.976))
         |> ignore
       })
       |> ignore

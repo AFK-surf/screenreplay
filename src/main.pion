@@ -309,7 +309,7 @@ fn set_full_screen(on : Bool) -> Unit {
 
 fn controls(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    row.row(view::Live::Is(true)).height(view::Live::Is(Some(32.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    row.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     let play_key = fn(b : view::View, press : () -> Unit) { play_button(b, press) }
     row.box(fn(left) {
       left.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).clips(view::Live::Is(true)) |> ignore
@@ -318,6 +318,7 @@ fn controls(parent : view::View) -> Unit {
         if clip {
           window_bar(b)
         } else {
+          capsule(b, fn(b) {
           icon_button(b, fn() {
               match the_root.v {
                 Some(r) if mark_at_playhead(r) is Some(_) => "bookmark-on"
@@ -346,6 +347,7 @@ fn controls(parent : view::View) -> Unit {
             }, shortcut="full")
           |> ignore
           volume_control(b)
+          }) |> ignore
         }
       }, at_once=true)
     })
@@ -354,7 +356,7 @@ fn controls(parent : view::View) -> Unit {
       mid.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
       let slot_w = 112.0
       mid.box(fn(l) {
-        l.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 10.0, 0.0))) |> ignore
+        l.row(view::Live::Is(true)).width(view::Live::By(fn() { Some(if clipping.get() { slot_w } else { 0.0 }) })).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 10.0, 0.0))) |> ignore
         l.show(fn() { clipping.get() }, fn(b) {
           words(b, fn() {
             let (a, z) = (clip_a.get(), clip_b.get())
@@ -366,6 +368,7 @@ fn controls(parent : view::View) -> Unit {
         |> ignore
       })
       |> ignore
+      capsule(mid, fn(mid) {
       icon_button(mid, fn() { "back-15" }, fn() { t("后退 15 秒") }, fn() { jump_by(-15000.0) }, shortcut="back15") |> ignore
       play_key(mid, fn() {
         if clipping.untracked() {
@@ -379,11 +382,10 @@ fn controls(parent : view::View) -> Unit {
         }
       })
       icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒") }, fn() { jump_by(15000.0) }, shortcut="on15") |> ignore
-      mid.box(fn(r) {
-        r.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Start)).padding(view::Live::Is((2.0, 0.0, 0.0, 0.0))) |> ignore
-        speed_key(r, exports=true)
-      })
-      |> ignore
+      capsule_rule(mid)
+      speed_key(mid, exports=true)
+      }) |> ignore
+      mid.box(fn(r) { r.width(view::Live::By(fn() { Some(if clipping.get() { slot_w } else { 0.0 }) })) |> ignore }) |> ignore
     })
     |> ignore
     row.box(fn(right) {
@@ -425,12 +427,15 @@ fn controls(parent : view::View) -> Unit {
             x.padding(view::Live::Is((0.0, 0.0, 2.0, 0.0))) |> ignore
             words(x, filter_summary, 12.0, ui_subtle) |> ignore
           }, at_once=true)
-          apps_key(b)
-          zoom_key(b)
-          b.show(fn() { !follow_latest.get() }, fn(x) {
-            icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, shortcut="latest") |> ignore
-          }, at_once=true)
-          b.box(fn(s) { s.width(view::Live::Is(Some(8.0))) |> ignore }) |> ignore
+          capsule(b, fn(c) {
+            apps_key(c)
+            zoom_key(c)
+            c.show(fn() { !follow_latest.get() }, fn(x) {
+              icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, shortcut="latest") |> ignore
+            }, at_once=true)
+            |> ignore
+          }) |> ignore
+          b.box(fn(s) { s.width(view::Live::Is(Some(6.0))) |> ignore }) |> ignore
           let clip = solid_icon_button(b, "scissors", fn() { t("剪辑") }, start_clip)
           tip(clip, fn() { t("剪辑") }, shortcut="clip")
         }

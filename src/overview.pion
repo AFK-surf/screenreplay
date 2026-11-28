@@ -161,8 +161,8 @@ fn overview(parent : view::View) -> Unit {
             f
             .height(view::Live::Is(Some(overview_h)))
             .radius(view::Live::Is(2.5))
-            .ground(view::Live::By(fn() { tone(0xEDEEF01FL, 0x17181B1FL) }))
-            .edge(view::Live::By(fn() { (1.5, ui_text()) }))
+            .ground(view::Live::By(fn() { tone(0xEDEEF02EL, 0x17181B2EL) }))
+            .edge(view::Live::By(fn() { (1.0, tone(0xEDEEF066L, 0x17181B52L)) }))
             .width(view::Live::By(fn() { Some(finder(w()).1) }))
             .offset(view::Live::By(fn() { (finder(w()).0, 0.0) }))
             |> ignore
@@ -178,7 +178,7 @@ fn overview(parent : view::View) -> Unit {
               .width(view::Live::Is(Some(2.0)))
               .height(view::Live::Is(Some(4.0)))
               .radius(view::Live::Is(1.0))
-              .ground(view::Live::By(ui_text))
+              .ground(view::Live::By(ui_muted))
               .offset(view::Live::By(fn() {
                 let (fx, fw) = finder(w())
                 (if end == 0 { fx + 4.0 } else { fx + fw - 6.0 }, (overview_h - 4.0) / 2.0)

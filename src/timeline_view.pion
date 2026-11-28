@@ -186,7 +186,7 @@ fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Ve
   for sp in drawn_spans(w, from, len) {
     let (a, b) = sp
     if b - a >= 2.0 {
-      fill.write_string(rect_d(a, 0.0, b - a - 1.0, strip_h))
+      fill.write_string(rect_d(a, 0.0, b - a - 1.0, app_h))
     }
   }
   for g in gaps_now.get() {
@@ -240,7 +240,7 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
     if s >= 26.0 {
       any = true
       // Input is -50..0 dB mapped to 0..255; gamma 1.6 prevents typical -20 dB audio from pegging the top.
-      top_y[i] = r(strip_h - mbt_compat::math_pow(s / 255.0, 1.6) * (strip_h - 6.0))
+      top_y[i] = r(strip_h - mbt_compat::math_pow(s / 255.0, 1.6) * (wave_h - 1.0))
     }
   }
   if !any {
@@ -700,7 +700,7 @@ fn timeline(parent : view::View) -> Unit {
     held.box(fn(band) {
       band_node.v = Some(band)
       band
-      .height(view::Live::Is(Some(strip_h)))
+      .height(view::Live::Is(Some(strip_h + tick_lane)))
       .presses(view::Live::Is(true))
       .cursor(view::Live::By(fn() {
         Some(
