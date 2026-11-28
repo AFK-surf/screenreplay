@@ -75,7 +75,7 @@ fn play_state_over(pic : view::View, told? : signals::Signal[(Int, Bool)], playi
       .radius(view::Live::Is(5.0))
       .ground(view::Live::Is(0x00000099L))
       .lines_up(view::Live::Is(Some(view::Along::Middle)))
-      .offset(view::Live::Is((12.0, 12.0)))
+      .offset(view::Live::By(fn() { (12.0, if dock_floats() { title_h() + 8.0 } else { 12.0 }) }))
       .alpha(view::Live::By(fn() { way.shown(b) }))
       .laid_nowhere(view::Live::By(fn() { way.shown(b) <= 0.0 }))
       |> ignore

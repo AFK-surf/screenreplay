@@ -17,7 +17,7 @@ fn strip_h() -> Double {
 
 // Room under the floating tiles for their shadow.
 fn shade_h() -> Double {
-  if floating_now() { 6.0 } else { 0.0 }}
+  if floating_now() { 8.0 } else { 0.0 }}
 
 fn rrect_d(x : Double, y : Double, w : Double, h : Double, r : Double) -> String {
   let r = dmin(r, dmin(w, h) / 2.0)
@@ -28,29 +28,64 @@ fn tiles_picture(w : Double, from : Double, len : Double) -> Option[pixels::Vect
     return Option::None
   }
   let h = app_h()
+  let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
+  let runs : Array[(Double, Double)] = []
+  let cuts : Array[Double] = []
+  let mut last_end = -1.0e300
+  for p in pieces_now.get() {
+    if p.1 <= from || p.0 >= from + len {
+      last_end = p.1
+      continue
+    }
+    let a = x_of(p.0)
+    let b = x_of(p.1)
+    if runs.length() > 0 && p.0 - last_end <= 1.0 {
+      let k = runs.length() - 1
+      runs[k] = (runs[k].0, b)
+    } else {
+      runs.push((a, b))
+    }
+    if b - a >= 30.0 {
+      cuts.push(a)
+      cuts.push(b)
+    }
+    last_end = p.1
+  }
   let fill = StringBuilder()
-  let shades = [StringBuilder(), StringBuilder(), StringBuilder()]
-  for sp in drawn_spans(w, from, len) {
-    let (a, b) = sp
-    if b - a >= 4.0 {
-      fill.write_string(rrect_d(a + 1.5, 0.0, b - a - 3.0, h, 7.0))
-      for i in 0..<3 {
-        let g = 0.5 + i.to_double() * 1.25
-        shades[i].write_string(rrect_d(a + 1.5 - g, 1.0 + i.to_double() * 1.5 - g, b - a - 3.0 + 2.0 * g, h + 2.0 * g, 7.0 + g))
+  let shades = [StringBuilder(), StringBuilder(), StringBuilder(), StringBuilder()]
+  let lines = StringBuilder()
+  for r in runs {
+    let (a, b) = r
+    if b - a < 4.0 {
+      continue
+    }
+    fill.write_string(rrect_d(a + 1.5, 0.0, b - a - 3.0, h, 7.0))
+    for i in 0..<4 {
+      let g = 0.5 + i.to_double()
+      shades[i].write_string(rrect_d(a + 1.5 - g, 0.5 + i.to_double() * 0.75 - g, b - a - 3.0 + 2.0 * g, h + 2.0 * g, 7.0 + g))
+    }
+    let mut last = -100.0
+    for x in cuts {
+      if x > a + 8.0 && x < b - 8.0 && (x - last).abs() > 2.0 {
+        lines.write_string(rect_d(x - 0.5, 8.0, 1.0, h - 16.0))
+        last = x
       }
     }
   }
   let layers : Array[pixels::VectorPath] = []
-  let inks = [tone(0x00000040L, 0x00000012L), tone(0x00000024L, 0x0000000AL), tone(0x00000014L, 0x00000006L)]
-  for i in [2, 1, 0] {
+  for i in [3, 2, 1, 0] {
     let d = shades[i].to_string()
     if d != "" {
-      layers.push(layer(d, inks[i]))
+      layers.push(layer(d, tone(0x00000026L, 0x0000000BL)))
     }
   }
   let fd = fill.to_string()
   if fd != "" {
-    layers.push(layer(fd, c_s1(), stroke=tone(0xFFFFFF14L, 0x0000000FL), width=0.5))
+    layers.push(layer(fd, c_s1(), stroke=tone(0xFFFFFF1AL, 0x00000012L), width=0.5))
+  }
+  let ld = lines.to_string()
+  if ld != "" {
+    layers.push(layer(ld, tone(0xFFFFFF24L, 0x0000001CL)))
   }
   Option::Some({ w: w, h: h + shade_h(), layers: layers })}
 
@@ -994,7 +1029,21 @@ fn timeline(parent : view::View) -> Unit {
     })
     |> ignore
     window_strip(held, w)
-    if !floating_now() {
+    if floating_now() {
+      held.box(fn(track) {
+        track
+        .margin(view::Live::Is((0.0, 6.0, 0.0, 0.0)))
+        .padding(view::Live::Is((10.0, 0.0, 10.0, 4.0)))
+        .radius(view::Live::Is(10.0))
+        .ground(view::Live::By(c_s1))
+        .edge(view::Live::By(fn() { (0.5, tone(0xFFFFFF1AL, 0x00000012L)) }))
+        .shadow(view::Live::By(fn() { (12.0, 2.0, tone(0x00000060L, 0x00000020L)) }))
+        .shadow_outside(view::Live::Is(true))
+        |> ignore
+        overview(track)
+      })
+      |> ignore
+    } else {
       overview(held)
     }
   })

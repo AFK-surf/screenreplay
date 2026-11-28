@@ -105,7 +105,7 @@ fn title_bar(parent : view::View) -> Unit {
   let th = title_h()
   let mac = is_mac()
   parent.box(fn(bar) {
-    bar.row(view::Live::Is(true)).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))).ground(view::Live::By(c_bg)) |> ignore
+    bar.row(view::Live::Is(true)).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))).ground(view::Live::By(fn() { if dock_floats() { clear(c_bg()) } else { c_bg() } })) |> ignore
     // Windows: manual system menu on right-click; macOS: moves_window handles titlebar double-click.
     let moves = fn(v : view::View) {
       v.presses(view::Live::Is(true)).moves_window(view::Live::Is(true)) |> ignore
@@ -906,10 +906,12 @@ fn make_window(root : view::View) -> Unit {
     saved_path.set(if dev_saved == "-" { "" } else { dev_saved })
   }
   let top = root.box(fn(b) {
+    b.over(view::Live::By(dock_floats), edges=(Some(0.0), Some(0.0), Some(0.0), None)) |> ignore
+    lg::liquid_panel_surface_decorate(b, radius=0.0, active=dock_floats, clips=false) |> ignore
     title_bar(b)
-    rule(b, fn() { tone(0x00000080L, 0x00000014L) })
+    b.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(fn() { tone(0x00000080L, 0x00000014L) })).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore
   })
-  chrome(root, top)
+  chrome(root, top, foot=true)
   picture(root)
   // Spacer keeps the dock pinned to the bottom when picture switches to over() in fullscreen.
   root.box(fn(s) { s.grow(view::Live::Is(1.0)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore }) |> ignore

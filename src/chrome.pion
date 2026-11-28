@@ -134,7 +134,7 @@ fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
   bar
   .on_pointer_moved(fn() { (pointer_moved.v)() })
   .alpha(view::Live::By(fn() { way.shown(bar) }))
-  .over_all(view::Live::By(fn() { full_screen.get() }))
+  .over_all(view::Live::By(floats))
   .laid_nowhere(view::Live::By(fn() { floats() && way.shown(bar) <= 0.0 }))
   |> ignore}
 

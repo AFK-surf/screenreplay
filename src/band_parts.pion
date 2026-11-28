@@ -64,7 +64,7 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
             let a = clamp(x_drawn_of(b, pc.0, w()), 0.0, w())
             let z = clamp(x_drawn_of(b, pc.1, w()), 0.0, w())
             if floats {
-              return if z - a >= 4.0 { Some((a + 1.5, z - a - 3.0)) } else { None }
+              return if z - a >= 8.0 { Some((a + 3.0, z - a - 6.0)) } else { None }
             }
             return if z - a >= 2.0 { Some((a, z - a - 1.0)) } else { None }
           }
@@ -72,12 +72,12 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
         None
       }
       b
-      .height(view::Live::Is(Some(app_h())))
-      .radius(view::Live::Is(if floats { 7.0 } else { 0.0 }))
+      .height(view::Live::Is(Some(if floats { app_h() - 6.0 } else { app_h() })))
+      .radius(view::Live::Is(if floats { 5.0 } else { 0.0 }))
       .ground(view::Live::By(if floats { c_s2 } else { c_s4 }))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
-      .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), 0.0) }))
+      .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), if floats { 3.0 } else { 0.0 }) }))
       |> ignore
     })
     |> ignore
@@ -126,6 +126,7 @@ fn app_icon(parent : view::View, process : String, size? : Double) -> Unit {
   }}
 
 fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
+  let floats = floating_now()
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
     // Quantize visible range and 1.5x zoom buckets so overview drag/resize does not rebuild label nodes every frame.
@@ -190,7 +191,7 @@ fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
           lab.box(fn(n) {
             // Override default text min-width so short stretches can shrink and ellipsize.
             n.laid_nowhere(view::Live::By(fn() { span().1 < 52.0 })).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
-            words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { (name_halo, c_s2()) })) |> ignore
+            words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { if floats { (0.0, 0L) } else { (name_halo, c_s2()) } })) |> ignore
           })
           |> ignore
         })
