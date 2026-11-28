@@ -114,19 +114,13 @@ fn bars_pointed() -> Bool {
       return true
     }
   }
-  match float_deck.v {
-    Some(d) => d.pointed_in()
-    None => false
-  }}
+  false}
 
 fn chrome(root : view::View, bar : view::View, floats_too? : Bool) -> Unit {
   let floats_too = match floats_too { Some(__mbt_v) => __mbt_v, None => false }
   let floats = fn() { full_screen.get() || (floats_too && dock_floats()) }
   let way = motion::NodeWay::new(1.0)
   chrome_bars.push(bar)
-  if floats_too {
-    float_shown.v = fn() { way.shown(bar) }
-  }
   let wanted = fn() {
     !floats() ||
     (pointer_lately.v)() ||

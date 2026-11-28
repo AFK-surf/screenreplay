@@ -819,7 +819,8 @@ fn timeline(parent : view::View) -> Unit {
           let (from, len) = shown(v)
           clamp((ax_d(pos_drawn(v), view_len()) - from) / len * w(), 0.0, w())
         }
-        for played in [true, false] {
+        // (no activity strip in the floating tray)
+        for played in (if signals::untracked(dock_floats) { [] } else { [true, false] }) {
           band.box(fn(o) {
             // Clip outer container to band width so the played-side overscan cannot bleed left past the band.
             o

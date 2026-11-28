@@ -641,29 +641,41 @@ fn zoom_key(parent : view::View) -> Unit {
 fn dock_floats() -> Bool {
   float_controls.get() && !full_screen.get() && !clipping.get()}
 
-// Floating keeps the timeline docked at the foot; only the controls float, over the picture just above it.
+// Floating, the timeline sits in a glass tray (Invar glass rim, solid well inside) above the glass capsules.
+fn timeline_tray(parent : view::View) -> Unit {
+  parent.box(fn(tray) {
+    tray.padding(view::Live::Is((7.0, 7.0, 7.0, 7.0))).radius(view::Live::Is(15.0)) |> ignore
+    lg::liquid_panel_surface_decorate(tray, clips=false) |> ignore
+    tray.box(fn(well) {
+      well
+      .radius(view::Live::Is(8.0))
+      .ground(view::Live::By(c_s1))
+      .edge(view::Live::By(fn() { (0.75, hair()) }))
+      .padding(view::Live::Is((10.0, 0.0, 10.0, 6.0)))
+      |> ignore
+      timeline(well)
+    })
+    |> ignore
+  })
+  |> ignore}
+
 fn dock(parent : view::View) -> Unit {
-  rule(parent, hair)
+  parent.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(hair)).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore
   parent.box(fn(d) {
     // Top padding (dock_over) lives inside timeline() so hover preview covers the heatmap and margin above it.
-    d.ground(view::Live::By(c_bg)).padding(view::Live::By(fn() { (20.0, 0.0, 20.0, if dock_floats() { 4.0 } else { 10.0 }) })) |> ignore
+    d
+    .ground(view::Live::By(fn() { if dock_floats() { clear(c_bg()) } else { c_bg() } }))
+    .padding(view::Live::By(fn() { if dock_floats() { (16.0, 0.0, 16.0, 14.0) } else { (20.0, 0.0, 20.0, 10.0) } }))
+    |> ignore
     d.pick(dock_floats, fn(p, floats) {
-      p.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
-      p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
       if floats {
-        p.box(fn(o) {
-          float_deck.v = Some(o)
-          o
-          .over(view::Live::Is(true), edges=(Some(0.0), Some(-52.0), Some(0.0), None))
-          .alpha(view::Live::By(fn() { (float_shown.v)() }))
-          .laid_nowhere(view::Live::By(fn() { (float_shown.v)() <= 0.0 }))
-          |> ignore
-          controls(o)
-        })
-        |> ignore
+        p.gap(view::Live::Is(10.0)) |> ignore
+        p.show(fn() { has_segs() }, timeline_tray, at_once=true)
       } else {
-        controls(p)
+        p.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
+        p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
       }
+      controls(p)
     }, at_once=true)
   })
   |> ignore}
@@ -954,8 +966,11 @@ fn make_window(root : view::View) -> Unit {
   picture(root)
   // Spacer keeps the dock pinned to the bottom when picture switches to over() in fullscreen.
   root.box(fn(s) { s.grow(view::Live::Is(1.0)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore }) |> ignore
-  let foot = root.box(fn(b) { dock(b) })
-  chrome(root, foot)
+  let foot = root.box(fn(b) {
+    b.over(view::Live::By(dock_floats), edges=(Some(0.0), None, Some(0.0), Some(0.0))) |> ignore
+    dock(b)
+  })
+  chrome(root, foot, floats_too=true)
   library_layer(root)
   settings_dialog(root)
   window_options_layer(root)

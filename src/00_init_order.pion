@@ -463,11 +463,6 @@ let float_bar : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let chrome_bars : Array[view::View] = []
 
-// The floating controls over the picture: shown as the floating header is, kept while pointed at.
-let float_deck : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
-
-let float_shown : mbt_compat::Ref[() -> Double] = mbt_compat::ref_new(fn() { 1.0 })
-
 let pic_drag_moved : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let pic_last_click : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0e9)
