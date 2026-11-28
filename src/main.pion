@@ -249,6 +249,44 @@ fn title_bar(parent : view::View) -> Unit {
   })
   |> ignore}
 
+// A drag on the picture, or on the well around it, moves the window once it has gone 4 pt (not in full screen); a
+// click on the picture plays or pauses, a second one soon after toggles full screen. (A drag handler takes the press,
+// so the clicks are told here too. A raw drag's ox/oy are where it is now, not where it went down: the down is kept.)
+fn picture_drag(d : view::Drag, clicks : Bool) -> Unit {
+  match d.kind {
+    Down => {
+      pic_drag_moved.v = false
+      pic_drag_from.v = (d.wx, d.wy)
+    }
+    Moved => {
+      let (x0, y0) = pic_drag_from.v
+      if !pic_drag_moved.v && ((d.wx - x0).abs() > 4.0 || (d.wy - y0).abs() > 4.0) {
+        pic_drag_moved.v = true
+        if !full_screen.untracked() {
+          hostapi::window_drag()
+          // (the system's move loop takes the release: the press is called off, or the picture keeps holding it
+          // and nothing is pointed at till the next press)
+          let (x, y) = (d.wx, d.wy)
+          match the_root.v {
+            Some(r) => r.at_moment(now() + 1.0, fn() { ui::view_pointer(3, x, y, hostapi::now()) }) |> ignore
+            None => ()
+          }
+        }
+      }
+    }
+    Up =>
+      if clicks && !pic_drag_moved.v {
+        set_playing(!want_play.untracked())
+        if d.at - pic_last_click.v < 400.0 {
+          pic_last_click.v = -1.0e9
+          set_full_screen(!full_screen.untracked())
+        } else {
+          pic_last_click.v = d.at
+        }
+      }
+    _ => ()
+  }}
+
 fn picture(parent : view::View) -> Unit {
   parent.box(fn(stage) {
     stage
@@ -258,6 +296,7 @@ fn picture(parent : view::View) -> Unit {
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .clips(view::Live::Is(true))
+    .on_drag(fn(d) { picture_drag(d, false) })
     |> ignore
     stage.pick(fn() { has_segs() }, fn(b, any) {
       if any {
@@ -278,8 +317,7 @@ fn picture(parent : view::View) -> Unit {
           .ground(view::Live::Is(picture_ground))
           .clips(view::Live::Is(true))
           .presses(view::Live::Is(true))
-          .on_press(fn() { set_playing(!want_play.untracked()) })
-          .on_double_press(fn() { set_full_screen(!full_screen.untracked()) })
+          .on_drag(fn(d) { picture_drag(d, true) })
           .on_wheel_moves(pic_wheel)
           .on_menu(fn(m) { open_moment_menu(m.wx, m.wy, pos_now(), true) })
           .on_pointer_moved(fn() {

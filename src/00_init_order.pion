@@ -456,6 +456,12 @@ let grabbed : signals::Signal[Int] = signals::signal(0)
 
 let full_screen : signals::Signal[Bool] = signals::signal(false)
 
+let pic_drag_moved : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
+
+let pic_drag_from : mbt_compat::Ref[(Double, Double)] = mbt_compat::ref_new((0.0, 0.0))
+
+let pic_last_click : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0e9)
+
 let saved : signals::Signal[String] = signals::signal("")
 
 let saved_path : signals::Signal[String] = signals::signal("")
