@@ -73,8 +73,8 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
       }
       b
       .height(view::Live::Is(Some(if floats { app_h() - 6.0 } else { app_h() })))
-      .radius(view::Live::Is(if floats { 5.0 } else { 0.0 }))
-      .ground(view::Live::By(if floats { c_s2 } else { c_s4 }))
+      .radius(view::Live::Is(if floats { (app_h() - 6.0) / 2.0 } else { 0.0 }))
+      .ground(view::Live::By(if floats { fn() { tone(0xFFFFFF29L, 0xECECEFFFL) } } else { c_s4 }))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
       .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), if floats { 3.0 } else { 0.0 }) }))

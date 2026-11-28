@@ -523,7 +523,7 @@ let just_marked : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0)
 
 let dock_app_h : Double = 24.0
 
-let float_app_h : Double = 30.0
+let float_app_h : Double = 32.0
 
 let wave_h : Double = 16.0
 

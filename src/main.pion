@@ -69,8 +69,9 @@ fn window_key(parent : view::View, label : () -> String, icon : () -> String, pr
     let lit = fn() { b.pointed() || b.pressed() || (snap && ui::window_snap_state() != 0) }
     let held = fn() { b.pressed() || (snap && ui::window_snap_state() == 2) }
     b
-    .width(view::Live::Is(Some(key_w)))
-    .height(view::Live::Is(Some(title_h())))
+    .width(view::Live::By(fn() { Some(if dock_floats() { 34.0 } else { key_w }) }))
+    .height(view::Live::By(fn() { Some(if dock_floats() { 32.0 } else { title_h() }) }))
+    .radius(view::Live::By(fn() { if dock_floats() { 16.0 } else { 0.0 } }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .cursor(view::Live::Is(Some(view::Cursor::Arrow)))
@@ -101,6 +102,14 @@ fn window_key(parent : view::View, label : () -> String, icon : () -> String, pr
   })
   |> ignore}
 
+// The floating header's islands: Invar glass capsules, nothing while docked.
+fn bubble(v : view::View) -> Unit {
+  v
+  .height(view::Live::By(fn() { if dock_floats() { Some(40.0) } else { None } }))
+  .radius(view::Live::By(fn() { if dock_floats() { 20.0 } else { 0.0 } }))
+  |> ignore
+  lg::liquid_panel_surface_decorate(v, active=dock_floats, clips=false) |> ignore}
+
 fn title_bar(parent : view::View) -> Unit {
   let th = title_h()
   let mac = is_mac()
@@ -129,7 +138,8 @@ fn title_bar(parent : view::View) -> Unit {
       moves(side)
       side.box(fn(left) {
         left_box.v = Some(left)
-        left.row(view::Live::Is(true)).padding(view::Live::By(fn() { (if mac && hostapi::window_inset() { 82.0 } else { 14.0 }, 0.0, 8.0, 0.0) })).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        left.row(view::Live::Is(true)).padding(view::Live::By(fn() { if dock_floats() { (if mac && hostapi::window_inset() { 82.0 } else { 12.0 }, 0.0, 14.0, 0.0) } else { (if mac && hostapi::window_inset() { 82.0 } else { 14.0 }, 0.0, 8.0, 0.0) } })).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        bubble(left)
         left.pick(fn() { library_open.get() }, fn(b, lib) {
           b.row(view::Live::Is(true)).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           if lib {
@@ -151,6 +161,8 @@ fn title_bar(parent : view::View) -> Unit {
     |> ignore
     bar.box(fn(o) {
       o.row(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)).gap(view::Live::Is(10.0)).shrink(view::Live::Is(1.0)).min_width(view::Live::Is(Some(0.0))).clips(view::Live::Is(true)) |> ignore
+      o.padding(view::Live::By(fn() { if dock_floats() { (16.0, 0.0, 16.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } })) |> ignore
+      bubble(o)
       moves(o)
       // Use laid_nowhere instead of pick so text nodes stay direct flex children and can ellipsize.
       let kind = fn() { if library_open.get() || !has_segs() { 0 } else if clipping.get() { 1 } else { 2 } }
@@ -201,8 +213,10 @@ fn title_bar(parent : view::View) -> Unit {
       side.box(fn(content) {
         right_box.v = Some(content)
         content.row(view::Live::Is(true)).height(view::Live::Is(Some(th))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        content.padding(view::Live::By(fn() { if dock_floats() { (4.0, 0.0, 4.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } })) |> ignore
+        bubble(content)
         content.box(fn(tools) {
-          tools.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).padding(view::Live::Is((0.0, 0.0, if mac { 14.0 } else { 6.0 }, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+          tools.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).padding(view::Live::By(fn() { (0.0, 0.0, if dock_floats() { 2.0 } else if mac { 14.0 } else { 6.0 }, 0.0) })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           recorder_chip(tools)
           icon_button(tools, fn() { if float_controls.get() { "panel-dock" } else { "panel-float" } }, fn() { if float_controls.get() { t("停靠控制条") } else { t("浮动控制条") } }, fn() {
             float_controls.set(!float_controls.untracked())
@@ -249,7 +263,14 @@ fn title_bar(parent : view::View) -> Unit {
     // Register maximize button rect for Windows Snap Layouts.
     if !mac {
       let snap = bar.by_room(fn(_, room) {
-        bar.reacts(fn() { room.width() }, fn(w) { hostapi::window_snap(w - key_w * 2.0, 0.0, key_w, th) })
+        bar.reacts(fn() { (room.width(), dock_floats()) }, fn(v) {
+          let (w, fl) = v
+          if fl {
+            hostapi::window_snap(w - 4.0 - 34.0 * 2.0, (th - 32.0) / 2.0, 34.0, 32.0)
+          } else {
+            hostapi::window_snap(w - key_w * 2.0, 0.0, key_w, th)
+          }
+        })
       })
       snap.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
     }
@@ -906,8 +927,10 @@ fn make_window(root : view::View) -> Unit {
     saved_path.set(if dev_saved == "-" { "" } else { dev_saved })
   }
   let top = root.box(fn(b) {
-    b.over(view::Live::By(dock_floats), edges=(Some(0.0), Some(0.0), Some(0.0), None)) |> ignore
-    lg::liquid_panel_surface_decorate(b, radius=0.0, active=dock_floats, clips=false) |> ignore
+    b
+    .over(view::Live::By(dock_floats), edges=(Some(0.0), Some(0.0), Some(0.0), None))
+    .padding(view::Live::By(fn() { if dock_floats() { (12.0, 10.0, 12.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } }))
+    |> ignore
     title_bar(b)
     b.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(fn() { tone(0x00000080L, 0x00000014L) })).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore
   })
