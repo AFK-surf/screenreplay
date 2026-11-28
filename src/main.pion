@@ -359,7 +359,8 @@ fn controls(parent : view::View) -> Unit {
           words(b, fn() {
             let (a, z) = (clip_a.get(), clip_b.get())
             let at = clip_time(clamp(pos_drawn(b), a, z))
-            clock(at) + " / " + clock(clip_kept())
+            let pace = export_speed()
+            clock(at / pace) + " / " + clock(clip_out_len())
           }, 13.0, ui_muted, weight=500) |> ignore
         }, at_once=true)
         |> ignore
@@ -380,7 +381,7 @@ fn controls(parent : view::View) -> Unit {
       icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒") }, fn() { jump_by(15000.0) }, shortcut="on15") |> ignore
       mid.box(fn(r) {
         r.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Start)).padding(view::Live::Is((6.0, 0.0, 0.0, 0.0))) |> ignore
-        speed_key(r)
+        speed_key(r, exports=true)
       })
       |> ignore
     })
@@ -415,7 +416,7 @@ fn controls(parent : view::View) -> Unit {
               let (w, h, _, _, _) = export_plan()
               "\{w}×\{h} · " + size_text()
             } else {
-              clock(clip_kept())
+              clock(clip_out_len())
             }
           })
           tip(save_k, fn() { t("保存片段") }, shortcut="save")
@@ -438,26 +439,27 @@ fn controls(parent : view::View) -> Unit {
   })
   |> ignore}
 
-fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, stage? : Bool) -> Unit {
+fn speed_text(s : Double) -> String {
+  if s == s.floor() {
+    "\{s.to_int()}×"
+  } else {
+    "\{s}×"
+  }}
+
+fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, stage? : Bool, exports? : Bool) -> Unit {
   let now = match now { Some(__mbt_v) => __mbt_v, None => fn() { speed.get() } }
   let set = match set { Some(__mbt_v) => __mbt_v, None => set_speed }
   let stage = match stage { Some(__mbt_v) => __mbt_v, None => false }
+  let exports = match exports { Some(__mbt_v) => __mbt_v, None => false }
 
-  let label = fn() {
-    let s = now()
-    if s == s.floor() {
-      "\{s.to_int()}×"
-    } else {
-      "\{s}×"
-    }
-  }
+  let strong = fn() { exports && clipping.get() && now() != 1.0 }
+  let label = fn() { if strong() { tf("导出 {0}", [speed_text(now())]) } else { speed_text(now()) } }
   let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
   let k = pressable(parent, label, fn() {
     guard key.v is Some(b) else { return }
     let chosen = signals::untracked(now)
     open_menu_under(b, arr_map(speeds, fn(s) {
-        let name = if s == s.floor() { "\{s.to_int()}×" } else { "\{s}×" }
-        Some(MenuEntry::{ label: name, key: if s == chosen { "✓" } else { "" }, act: fn() { set(s) } })
+        Some(MenuEntry::{ label: speed_text(s), key: if s == chosen { "✓" } else { "" }, act: fn() { set(s) } })
       }), above=true)
   }, fn(b) {
     let (hand, _) = answer(b)
@@ -470,12 +472,18 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {
-      let on = if stage { stage_hover } else { c_s3() }
-      mix(clear(on), on, hand.shown(b))
+      if strong() {
+        mix(ui_accent(), ui_accent_hover(), hand.shown(b))
+      } else {
+        let on = if stage { stage_hover } else { c_s3() }
+        mix(clear(on), on, hand.shown(b))
+      }
     }))
     |> ignore
     words(b, label, 12.0, fn() {
-      if stage {
+      if strong() {
+        ui_on_accent()
+      } else if stage {
         mix(stage_muted, stage_text, hand.shown(b))
       } else {
         mix(ui_muted(), ui_text(), hand.shown(b))
@@ -484,7 +492,9 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     |> ignore
     b.box(fn(c) {
       c.width(view::Live::Is(Some(10.0))).height(view::Live::Is(Some(10.0))).picture(view::Live::Is(Some(vector("M2.5 3.75 5 6.25 7.5 3.75", 10.0, 10.0, stroke=1.25)))).tint(view::Live::By(fn() {
-        if stage {
+        if strong() {
+          ui_on_accent()
+        } else if stage {
           mix(stage_subtle, stage_muted, hand.shown(b))
         } else {
           mix(ui_subtle(), ui_muted(), hand.shown(b))
@@ -493,6 +503,9 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     })
     |> ignore
   })
+  if exports {
+    tip(k, fn() { if clipping.get() { t("保存的片段也按这个倍速") } else { t("播放速度") } })
+  }
   key.v = Some(k)}
 
 fn zoom_key(parent : view::View) -> Unit {

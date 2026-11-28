@@ -114,11 +114,11 @@ extern "C" fn rp_start_resident_hidden() -> Unit = "rp_start_resident_hidden"
 extern "C" fn rp_resident_primed() -> Unit = "rp_resident_primed"
 extern "C" fn rp_resident_hidden() -> Unit = "rp_resident_hidden"
 extern "C" fn rp_set_bg_rgb(rgb : Int) -> Unit = "rp_set_bg_rgb"
-extern "C" fn c_rp_export_start(plan : Ptr, plan_len : Int64, output : Ptr, output_len : Int64, width : Int, height : Int, fps : Int, bitrate : Int, codec : Int, crops : Ptr, crops_len : Int64, scale : Double) -> Int = "pion_rp_export_start"
-fn rp_export_start(plan : Bytes, output : Bytes, width : Int, height : Int, fps : Int, bitrate : Int, codec : Int, crops : Bytes, scale : Double) -> Int { c_rp_export_start(bytes_data_ptr(plan), plan.length().to_int64(), bytes_data_ptr(output), output.length().to_int64(), width, height, fps, bitrate, codec, bytes_data_ptr(crops), crops.length().to_int64(), scale) }
+extern "C" fn c_rp_export_start(plan : Ptr, plan_len : Int64, output : Ptr, output_len : Int64, width : Int, height : Int, fps : Int, bitrate : Int, codec : Int, crops : Ptr, crops_len : Int64, scale : Double, speed : Double) -> Int = "pion_rp_export_start"
+fn rp_export_start(plan : Bytes, output : Bytes, width : Int, height : Int, fps : Int, bitrate : Int, codec : Int, crops : Bytes, scale : Double, speed : Double) -> Int { c_rp_export_start(bytes_data_ptr(plan), plan.length().to_int64(), bytes_data_ptr(output), output.length().to_int64(), width, height, fps, bitrate, codec, bytes_data_ptr(crops), crops.length().to_int64(), scale, speed) }
 extern "C" fn rp_av1_here() -> Int = "rp_av1_here"
-extern "C" fn c_rp_gif_estimate_start(plan : Ptr, plan_len : Int64, width : Int, height : Int, fps : Int, crops : Ptr, crops_len : Int64, scale : Double) -> Unit = "pion_rp_gif_estimate_start"
-fn rp_gif_estimate_start(plan : Bytes, width : Int, height : Int, fps : Int, crops : Bytes, scale : Double) -> Unit { c_rp_gif_estimate_start(bytes_data_ptr(plan), plan.length().to_int64(), width, height, fps, bytes_data_ptr(crops), crops.length().to_int64(), scale) }
+extern "C" fn c_rp_gif_estimate_start(plan : Ptr, plan_len : Int64, width : Int, height : Int, fps : Int, crops : Ptr, crops_len : Int64, scale : Double, speed : Double) -> Unit = "pion_rp_gif_estimate_start"
+fn rp_gif_estimate_start(plan : Bytes, width : Int, height : Int, fps : Int, crops : Bytes, scale : Double, speed : Double) -> Unit { c_rp_gif_estimate_start(bytes_data_ptr(plan), plan.length().to_int64(), width, height, fps, bytes_data_ptr(crops), crops.length().to_int64(), scale, speed) }
 extern "C" fn rp_gif_estimate() -> Double = "rp_gif_estimate"
 extern "C" fn rp_export_state() -> Int = "rp_export_state"
 extern "C" fn rp_export_progress() -> Double = "rp_export_progress"

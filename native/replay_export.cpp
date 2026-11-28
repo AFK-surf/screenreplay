@@ -19,8 +19,10 @@
 #include <condition_variable>
 #include <algorithm>
 #include <climits>
+#include <memory>
 #include <cstdlib>
 #include "moonbit.h"
+#include "wsola.h"
 
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
@@ -58,6 +60,7 @@ struct Job {
   int bt601 = 0, full = 0;
   int codec = kH264;
   double scale = 1.0;
+  double speed = 1.0;
   LONGLONG total = 1;
 };
 
@@ -1290,7 +1293,9 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
   gpu_crop.init(device.Get(), context.Get());
 
   const bool gif = job.codec == kGif;
-  const bool sound = !gif && any_sound(job);
+  const bool sound = !gif && job.speed <= 4.0 && any_sound(job);
+  const bool sped = job.speed != 1.0;
+  const auto scaled = [&](LONGLONG t) { return sped ? (LONGLONG)((double)t / job.speed) : t; };
   const std::wstring partial = partial_of(job);
   Gif own;
   Gif &animation = count ? *count : own;
@@ -1330,11 +1335,13 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
   const LONGLONG frame = 10000000LL / job.fps;
   LONGLONG next_video = LLONG_MIN;
   ComPtr<IMFSample> held;
-  auto put = [&](IMFSample *sample, LONGLONG t) -> HRESULT {
+  LONGLONG held_src = 0;
+  // t: where the frame lands in the export; src: where it is in the selection (crops follow that).
+  auto put = [&](IMFSample *sample, LONGLONG t, LONGLONG src) -> HRESULT {
     ComPtr<IMFSample> f = sample;
     if (!job.crops.empty()) {
       f.Reset();
-      if (FAILED(gpu_crop.crop(job, sample, t, &f))) CHECK(cropped(job, sample, t, &f));
+      if (FAILED(gpu_crop.crop(job, sample, src, &f))) CHECK(cropped(job, sample, src, &f));
     }
     if (gif) {
       CHECK(with_pixels(gpu_crop, f.Get(), job.width, [&](const BYTE *px, LONG pitch) { return animation.add(px, pitch, t); }));
@@ -1344,18 +1351,60 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
       CHECK(writer->WriteSample(vout, f.Get()));
     }
     next_video = t + frame - frame / 10;
-    done = std::max(done, t);
+    done = std::max(done, src);
     told.store(std::min(0.99, (double)done / (double)job.total));
     return S_OK;
   };
-  auto offer = [&](IMFSample *sample, LONGLONG t) -> HRESULT {
+  auto offer = [&](IMFSample *sample, LONGLONG src) -> HRESULT {
+    const LONGLONG t = scaled(src);
     if (held && t >= next_video) {
-      if (t - next_video >= frame / 2) CHECK(put(held.Get(), next_video));
+      if (t - next_video >= frame / 2) CHECK(put(held.Get(), next_video, held_src));
       held.Reset();
     }
-    if (t >= next_video) return put(sample, t);
+    if (t >= next_video) return put(sample, t, src);
     held = sample;
+    held_src = src;
     return S_OK;
+  };
+  std::unique_ptr<Wsola> stretch;
+  if (sound && sped) stretch.reset(new Wsola(job.speed));
+  LONGLONG fed_to = 0;    // where in the selection the audio fed to the stretcher reaches
+  LONGLONG audio_out = 0; // frames of stretched audio written
+  std::vector<int16_t> stretched;
+  auto write_stretched = [&]() -> HRESULT {
+    if (stretched.empty()) return S_OK;
+    const DWORD bytes = (DWORD)(stretched.size() * sizeof(int16_t));
+    ComPtr<IMFMediaBuffer> buf;
+    CHECK(MFCreateMemoryBuffer(bytes, &buf));
+    BYTE *p = nullptr;
+    CHECK(buf->Lock(&p, nullptr, nullptr));
+    memcpy(p, stretched.data(), bytes);
+    buf->Unlock();
+    buf->SetCurrentLength(bytes);
+    ComPtr<IMFSample> s;
+    CHECK(MFCreateSample(&s));
+    s->AddBuffer(buf.Get());
+    const LONGLONG frames = (LONGLONG)(stretched.size() / 2);
+    s->SetSampleTime(audio_out * 10000000LL / 48000);
+    s->SetSampleDuration(frames * 10000000LL / 48000);
+    audio_out += frames;
+    stretched.clear();
+    return writer->WriteSample(aout, s.Get());
+  };
+  auto stretch_audio = [&](IMFSample *sample, LONGLONG src) -> HRESULT {
+    ComPtr<IMFMediaBuffer> buf;
+    CHECK(sample->ConvertToContiguousBuffer(&buf));
+    BYTE *p = nullptr;
+    DWORD len = 0;
+    CHECK(buf->Lock(&p, nullptr, &len));
+    const int16_t *pcm = (const int16_t *)p;
+    LONGLONG frames = len / 4;
+    if (src > fed_to + 10000) stretch->feed(nullptr, (long)((src - fed_to) * 48000 / 10000000LL), false, stretched);
+    const LONGLONG skip = src < fed_to ? std::min(frames, (fed_to - src) * 48000 / 10000000LL) : 0;
+    stretch->feed(pcm + skip * 2, (long)(frames - skip), false, stretched);
+    buf->Unlock();
+    fed_to = std::max(fed_to, src + frames * 10000000LL / 48000);
+    return write_stretched();
   };
   for (const auto &part : job.parts) {
     ComPtr<IMFAttributes> rattrs;
@@ -1467,20 +1516,28 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
       const LONGLONG out = part.offset + (ts - part.trim);
       if (is_video) {
         CHECK(offer(sample.Get(), out));
+      } else if (stretch) {
+        CHECK(stretch_audio(sample.Get(), out));
       } else {
         sample->SetSampleTime(out);
         CHECK(writer->WriteSample(aout, sample.Get()));
       }
     }
     if (held) {
-      if (part.offset + (part.end - part.trim) - next_video >= frame / 2) CHECK(put(held.Get(), next_video));
+      if (scaled(part.offset + (part.end - part.trim)) - next_video >= frame / 2) CHECK(put(held.Get(), next_video, held_src));
       held.Reset();
     }
   }
   if (gif) {
-    CHECK(animation.finish(job.total));
+    CHECK(animation.finish(scaled(job.total)));
     if (count) return S_OK;
   } else {
+    if (stretch) {
+      stretch->feed(nullptr, 0, true, stretched);
+      const LONGLONG most = scaled(job.total) * 48000 / 10000000LL - audio_out;
+      if ((LONGLONG)stretched.size() / 2 > most) stretched.resize((size_t)std::max<LONGLONG>(0, most) * 2);
+      CHECK(write_stretched());
+    }
     CHECK(writer->Finalize());
     writer.Reset();
     if (job.codec == kAv1) CHECK(av1_sized(partial, job.width, job.height));
@@ -1490,7 +1547,7 @@ HRESULT run(Job job, const std::atomic<bool> &stop, std::atomic<double> &told, G
   return S_OK;
 }
 
-bool make_job(const char *plan, const char *crops, int width, int height, int fps, int bitrate, int codec, double scale, Job &job) {
+bool make_job(const char *plan, const char *crops, int width, int height, int fps, int bitrate, int codec, double scale, double speed, Job &job) {
   job.width = width & ~1;
   job.height = height & ~1;
   job.fps = fps > 0 ? fps : 30;
@@ -1499,6 +1556,7 @@ bool make_job(const char *plan, const char *crops, int width, int height, int fp
   if (codec == kAv1) job.bitrate = (int)((int64_t)job.bitrate * 98 / 100);
   job.codec = codec >= kH264 && codec <= kGif ? codec : kH264;
   job.scale = scale > 0.0 && scale < 1.0 ? scale : 1.0;
+  job.speed = speed >= 0.25 && speed <= 32.0 ? speed : 1.0;
   for (const char *c = crops; *c;) {
     const char *nl = strchr(c, '\n');
     std::string line = nl ? std::string(c, nl - c) : std::string(c);
@@ -1621,13 +1679,13 @@ static void exit_registered() {
 // plan: "path\toffsetMs\ttrimStartMs\tendMs" lines; crops: "ms\tx\ty\tw\th" lines; codec: 0 H264, 1 HEVC, 2 AV1, 3 GIF.
 // Returns 0 started, -1 already running, -2 empty job.
 extern "C" int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output, int32_t width, int32_t height, int32_t fps,
-                                   int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale) {
+                                   int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale, double speed) {
   std::lock_guard<std::mutex> lock(mu);
   if (state.load() == 1) return -1;
   if (worker.joinable()) worker.join();
   Job job;
   job.output = wide((const char *)output);
-  if (!make_job((const char *)plan, (const char *)crops, width, height, fps, bitrate, codec, scale, job)) return -2;
+  if (!make_job((const char *)plan, (const char *)crops, width, height, fps, bitrate, codec, scale, speed, job)) return -2;
   cancel.store(false);
   progress.store(0.0);
   failure.store(0);
@@ -1655,9 +1713,10 @@ extern "C" int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output,
   return 0;
 }
 
-extern "C" void rp_gif_estimate_start(moonbit_bytes_t plan, int32_t width, int32_t height, int32_t fps, moonbit_bytes_t crops, double scale) {
+extern "C" void rp_gif_estimate_start(moonbit_bytes_t plan, int32_t width, int32_t height, int32_t fps, moonbit_bytes_t crops, double scale,
+                                      double speed) {
   Job job;
-  const bool made = make_job((const char *)plan, (const char *)crops, width, height, fps, 0, kGif, scale, job);
+  const bool made = make_job((const char *)plan, (const char *)crops, width, height, fps, 0, kGif, scale, speed, job);
   std::lock_guard<std::mutex> lock(estimate_mu);
   estimate_stop.store(true);
   estimate_gen++;
