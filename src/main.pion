@@ -582,7 +582,10 @@ fn dock(parent : view::View) -> Unit {
       p.gap(view::Live::Is(if floats { 10.0 } else { 0.0 })) |> ignore
       p.show(fn() { has_segs() }, fn(b) {
         if floats {
-          lg::liquid_panel_node(b, fn(panel) { timeline(panel) }, radius=16.0, pad=10.0, floating=true) |> ignore
+          lg::liquid_panel_node(b, fn(panel) { timeline(panel) }, radius=16.0, pad=10.0)
+          .shadow(view::Live::By(fn() { (28.0, 8.0, sheet_shadow()) }))
+          .shadow_outside(view::Live::Is(true))
+          |> ignore
         } else {
           timeline(b)
         }
