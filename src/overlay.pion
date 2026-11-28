@@ -30,7 +30,7 @@ fn sr_tip_look() -> kit::TipLook {
     cap_gap: 2.0,
     cap_label_gap: 6.0,
     scale_from: 1.0,
-    exit_scale: 1.0,
+    exit_scale: 0.97,
   }
 }
 
@@ -56,6 +56,7 @@ fn shortcut_words(action : String) -> String {
     "back15" => "J"
     "on15" => "L"
     "clip" => "C"
+    "latest" => "End"
     "mark" => "M"
     "escape" => "Esc"
     "undo" => if mac { "⌘Z" } else { "Ctrl+Z" }

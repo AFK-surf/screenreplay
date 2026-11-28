@@ -428,9 +428,9 @@ fn controls(parent : view::View) -> Unit {
           apps_key(b)
           zoom_key(b)
           b.show(fn() { !follow_latest.get() }, fn(x) {
-            text_button(x, fn() { t("回到最新") }, show_latest, ghost=true) |> ignore
+            icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, h=32.0, size=17.0, shortcut="latest") |> ignore
           }, at_once=true)
-          let clip = text_button(b, fn() { t("剪辑") }, start_clip, icon="scissors")
+          let clip = solid_icon_button(b, "scissors", fn() { t("剪辑") }, start_clip)
           tip(clip, fn() { t("剪辑") }, shortcut="clip")
         }
       }, at_once=true)

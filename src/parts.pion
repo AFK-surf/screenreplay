@@ -98,6 +98,7 @@ fn glyph_vector(name : String) -> Option[pixels::Vector] {
           ("M8.12 8.12L12 12", 2.25),
         ]),
       )
+    "to-end" => Option::Some(vectors(24.0, 24.0, [("M17 12H3", 2.1), ("M11 18l6-6-6-6", 2.1), ("M21 5v14", 2.1)]))
     "warn-tri" =>
       Option::Some(
         vectors(16.0, 16.0, [
@@ -196,6 +197,21 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
         mix(ui_muted(), ui_text(), hand.shown(b))
       }
     })
+  })}
+
+fn solid_icon_button(parent : view::View, icon : String, label : () -> String, press : () -> Unit) -> view::View {
+  pressable(parent, label, press, fn(b) {
+    let (hand, _) = answer(b)
+    b
+    .width(view::Live::Is(Some(32.0)))
+    .height(view::Live::Is(Some(32.0)))
+    .radius(view::Live::Is(8.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+    .ground(view::Live::By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
+    |> ignore
+    glyph(b, fn() { icon }, 16.0, ui_on_accent)
   })}
 
 fn text_button(parent : view::View, label : () -> String, press : () -> Unit, icon? : String, ghost? : Bool, small? : Bool, danger? : Bool) -> view::View {

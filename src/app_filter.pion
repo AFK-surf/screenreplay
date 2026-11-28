@@ -146,10 +146,12 @@ fn apps_key(parent : view::View) -> Unit {
     b
     .row(view::Live::Is(true))
     .gap(view::Live::Is(5.0))
-    .padding(view::Live::Is((8.0, 0.0, 4.0, 0.0)))
-    .height(view::Live::Is(Some(28.0)))
+    .padding(view::Live::By(fn() { if filter_on() { (8.0, 0.0, 4.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } }))
+    .width(view::Live::By(fn() { if filter_on() { None } else { Some(32.0) } }))
+    .height(view::Live::By(fn() { Some(if filter_on() { 28.0 } else { 32.0 }) }))
     .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {
       if filter_on() {
         mix(c_s3(), c_s4(), hand.shown(b))
@@ -162,8 +164,8 @@ fn apps_key(parent : view::View) -> Unit {
     b.show(fn() { !filter_on() }, fn(x) {
       x.box(fn(g) {
         g
-        .width(view::Live::Is(Some(14.0)))
-        .height(view::Live::Is(Some(14.0)))
+        .width(view::Live::Is(Some(16.0)))
+        .height(view::Live::Is(Some(16.0)))
         .picture(view::Live::Is(Some(vector("M2 2.8h10L8.2 7.4V11L5.8 12.2V7.4Z", 14.0, 14.0, stroke=1.4))))
         .tint(view::Live::By(ink))
         |> ignore
@@ -197,7 +199,7 @@ fn apps_key(parent : view::View) -> Unit {
     }, at_once=true)
     |> ignore
     b.box(fn(n) {
-      n.max_width(view::Live::Is(Some(180.0))).cuts(view::Live::Is(true)).padding(view::Live::Is((0.0, 0.0, 4.0, 0.0))) |> ignore
+      n.max_width(view::Live::Is(Some(180.0))).cuts(view::Live::Is(true)).padding(view::Live::Is((0.0, 0.0, 4.0, 0.0))).laid_nowhere(view::Live::By(fn() { !filter_on() })) |> ignore
       words(n, fn() {
         let f = app_filter.get()
         if f.is_empty() {
@@ -236,6 +238,7 @@ fn apps_key(parent : view::View) -> Unit {
     }, at_once=true)
     |> ignore
   })
+  tip(k, fn() { t("按应用统计和过滤") })
   apps_anchor.v = Some(k.id())}
 
 fn tick_box(parent : view::View, on : () -> Bool) -> Unit {
