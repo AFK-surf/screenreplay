@@ -465,6 +465,8 @@ let chrome_bars : Array[view::View] = []
 
 let pic_drag_moved : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
+let pic_drag_from : mbt_compat::Ref[(Double, Double)] = mbt_compat::ref_new((0.0, 0.0))
+
 let pic_last_click : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0e9)
 
 let saved : signals::Signal[String] = signals::signal("")

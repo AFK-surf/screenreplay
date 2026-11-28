@@ -75,7 +75,7 @@ fn overview(parent : view::View, tray? : Bool) -> Unit {
   parent.box(fn(row) {
     row.row(view::Live::Is(true)).margin(view::Live::Is(if tray { (0.0, 0.0, 0.0, 0.0) } else { (0.0, 4.0, 0.0, 0.0) })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     if tray {
-      row.padding(view::Live::Is((6.0, 1.0, 6.0, 1.0))).radius(view::Live::Is(8.0)).ground(view::Live::By(fn() { tone(0x141518FFL, 0xF1F2F6FFL) })) |> ignore
+      row.padding(view::Live::Is((6.0, 1.0, 6.0, 1.0))).radius(view::Live::Is(8.0)).ground(view::Live::By(fn() { tone(0x0000002EL, 0x17181B08L) })) |> ignore
     }
     row.box(fn(cell) {
       cell.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))) |> ignore

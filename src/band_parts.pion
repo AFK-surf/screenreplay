@@ -69,7 +69,7 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
       }
       b
       .height(view::Live::Is(Some(app_h)))
-      .ground(view::Live::By(if in_tray() { fn() { tone(0x343741FFL, 0xE2E5ECFFL) } } else { c_s4 }))
+      .ground(view::Live::By(if in_tray() { fn() { tone(0xFFFFFF17L, 0x17181B12L) } } else { c_s4 }))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
       .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), 0.0) }))
