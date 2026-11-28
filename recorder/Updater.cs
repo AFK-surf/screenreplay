@@ -11,7 +11,7 @@ namespace Replay.Recorder;
 
 internal sealed class Updater : IDisposable
 {
-    public const string AppVersion = "0.1.27";
+    public const string AppVersion = "0.1.28";
 
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{9C4A8E17-5D2B-4E91-A763-8F10B2C5D9E4}_is1";
     private const string TestUninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenReplay-Test_is1";

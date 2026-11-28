@@ -6,7 +6,7 @@ import Security
 public final class Updater: @unchecked Sendable {
   public static let appVersion: String = {
     let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-    return isPlainVersion(v) ? v : "0.1.27"
+    return isPlainVersion(v) ? v : "0.1.28"
   }()
 
   /// The Team ID of "Developer ID Application: AFK AI, Inc. (D9AAN3VJK8)", what scripts/sign-mac.sh signs with.

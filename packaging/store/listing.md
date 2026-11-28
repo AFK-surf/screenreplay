@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.27):** A cleaner bottom bar: icon buttons in three groups, and a timeline whose app lane, sound wave and time marks no longer overlap. While clipping, the playback speed is the export speed (“Export 2×”), with the sound kept at its pitch up to 4×; hold Ctrl (⌘ on Mac) to move the selection, a plain drag in it moves the playhead. Drag the picture to move the window. New-style menus. Fixed the picture being squeezed in windows narrower than the recording, and the timeline preview flashing black while scrubbing.
+**What's new in this version (0.1.28):** Much smoother timeline scrubbing and live GPU hover preview: forward drags and short backward scrubs decode frames incrementally on the GPU instead of jumping every 2 seconds between keyframes; the preview card mirrors the exact main frame while dragging and layers live hardware-decoded video over static thumbnails while hovering. Added a 200-entry LRU cap on timeline thumbnail textures to keep VRAM flat during long sessions, and fixed the hover card occasionally snapping to the left on first hover.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.27）：** 底栏重新整理：按钮改成图标、分成三组，时间轴上的应用条、声音波形和时间刻度不再互相压着；剪辑时预览倍速就是导出倍速（「导出 2×」），4× 以内声音保持原音高；剪辑时按住 Ctrl（Mac 上是 ⌘）拖动才移动选区，直接拖是拖播放头；按住画面拖动可以移动窗口；菜单换成新样式；修复窗口比录像窄时画面被横向挤扁、拖动时间轴时预览小图闪黑的问题。
+**此版本新增内容（0.1.28）：** 时间轴拖动回放更流畅，前进拖动与短距回拖改用显卡增量逐帧解码，不再每 2 秒只跳关键帧；时间轴拖动与悬停预览升级为实时硬解画面，拖动时预览浮层与主画面同帧同步，悬停时在静态缩略图上实时解码高清画面；为缩略图显存缓存增加 200 张 LRU 上限以保持长开窗口显存平稳，窗口隐藏时自动释放悬停解码流；修复首次悬停时间轴时预览卡片偶发贴到最左侧的问题。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 

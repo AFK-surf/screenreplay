@@ -51,6 +51,16 @@ footer { border-top: 1px solid var(--hair); padding: 24px 0 36px; color: var(--t
     <h1 data-zh="更新日志" data-en="Changelog">更新日志</h1>
 
     <article class="ver-card">
+      <div class="ver-head"><h2>0.1.28</h2><span>2026-11-29</span></div>
+      <ul>
+        <li data-zh="时间轴拖动回放更流畅：前进拖动与短距回拖改用显卡增量逐帧解码，不再每 2 秒只跳关键帧；大跨度快速拖动仍保持快路径响应。" data-en="Much smoother timeline scrubbing: forward drags and short backward scrubs now decode frames incrementally on the GPU instead of jumping every 2 seconds between keyframes, while wide jumps stay fast.">时间轴拖动回放更流畅：前进拖动与短距回拖改用显卡增量逐帧解码，不再每 2 秒只跳关键帧；大跨度快速拖动仍保持快路径响应。</li>
+        <li data-zh="时间轴悬停与拖动预览升级为实时硬解画面：拖动时预览浮层与主画面同帧同步；悬停扫过时间轴时在静态缩略图上实时解码高清画面。" data-en="Live GPU video preview on timeline hover and scrub: while dragging, the preview card mirrors the exact main frame in real time; while hovering, live hardware-decoded frames layer over the static thumbnails.">时间轴悬停与拖动预览升级为实时硬解画面：拖动时预览浮层与主画面同帧同步；悬停扫过时间轴时在静态缩略图上实时解码高清画面。</li>
+        <li data-zh="缩略图显存缓存增加 200 张 LRU 上限，长开回放窗口反复拖动时间轴时显存占用保持平稳；窗口隐藏时自动释放悬停解码流。" data-en="Added a 200-entry LRU cap for decoded timeline thumbnail textures so VRAM stays flat during long replay sessions, and released the hover decoder automatically when the window hides.">缩略图显存缓存增加 200 张 LRU 上限，长开回放窗口反复拖动时间轴时显存占用保持平稳；窗口隐藏时自动释放悬停解码流。</li>
+        <li data-zh="修复首次悬停时间轴时预览卡片偶发贴到最左侧的问题。" data-en="Fixed the hover preview card occasionally snapping to the far left on the first hover.">修复首次悬停时间轴时预览卡片偶发贴到最左侧的问题。</li>
+      </ul>
+    </article>
+
+    <article class="ver-card">
       <div class="ver-head"><h2>0.1.27</h2><span>2026-11-28</span></div>
       <ul>
         <li data-zh="底栏重新整理：按钮改成图标，分成三组；悬停提示带快捷键。" data-en="A cleaner bottom bar: icon buttons in three groups, with shortcuts in their tooltips.">底栏重新整理：按钮改成图标，分成三组；悬停提示带快捷键。</li>
