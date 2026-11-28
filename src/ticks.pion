@@ -173,7 +173,7 @@ fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
         .laid_nowhere(view::Live::By(fn() { place(b) is None }))
         .offset(view::Live::By(fn() { (place(b).unwrap_or(0.0), strip_h + 2.0) }))
         |> ignore
-        words(b, fn() { tick.text }, tick_size, if tick.major { ui_text } else { ui_muted }, weight=if tick.major {
+        words(b, fn() { tick.text }, if in_tray() { 9.5 } else { tick_size }, if in_tray() { fn() { tone(0x8C929DFFL, 0x727782FFL) } } else if tick.major { ui_text } else { ui_muted }, weight=if tick.major {
           600
         } else {
           500

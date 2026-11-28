@@ -69,7 +69,7 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
       }
       b
       .height(view::Live::Is(Some(app_h)))
-      .ground(view::Live::By(c_s4))
+      .ground(view::Live::By(if in_tray() { fn() { tone(0x343741FFL, 0xE2E5ECFFL) } } else { c_s4 }))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
       .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), 0.0) }))
@@ -121,6 +121,7 @@ fn app_icon(parent : view::View, process : String, size? : Double) -> Unit {
   }}
 
 fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
+  let tray = in_tray()
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
     // Quantize visible range and 1.5x zoom buckets so overview drag/resize does not rebuild label nodes every frame.
@@ -184,8 +185,12 @@ fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
           app_icon(lab, app, size=14.0)
           lab.box(fn(n) {
             // Override default text min-width so short stretches can shrink and ellipsize.
-            n.laid_nowhere(view::Live::By(fn() { span().1 < 52.0 })).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
-            words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { (name_halo, c_s2()) })) |> ignore
+            n.laid_nowhere(view::Live::By(fn() { span().1 < (if tray { 104.0 } else { 52.0 }) })).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
+            if tray {
+              words(n, fn() { app_name(app) }, 11.5, fn() { tone(0xB3B7C0FFL, 0x4A4E55FFL) }, weight=500) |> ignore
+            } else {
+              words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { (name_halo, c_s2()) })) |> ignore
+            }
           })
           |> ignore
         })
@@ -225,6 +230,11 @@ fn gap_labels(parent : view::View, w : () -> Double) -> Unit {
   })
   |> ignore}
 
+// The tray's marker: a 6 pt dot with a 1.5 pt ring, centred 4.5 pt down a 16 x 9 box.
+fn rim_dot_picture(fill : Int64, ring : Int64) -> pixels::Vector {
+  let circle = fn(r : Double) { "M\{8.0 - r} 4.5a\{r} \{r} 0 1 0 \{2.0 * r} 0a\{r} \{r} 0 1 0 -\{2.0 * r} 0z" }
+  { w: 16.0, h: 9.0, layers: [layer(circle(4.5), ring), layer(circle(3.0), fill)] }}
+
 fn pin_picture(fill : Int64, ground : Int64) -> pixels::Vector {
   {
     w: 16.0,
@@ -257,6 +267,7 @@ fn mark_after(abs : Double) -> Option[Double] {
   next}
 
 fn marks_layer(band : view::View, w : () -> Double) -> Unit {
+  let tray = in_tray()
   band.box(fn(o) {
     o.over(view::Live::Is(true)) |> ignore
     o.each(fn() {
@@ -293,9 +304,9 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
         })
         b
         .width(view::Live::By(fn() { Some(shows()) }))
-        .height(view::Live::Is(Some(21.0)))
+        .height(view::Live::Is(Some(if tray { 9.0 } else { 21.0 })))
         .laid_nowhere(view::Live::By(fn() { x() < 0.0 || x() > w() }))
-        .offset(view::Live::By(fn() { (x() - 8.0, -21.5) }))
+        .offset(view::Live::By(fn() { (x() - 8.0, if tray { -4.5 } else { -21.5 }) }))
         .on_menu(fn(m) {
           let at = abs - t0()
           open_menu(m.wx, m.wy, [
@@ -336,6 +347,15 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
         })
         |> ignore
         b.box(fn(g) {
+          if tray {
+            g
+            .width(view::Live::Is(Some(16.0)))
+            .height(view::Live::Is(Some(9.0)))
+            .picture(view::Live::By(fn() { Some(rim_dot_picture(if covered() { tone(0x6F737EFFL, 0x8E939EFFL) } else { ui_text() }, c_s1())) }))
+            .scale(view::Live::By(fn() { match grow { Option::Some(way) => way.shown(g); Option::None => 1.0 } }), about=view::Pivot::At(0.5, 0.5))
+            |> ignore
+            return
+          }
           g
           .width(view::Live::Is(Some(16.0)))
           .height(view::Live::Is(Some(21.0)))
@@ -359,11 +379,11 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
         }
         g
         .width(view::Live::Is(Some(16.0)))
-        .height(view::Live::Is(Some(21.0)))
+        .height(view::Live::Is(Some(if tray { 9.0 } else { 21.0 })))
         .laid_nowhere(view::Live::By(fn() { mark_pointed.get() is None || x() < 0.0 || x() > w() }))
-        .offset(view::Live::By(fn() { (x() - 8.0, -21.5) }))
-        .picture(view::Live::By(fn() { Some(pin_picture(ui_text(), c_bg())) }))
-        .scale(view::Live::Is(pin_scale), about=view::Pivot::At(0.5, 0.976))
+        .offset(view::Live::By(fn() { (x() - 8.0, if tray { -4.5 } else { -21.5 }) }))
+        .picture(view::Live::By(fn() { Some(if tray { rim_dot_picture(ui_text(), c_s1()) } else { pin_picture(ui_text(), c_bg()) }) }))
+        .scale(view::Live::Is(if tray { 1.0 } else { pin_scale }), about=view::Pivot::At(0.5, if tray { 0.5 } else { 0.976 }))
         |> ignore
       })
       |> ignore

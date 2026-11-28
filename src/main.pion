@@ -651,7 +651,6 @@ fn timeline_tray(parent : view::View) -> Unit {
       .radius(view::Live::Is(8.0))
       .ground(view::Live::By(c_s1))
       .edge(view::Live::By(fn() { (0.75, hair()) }))
-      .padding(view::Live::Is((10.0, 0.0, 10.0, 6.0)))
       |> ignore
       timeline(well)
     })

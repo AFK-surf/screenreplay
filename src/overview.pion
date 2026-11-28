@@ -65,9 +65,18 @@ fn overview_drag(d : view::Drag, w : Double) -> Unit {
     }
   }}
 
-fn overview(parent : view::View) -> Unit {
+// tray: the floating tray's bay, flush to the well on a quiet ground under a hairline, the trough recessed, the
+// recorded stretches darker in it, the viewport an outlined frame.
+fn overview(parent : view::View, tray? : Bool) -> Unit {
+  let tray = match tray { Some(__mbt_v) => __mbt_v, None => false }
+  if tray {
+    parent.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).margin(view::Live::Is((0.0, 3.0, 0.0, 0.0))).ground(view::Live::By(fn() { tone(0xFFFFFF14L, 0x17181B14L) })) |> ignore }) |> ignore
+  }
   parent.box(fn(row) {
-    row.row(view::Live::Is(true)).margin(view::Live::Is((0.0, 4.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    row.row(view::Live::Is(true)).margin(view::Live::Is(if tray { (0.0, 0.0, 0.0, 0.0) } else { (0.0, 4.0, 0.0, 0.0) })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    if tray {
+      row.padding(view::Live::Is((6.0, 1.0, 6.0, 1.0))).radius(view::Live::Is(8.0)).ground(view::Live::By(fn() { tone(0x141518FFL, 0xF1F2F6FFL) })) |> ignore
+    }
     row.box(fn(cell) {
       cell.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))) |> ignore
       cell.by_room(fn(track, room) {
@@ -134,9 +143,11 @@ fn overview(parent : view::View) -> Unit {
             if width <= 0.0 {
               return None
             }
-            let layers : Array[pixels::VectorPath] = [
-              layer(hatch_d(0.0, width, 4.0), 0L, stroke=tone(0xFFFFFF17L, 0x00000017L), width=1.0),
-            ]
+            let layers : Array[pixels::VectorPath] = if tray {
+              [layer(rect_d(0.0, 0.0, width, 4.0), tone(0xFFFFFF0FL, 0x17181B12L))]
+            } else {
+              [layer(hatch_d(0.0, width, 4.0), 0L, stroke=tone(0xFFFFFF17L, 0x00000017L), width=1.0)]
+            }
             let vl = view_len()
             let spans = match axis_now.get() {
               Option::Some(a) => a.ks
@@ -146,10 +157,12 @@ fn overview(parent : view::View) -> Unit {
               let a = clamp(ax_d(r.0, vl) * k(), 0.0, width)
               let z = clamp(ax_d(r.1, vl) * k(), 0.0, width)
               if z - a >= 1.0 {
-                layers.push(layer(rect_d(a, 0.0, z - a, 4.0), c_s4()))
+                layers.push(layer(rect_d(a, 0.0, z - a, 4.0), if tray { tone(0xFFFFFF3DL, 0x17181B3DL) } else { c_s4() }))
               }
             }
-            layers.push(layer(rect_d(0.5, 0.5, width - 1.0, 3.0), 0L, stroke=hair(), width=1.0))
+            if !tray {
+              layers.push(layer(rect_d(0.5, 0.5, width - 1.0, 3.0), 0L, stroke=hair(), width=1.0))
+            }
             Some(pixels::Vector::{ w: width, h: overview_h, layers: arr_map(layers, fn(l) { pixels::VectorPath::{ d: l.d, fill: l.fill, stroke: l.stroke, width: l.width, even_odd: l.even_odd, sx: l.sx, sy: l.sy, tx: l.tx, ty: (overview_h - 4.0) / 2.0 } }) })
           }))
           |> ignore
@@ -161,8 +174,8 @@ fn overview(parent : view::View) -> Unit {
             f
             .height(view::Live::Is(Some(overview_h)))
             .radius(view::Live::Is(2.5))
-            .ground(view::Live::By(fn() { tone(0xEDEEF02EL, 0x17181B2EL) }))
-            .edge(view::Live::By(fn() { (1.0, tone(0xEDEEF066L, 0x17181B52L)) }))
+            .ground(view::Live::By(fn() { if tray { tone(0xEDEEF01CL, 0x17181B0FL) } else { tone(0xEDEEF02EL, 0x17181B2EL) } }))
+            .edge(view::Live::By(fn() { if tray { (1.25, tone(0xEDEEF0C7L, 0x17181BB3L)) } else { (1.0, tone(0xEDEEF066L, 0x17181B52L)) } }))
             .width(view::Live::By(fn() { Some(finder(w()).1) }))
             .offset(view::Live::By(fn() { (finder(w()).0, 0.0) }))
             |> ignore

@@ -175,7 +175,104 @@ fn drawn_spans(w : Double, from : Double, len : Double) -> Array[(Double, Double
   }
   out}
 
+// The floating tray draws its timeline flatter (Neon's tray design): the app lane a solid row with hairlines
+// between named apps, runs of switches too short for an icon one recessed stretch with micro ticks, a recording
+// gap a groove with two marks, the waveform and tick rows each on their own quiet ground.
+fn in_tray() -> Bool {
+  signals::untracked(dock_floats)}
+
+fn tray_grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Vector] {
+  if w <= 0.0 || len <= 0.0 || segs.is_empty() {
+    return Option::None
+  }
+  let x_of = fn(at : Double) { clamp((at - from) / len * w, 0.0, w) }
+  let lane = StringBuilder()
+  let burst = StringBuilder()
+  let ticks = StringBuilder()
+  let cuts = StringBuilder()
+  let mut b_from = -1.0
+  let mut b_to = -1.0
+  let mut last_tick = -100.0
+  let mut last_end = -1.0e300
+  for p in pieces_now.get() {
+    if p.1 <= from || p.0 >= from + len {
+      last_end = p.1
+      continue
+    }
+    let a = x_of(p.0)
+    let b = x_of(p.1)
+    lane.write_string(rect_d(a, 0.0, b - a, app_h))
+    let joined = p.0 - last_end <= 1.0
+    if b - a >= 30.0 {
+      if b_from >= 0.0 {
+        burst.write_string(rect_d(b_from, 0.0, b_to - b_from, app_h))
+        b_from = -1.0
+      }
+      if joined {
+        cuts.write_string(rect_d(a - 0.5, 0.0, 1.0, app_h))
+      }
+    } else {
+      if b_from < 0.0 || !joined {
+        if b_from >= 0.0 {
+          burst.write_string(rect_d(b_from, 0.0, b_to - b_from, app_h))
+        }
+        if joined {
+          cuts.write_string(rect_d(a - 0.5, 0.0, 1.0, app_h))
+        }
+        b_from = a
+        last_tick = a
+      } else if a - last_tick >= 3.0 {
+        ticks.write_string(rect_d(a - 0.5, 7.0, 1.0, 10.0))
+        last_tick = a
+      }
+      b_to = b
+    }
+    last_end = p.1
+  }
+  if b_from >= 0.0 {
+    burst.write_string(rect_d(b_from, 0.0, b_to - b_from, app_h))
+  }
+  let grooves = StringBuilder()
+  let marks = StringBuilder()
+  for g in gaps_now.get() {
+    if g.1 <= from || g.0 >= from + len {
+      continue
+    }
+    let a = x_of(g.0)
+    let b = x_of(g.1)
+    if b - a >= 2.0 {
+      grooves.write_string(rect_d(a, 0.0, b - a, app_h))
+      cuts.write_string(rect_d(a - 0.5, 0.0, 1.0, app_h))
+      cuts.write_string(rect_d(b - 0.5, 0.0, 1.0, app_h))
+      let c = (a + b) / 2.0
+      if b - a >= 8.0 {
+        marks.write_string(rect_d(c - 2.25, 7.5, 1.0, 9.0))
+        marks.write_string(rect_d(c + 1.25, 7.5, 1.0, 9.0))
+      }
+    }
+  }
+  let layers : Array[pixels::VectorPath] = [
+    layer(rect_d(0.0, app_h, w, strip_h - app_h), tone(0x1E1F24FFL, 0xFAFBFDFFL)),
+    layer(rect_d(0.0, app_h, w, 1.0), tone(0xFFFFFF0FL, 0x17181B0FL)),
+    layer(rect_d(0.0, strip_h, w, 1.0), tone(0xFFFFFF0FL, 0x17181B0FL)),
+  ]
+  let add = fn(d : String, ink : Int64) {
+    if d != "" {
+      layers.push(layer(d, ink))
+    }
+  }
+  add(lane.to_string(), tone(0x24262CFFL, 0xF2F3F7FFL))
+  add(burst.to_string(), tone(0x2A2C34FFL, 0xEAECEFFFL))
+  add(grooves.to_string(), tone(0x121316FFL, 0xE2E5EBFFL))
+  add(ticks.to_string(), tone(0xFFFFFF38L, 0x17181B38L))
+  add(marks.to_string(), tone(0xFFFFFF42L, 0x17181B47L))
+  add(cuts.to_string(), tone(0xFFFFFF14L, 0x17181B14L))
+  Option::Some({ w: w, h: strip_h + 1.0, layers: layers })}
+
 fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Vector] {
+  if in_tray() {
+    return tray_grounds_picture(w, from, len)
+  }
   if w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return Option::None
   }
@@ -693,7 +790,8 @@ fn block_wheel(e : view::Wheel, x : Double, w : Double) -> Unit {
 fn timeline(parent : view::View) -> Unit {
   parent.by_room(fn(held, room) {
     hover_node.v = Some(held)
-    held.padding(view::Live::Is((0.0, dock_over, 0.0, 0.0))) |> ignore
+    let tray = in_tray()
+    held.padding(view::Live::Is((0.0, if tray { 0.0 } else { dock_over }, 0.0, 0.0))) |> ignore
     let w = fn() { room.width() }
     held.on_wheel(fn(e) { block_wheel(e, e.x, room.width()) }) |> ignore
     held.presses(view::Live::Is(true)).on_drag(fn(d) { band_drag(d, room.width()) }, captures=true) |> ignore
@@ -734,6 +832,7 @@ fn timeline(parent : view::View) -> Unit {
         .over(view::Live::Is(true))
         .presses(view::Live::Is(false))
         .clips(view::Live::Is(true))
+        .radius(view::Live::Is(if tray { 8.0 } else { 0.0 }))
         |> ignore
         let dim = motion::NodeWay::new(if clipping.untracked() { 0.45 } else { 1.0 })
         s.reacts(fn() { clipping.get() }, fn(on) { dim.go_ms(s, if on { 0.45 } else { 1.0 }, if motion_off() { 1.0 } else { 160.0 }) })
@@ -758,7 +857,7 @@ fn timeline(parent : view::View) -> Unit {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(g) {
             g
-            .height(view::Live::Is(Some(strip_h)))
+            .height(view::Live::Is(Some(if tray { strip_h + 1.0 } else { strip_h })))
             .width(view::Live::By(fn() { Some(cover.get().2) }))
             .drawn_off(view::Live::By(fn() { slid(g) }), exact=true)
             .picture(view::Live::By(fn() {
@@ -820,7 +919,7 @@ fn timeline(parent : view::View) -> Unit {
           clamp((ax_d(pos_drawn(v), view_len()) - from) / len * w(), 0.0, w())
         }
         // (no activity strip in the floating tray)
-        for played in (if signals::untracked(dock_floats) { [] } else { [true, false] }) {
+        for played in (if tray { [] } else { [true, false] }) {
           band.box(fn(o) {
             // Clip outer container to band width so the played-side overscan cannot bleed left past the band.
             o
@@ -865,7 +964,7 @@ fn timeline(parent : view::View) -> Unit {
             .width(view::Live::By(fn() { Some(loud_cover.get().2) }))
             .drawn_off(view::Live::By(fn() { loud_slid(l) }), exact=true)
             .picture(view::Live::By(fn() { loud.get() }))
-            .tint(view::Live::By(fn() { tone(0xEDEEF033L, 0x17181B29L) }))
+            .tint(view::Live::By(fn() { if tray { tone(0xEDEEF01FL, 0x17181B17L) } else { tone(0xEDEEF033L, 0x17181B29L) } }))
             |> ignore
           })
           |> ignore
@@ -893,7 +992,7 @@ fn timeline(parent : view::View) -> Unit {
               .height(view::Live::Is(Some(strip_h)))
               .drawn_off(view::Live::By(fn() { (w() - played(l) + loud_slid(l).0, 0.0) }), exact=true)
               .picture(view::Live::By(fn() { loud.get() }))
-              .tint(view::Live::By(fn() { tone(0xEDEEF046L, 0x17181B37L) }))
+              .tint(view::Live::By(fn() { if tray { tone(0xEDEEF042L, 0x17181B2EL) } else { tone(0xEDEEF046L, 0x17181B37L) } }))
               |> ignore
             })
             |> ignore
@@ -939,7 +1038,7 @@ fn timeline(parent : view::View) -> Unit {
     })
     |> ignore
     window_strip(held, w)
-    overview(held)
+    overview(held, tray=tray)
   })
   |> ignore}
 fn __mbt_local_edge_scroll_step_12(band : view::View, w : Double, last : Double) -> Unit {
