@@ -1,3 +1,4 @@
+import "lg"
 import "kit"
 import "mbt_compat"
 import "motion"
@@ -168,12 +169,6 @@ fn menu_layer(root : view::View) -> Unit {
         panel
         .alpha(view::Live::By(fn() { open.shown(panel) }))
         .scale(view::Live::By(fn() { if motion_off() { 1.0 } else { 0.96 + 0.04 * open.shown(panel) } }), about=if menu_above.v { view::Pivot::At(0.5, 1.0) } else { view::Pivot::At(1.0, 0.0) })
-        .min_width(view::Live::Is(Some(200.0)))
-        .pad(view::Live::Is(4.0))
-        .ground(view::Live::By(c_s2))
-        .radius(view::Live::Is(10.0))
-        .edge(view::Live::By(fn() { (1.0, hair2()) }))
-        .shadow(view::Live::By(fn() { (32.0, 12.0, sheet_shadow()) }))
         .presses(view::Live::Is(true))
         |> ignore
         match menu_anchor.v {
@@ -205,56 +200,35 @@ fn menu_layer(root : view::View) -> Unit {
           }
         }))
         |> ignore
-        panel.each(fn() {
+        lg::liquid_menu_panel_node(panel, fn() {
           match menu_shown.get() {
-            Option::Some((_, _, es)) => mbt_compat::arr_makei(es.length(), fn(i) { i })
-            Option::None => []
-          }
-        }, fn(i : Int) -> Int { i }, fn(row, i) {
-          let entry = signals::untracked(fn() {
-            match menu_shown.get() {
-              Option::Some((_, _, es)) if i.get() < es.length() => es[i.get()]
-              _ => None
-            }
-          })
-          match entry {
-            None => {
-              row.padding(view::Live::Is((0.0, 4.0, 0.0, 4.0))) |> ignore
-              rule(row, hair)
-            }
-            Some(e) =>
-              pressable(row, fn() { e.label }, fn() {
-                close_menu()
-                (e.act)()
-              }, fn(b) {
-                b
-                .row(view::Live::Is(true))
-                .height(view::Live::Is(Some(32.0)))
-                .padding(view::Live::Is((10.0, 0.0, 10.0, 0.0)))
-                .gap(view::Live::Is(10.0))
-                .radius(view::Live::Is(6.0))
-                .lines_up(view::Live::Is(Some(view::Along::Middle)))
-                .cursor(view::Live::Is(Some(view::Cursor::Arrow)))
-                .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
-                .ground(view::Live::By(fn() { if b.pointed() || b.focus_shown() { c_s3() } else { 0L } }))
-                |> ignore
-                b.box(fn(l) {
-                  l.grow(view::Live::Is(1.0)) |> ignore
-                  words(l, fn() { e.label }, 13.0, ui_text, weight=if e.key == "✓" { 500 } else { 400 }) |> ignore
-                })
-                |> ignore
-                if e.key == "✓" {
-                  b.box(fn(ck) {
-                    ck.width(view::Live::Is(Some(14.0))).height(view::Live::Is(Some(14.0))).picture(view::Live::Is(Some(vector("M2.5 7.5l3.2 3.2 5.8-6.4", 14.0, 14.0, stroke=1.7)))).tint(view::Live::By(ui_text)) |> ignore
-                  })
-                  |> ignore
-                } else if e.key != "" {
-                  kbd(b, e.key)
+            Option::Some((_, _, es)) => {
+              let mut checks = false
+              for e in es {
+                match e {
+                  Some(m) if m.key == "✓" => checks = true
+                  _ => ()
+                }
+              }
+              arr_map(es, fn(e) {
+                match e {
+                  None => lg::LiquidMenuEntry::separator()
+                  Some(m) =>
+                    if checks {
+                      lg::LiquidMenuEntry::check(label=m.label, checked=fn() { m.key == "✓" }, on_toggle=fn() {
+                        close_menu()
+                        (m.act)()
+                      })
+                    } else {
+                      lg::LiquidMenuEntry::item(label=m.label, on_select=m.act, shortcut=m.key)
+                    }
                 }
               })
-              |> ignore
+            }
+            Option::None => []
           }
-        }, at_once=true)
+        }, close_menu, min_width=200.0)
+        |> ignore
       })
       |> ignore
     }, at_once=true)
