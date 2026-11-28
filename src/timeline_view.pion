@@ -1,3 +1,4 @@
+import "hostapi"
 import "mbt_compat"
 import "motion"
 import "pixels"
@@ -185,7 +186,7 @@ fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Ve
   for sp in drawn_spans(w, from, len) {
     let (a, b) = sp
     if b - a >= 2.0 {
-      fill.write_string(rect_d(a, 0.0, b - a - 1.0, strip_h))
+      fill.write_string(rect_d(a, 0.0, b - a - 1.0, app_h))
     }
   }
   for g in gaps_now.get() {
@@ -239,7 +240,7 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
     if s >= 26.0 {
       any = true
       // Input is -50..0 dB mapped to 0..255; gamma 1.6 prevents typical -20 dB audio from pegging the top.
-      top_y[i] = r(strip_h - mbt_compat::math_pow(s / 255.0, 1.6) * (strip_h - 6.0))
+      top_y[i] = r(strip_h - mbt_compat::math_pow(s / 255.0, 1.6) * (wave_h - 1.0))
     }
   }
   if !any {
@@ -608,6 +609,9 @@ fn band_moved(x : Double, w : Double) -> Unit {
     _ => ()
   }}
 
+fn move_held() -> Bool {
+  (hostapi::mods_held() & (if is_mac() { ui::mod_cmd } else { ui::mod_ctrl })) != 0}
+
 fn band_drag(d : view::Drag, w : Double) -> Unit {
   if w <= 0.0 {
     return
@@ -619,7 +623,7 @@ fn band_drag(d : view::Drag, w : Double) -> Unit {
       region_let_go()
       let edge = near_edge(at, w)
       let (a, b) = (clip_a.untracked(), clip_b.untracked())
-      let inside = clipping.untracked() && edge == 0 && at > a && at < b
+      let inside = clipping.untracked() && edge == 0 && at > a && at < b && move_held()
       clip_moved.v = false
       clip_origin.v = a
       // Record press x manually (raw drag events update origin to current position).
@@ -696,13 +700,14 @@ fn timeline(parent : view::View) -> Unit {
     held.box(fn(band) {
       band_node.v = Some(band)
       band
-      .height(view::Live::Is(Some(strip_h)))
+      .height(view::Live::Is(Some(strip_h + tick_lane)))
       .presses(view::Live::Is(true))
       .cursor(view::Live::By(fn() {
         Some(
           match grabbed.get() {
             1 | 2 => view::Cursor::ResizeX
-            3 | 4 => view::Cursor::Arrow
+            3 => view::Cursor::Arrow
+            4 => view::Cursor::Grabbing
             _ =>
               match (clipping.get(), hover_now()) {
                 (true, Some(x)) => {
@@ -920,6 +925,8 @@ fn timeline(parent : view::View) -> Unit {
       |> ignore
       marks_layer(band, w)
       clip_layer(band, w)
+      clip_hint(band, w)
+      clip_pace(band, w)
       hover_line(band, w)
       playhead(band, w)
       away_chip(band, w)

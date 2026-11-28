@@ -12,6 +12,9 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <vector>
+
+#include "wsola.h"
 
 namespace {
 
@@ -44,11 +47,12 @@ struct ExportJob {
   int bitrate = 4000000;
   int codec = kH264;
   double scale = 1.0;
+  double speed = 1.0;
   double total_ms = 0.0;
 };
 
 static bool parse_export_job(const std::string &plan_str, const std::string &crops_str,
-                             int width, int height, int fps, int bitrate, int codec, double scale,
+                             int width, int height, int fps, int bitrate, int codec, double scale, double speed,
                              const std::string &output, ExportJob &job) {
   job = ExportJob{};
   job.output = output;
@@ -56,6 +60,7 @@ static bool parse_export_job(const std::string &plan_str, const std::string &cro
   job.fps = std::max(1, std::min(120, fps > 0 ? fps : 30));
   job.bitrate = std::max(100000, bitrate > 0 ? bitrate : 4000000);
   job.scale = (scale > 0.0 && scale <= 1.0) ? scale : 1.0;
+  job.speed = (speed >= 0.25 && speed <= 32.0) ? speed : 1.0;
   if (codec == kGif) {
     job.width = std::max(2, width);
     job.height = std::max(2, height);
@@ -168,6 +173,24 @@ static std::atomic<double> g_export_prog{0.0};
 static std::atomic<int32_t> g_export_fail{0};
 static std::atomic<bool> g_export_cancel{false};
 
+// Stretched 16-bit stereo PCM appended at a frame count of 48 kHz.
+static bool append_pcm(AVAssetWriterInput *input, CMFormatDescriptionRef fmt, const std::vector<int16_t> &pcm, int64_t at) {
+  if (pcm.empty() || !fmt) return true;
+  const size_t bytes = pcm.size() * sizeof(int16_t);
+  CMBlockBufferRef block = nullptr;
+  if (CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, nullptr, bytes, kCFAllocatorDefault, nullptr, 0, bytes,
+                                         kCMBlockBufferAssureMemoryNowFlag, &block) != noErr || !block) return false;
+  CMBlockBufferReplaceDataBytes(pcm.data(), block, 0, bytes);
+  CMSampleBufferRef sb = nullptr;
+  OSStatus st = CMAudioSampleBufferCreateReadyWithPacketDescriptions(kCFAllocatorDefault, block, fmt, (CMItemCount)(pcm.size() / 2),
+                                                                     CMTimeMake(at, 48000), nullptr, &sb);
+  CFRelease(block);
+  if (st != noErr || !sb) return false;
+  BOOL ok = [input appendSampleBuffer:sb];
+  CFRelease(sb);
+  return ok;
+}
+
 static int run_video_export(const ExportJob &job) {
   @autoreleasepool {
     unlink(job.output.c_str());
@@ -236,7 +259,7 @@ static int run_video_export(const ExportJob &job) {
     }
 
     AVAssetWriterInput *aInput = nil;
-    if (anyAudioSource) {
+    if (anyAudioSource && job.speed <= 4.0) {
       AudioChannelLayout acl = {};
       acl.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo;
       NSDictionary *aSettings = @{
@@ -355,18 +378,19 @@ static int run_video_export(const ExportJob &job) {
           CMTime pts = CMSampleBufferGetPresentationTimeStamp(sb);
           double src_ms = CMTimeGetSeconds(pts) * 1000.0;
           double clip_ms = seg.offset_ms + std::max(0.0, src_ms - seg.trim_ms);
-          if (clip_ms + step_ms * 0.35 >= next_due_ms) {
+          double out_ms = clip_ms / jobPtr->speed;
+          if (out_ms + step_ms * 0.35 >= next_due_ms) {
             CVImageBufferRef imgBuf = CMSampleBufferGetImageBuffer(sb);
             CVPixelBufferRef dstBuf = nullptr;
             if (imgBuf && adaptor.pixelBufferPool &&
                 CVPixelBufferPoolCreatePixelBuffer(nullptr, adaptor.pixelBufferPool, &dstBuf) == kCVReturnSuccess && dstBuf) {
               CropStep cs = crop_at(jobPtr->crops, clip_ms);
               if (render_cropped_pixelbuffer(ciCtx, imgBuf, jobPtr->scale, cs, dstBuf, jobPtr->width, jobPtr->height)) {
-                int64_t ticks = (int64_t)std::llround(clip_ms * 60.0);
+                int64_t ticks = (int64_t)std::llround(out_ms * 60.0);
                 if (ticks <= last_pts_ticks) ticks = last_pts_ticks + 1;
                 last_pts_ticks = ticks;
                 [adaptor appendPixelBuffer:dstBuf withPresentationTime:CMTimeMake(ticks, 60000)];
-                next_due_ms = clip_ms + step_ms;
+                next_due_ms = out_ms + step_ms;
                 g_export_prog.store(std::min(0.99, clip_ms / jobPtr->total_ms));
               }
               CVPixelBufferRelease(dstBuf);
@@ -385,10 +409,28 @@ static int run_video_export(const ExportJob &job) {
       __block AVAssetReaderTrackOutput *aOut = nil;
       __block int64_t last_audio_sample = -1;
       __block bool aFinished = false;
+      const bool sped = jobPtr->speed != 1.0;
+      __block Wsola *stretch = sped ? new Wsola(jobPtr->speed) : nullptr;
+      __block CMFormatDescriptionRef pcmFormat = nullptr;
+      __block double fed_to_ms = 0.0;
+      __block int64_t audio_out = 0;
 
       auto finishAudio = ^{
         if (aFinished) return;
         aFinished = true;
+        if (stretch) {
+          std::vector<int16_t> tail;
+          stretch->feed(nullptr, 0, true, tail);
+          const int64_t most = (int64_t)(jobPtr->total_ms / jobPtr->speed * 48.0) - audio_out;
+          if ((int64_t)tail.size() / 2 > most) tail.resize((size_t)std::max<int64_t>(0, most) * 2);
+          if (aInput.isReadyForMoreMediaData) append_pcm(aInput, pcmFormat, tail, audio_out);
+          delete stretch;
+          stretch = nullptr;
+        }
+        if (pcmFormat) {
+          CFRelease(pcmFormat);
+          pcmFormat = nullptr;
+        }
         if (aReader) {
           [aReader cancelReading];
           aReader = nil;
@@ -469,6 +511,26 @@ static int run_video_export(const ExportJob &job) {
             CMTime pts = CMSampleBufferGetPresentationTimeStamp(asb);
             double src_ms = CMTimeGetSeconds(pts) * 1000.0;
             double clip_ms = seg.offset_ms + std::max(0.0, src_ms - seg.trim_ms);
+            if (stretch) {
+              if (!pcmFormat) {
+                pcmFormat = CMSampleBufferGetFormatDescription(asb);
+                if (pcmFormat) CFRetain(pcmFormat);
+              }
+              CMItemCount frames = CMSampleBufferGetNumSamples(asb);
+              std::vector<int16_t> pcm((size_t)frames * 2);
+              CMBlockBufferRef data = CMSampleBufferGetDataBuffer(asb);
+              if (data && frames > 0 && CMBlockBufferCopyDataBytes(data, 0, pcm.size() * sizeof(int16_t), pcm.data()) == noErr) {
+                std::vector<int16_t> out;
+                if (clip_ms > fed_to_ms + 1.0) stretch->feed(nullptr, (long)((clip_ms - fed_to_ms) * 48.0), false, out);
+                const int64_t skip = clip_ms < fed_to_ms ? std::min<int64_t>(frames, (int64_t)((fed_to_ms - clip_ms) * 48.0)) : 0;
+                stretch->feed(pcm.data() + skip * 2, (long)(frames - skip), false, out);
+                fed_to_ms = std::max(fed_to_ms, clip_ms + frames / 48.0);
+                append_pcm(aInput, pcmFormat, out, audio_out);
+                audio_out += (int64_t)(out.size() / 2);
+              }
+              CFRelease(asb);
+              continue;
+            }
             int64_t startSample = (int64_t)std::llround(clip_ms * 48.0);
             if (startSample <= last_audio_sample) startSample = last_audio_sample + 1;
             CMItemCount numSamples = CMSampleBufferGetNumSamples(asb);
@@ -518,7 +580,7 @@ static bool encode_gif_common(const ExportJob &job, bool to_file, std::atomic<bo
   @autoreleasepool {
     CIContext *ciCtx = [CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer : @NO}];
     const double step_ms = 1000.0 / (double)job.fps;
-    const int expected_frames = std::max(1, (int)std::ceil(job.total_ms / step_ms));
+    const int expected_frames = std::max(1, (int)std::ceil(job.total_ms / job.speed / step_ms));
     const int stride_frames = (max_sample_frames > 0 && expected_frames > max_sample_frames)
                                   ? std::max(1, expected_frames / max_sample_frames)
                                   : 1;
@@ -604,8 +666,9 @@ static bool encode_gif_common(const ExportJob &job, bool to_file, std::atomic<bo
           CMTime pts = CMSampleBufferGetPresentationTimeStamp(sb);
           double src_ms = CMTimeGetSeconds(pts) * 1000.0;
           double clip_ms = seg.offset_ms + std::max(0.0, src_ms - seg.trim_ms);
-          if (clip_ms + step_ms * 0.35 >= next_due_ms) {
-            next_due_ms = clip_ms + step_ms;
+          double out_ms = clip_ms / job.speed;
+          if (out_ms + step_ms * 0.35 >= next_due_ms) {
+            next_due_ms = out_ms + step_ms;
             if ((frame_idx % stride_frames) == 0 && added < target_count) {
               CVImageBufferRef imgBuf = CMSampleBufferGetImageBuffer(sb);
               CropStep cs = crop_at(job.crops, clip_ms);
@@ -686,12 +749,12 @@ static void gif_estimator_loop() {
 }
 
 extern "C" int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output, int32_t width, int32_t height, int32_t fps,
-                                   int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale) {
+                                   int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale, double speed) {
   std::lock_guard<std::mutex> lock(g_export_mu);
   if (g_export_state.load() == 1) return -1;
 
   ExportJob job;
-  if (!parse_export_job(rp_str(plan), rp_str(crops), width, height, fps, bitrate, codec, scale, rp_str(output), job)) {
+  if (!parse_export_job(rp_str(plan), rp_str(crops), width, height, fps, bitrate, codec, scale, speed, rp_str(output), job)) {
     return -2;
   }
 
@@ -729,9 +792,9 @@ extern "C" int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output,
 }
 
 extern "C" void rp_gif_estimate_start(moonbit_bytes_t plan, int32_t width, int32_t height, int32_t fps,
-                                      moonbit_bytes_t crops, double scale) {
+                                      moonbit_bytes_t crops, double scale, double speed) {
   ExportJob job;
-  bool valid = parse_export_job(rp_str(plan), rp_str(crops), width, height, fps, 0, kGif, scale, "", job);
+  bool valid = parse_export_job(rp_str(plan), rp_str(crops), width, height, fps, 0, kGif, scale, speed, "", job);
   std::lock_guard<std::mutex> lock(g_est_mu);
   g_est_stop.store(true);
   if (!valid) {

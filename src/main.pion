@@ -309,7 +309,7 @@ fn set_full_screen(on : Bool) -> Unit {
 
 fn controls(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    row.row(view::Live::Is(true)).height(view::Live::Is(Some(32.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    row.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     let play_key = fn(b : view::View, press : () -> Unit) { play_button(b, press) }
     row.box(fn(left) {
       left.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).clips(view::Live::Is(true)) |> ignore
@@ -318,6 +318,7 @@ fn controls(parent : view::View) -> Unit {
         if clip {
           window_bar(b)
         } else {
+          capsule(b, fn(b) {
           icon_button(b, fn() {
               match the_root.v {
                 Some(r) if mark_at_playhead(r) is Some(_) => "bookmark-on"
@@ -346,6 +347,7 @@ fn controls(parent : view::View) -> Unit {
             }, shortcut="full")
           |> ignore
           volume_control(b)
+          }) |> ignore
         }
       }, at_once=true)
     })
@@ -354,17 +356,19 @@ fn controls(parent : view::View) -> Unit {
       mid.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
       let slot_w = 112.0
       mid.box(fn(l) {
-        l.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 6.0, 0.0))) |> ignore
+        l.row(view::Live::Is(true)).width(view::Live::By(fn() { Some(if clipping.get() { slot_w } else { 0.0 }) })).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 10.0, 0.0))) |> ignore
         l.show(fn() { clipping.get() }, fn(b) {
           words(b, fn() {
             let (a, z) = (clip_a.get(), clip_b.get())
             let at = clip_time(clamp(pos_drawn(b), a, z))
-            clock(at) + " / " + clock(clip_kept())
+            let pace = export_speed()
+            clock(at / pace) + " / " + clock(clip_out_len())
           }, 13.0, ui_muted, weight=500) |> ignore
         }, at_once=true)
         |> ignore
       })
       |> ignore
+      capsule(mid, fn(mid) {
       icon_button(mid, fn() { "back-15" }, fn() { t("后退 15 秒") }, fn() { jump_by(-15000.0) }, shortcut="back15") |> ignore
       play_key(mid, fn() {
         if clipping.untracked() {
@@ -378,17 +382,16 @@ fn controls(parent : view::View) -> Unit {
         }
       })
       icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒") }, fn() { jump_by(15000.0) }, shortcut="on15") |> ignore
-      mid.box(fn(r) {
-        r.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Start)).padding(view::Live::Is((6.0, 0.0, 0.0, 0.0))) |> ignore
-        speed_key(r)
-      })
-      |> ignore
+      capsule_rule(mid)
+      speed_key(mid, exports=true)
+      }) |> ignore
+      mid.box(fn(r) { r.width(view::Live::By(fn() { Some(if clipping.get() { slot_w } else { 0.0 }) })) |> ignore }) |> ignore
     })
     |> ignore
     row.box(fn(right) {
       right.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
       right.pick(fn() { clipping.get() }, fn(b, clip) {
-        b.row(view::Live::Is(true)).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        b.row(view::Live::Is(true)).gap(view::Live::Is(if clip { 10.0 } else { 2.0 })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
         if clip {
           window_options_button(b)
           b.box(fn(h) {
@@ -415,7 +418,7 @@ fn controls(parent : view::View) -> Unit {
               let (w, h, _, _, _) = export_plan()
               "\{w}×\{h} · " + size_text()
             } else {
-              clock(clip_kept())
+              clock(clip_out_len())
             }
           })
           tip(save_k, fn() { t("保存片段") }, shortcut="save")
@@ -424,12 +427,16 @@ fn controls(parent : view::View) -> Unit {
             x.padding(view::Live::Is((0.0, 0.0, 2.0, 0.0))) |> ignore
             words(x, filter_summary, 12.0, ui_subtle) |> ignore
           }, at_once=true)
-          apps_key(b)
-          zoom_key(b)
-          b.show(fn() { !follow_latest.get() }, fn(x) {
-            text_button(x, fn() { t("回到最新") }, show_latest, ghost=true) |> ignore
-          }, at_once=true)
-          let clip = text_button(b, fn() { t("剪辑") }, start_clip, icon="scissors")
+          capsule(b, fn(c) {
+            apps_key(c)
+            zoom_key(c)
+            c.show(fn() { !follow_latest.get() }, fn(x) {
+              icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, shortcut="latest") |> ignore
+            }, at_once=true)
+            |> ignore
+          }) |> ignore
+          b.box(fn(s) { s.width(view::Live::Is(Some(6.0))) |> ignore }) |> ignore
+          let clip = solid_icon_button(b, "scissors", fn() { t("剪辑") }, start_clip)
           tip(clip, fn() { t("剪辑") }, shortcut="clip")
         }
       }, at_once=true)
@@ -438,26 +445,27 @@ fn controls(parent : view::View) -> Unit {
   })
   |> ignore}
 
-fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, stage? : Bool) -> Unit {
+fn speed_text(s : Double) -> String {
+  if s == s.floor() {
+    "\{s.to_int()}×"
+  } else {
+    "\{s}×"
+  }}
+
+fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, stage? : Bool, exports? : Bool) -> Unit {
   let now = match now { Some(__mbt_v) => __mbt_v, None => fn() { speed.get() } }
   let set = match set { Some(__mbt_v) => __mbt_v, None => set_speed }
   let stage = match stage { Some(__mbt_v) => __mbt_v, None => false }
+  let exports = match exports { Some(__mbt_v) => __mbt_v, None => false }
 
-  let label = fn() {
-    let s = now()
-    if s == s.floor() {
-      "\{s.to_int()}×"
-    } else {
-      "\{s}×"
-    }
-  }
+  let strong = fn() { exports && clipping.get() && now() != 1.0 }
+  let label = fn() { if strong() { tf("导出 {0}", [speed_text(now())]) } else { speed_text(now()) } }
   let key : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
   let k = pressable(parent, label, fn() {
     guard key.v is Some(b) else { return }
     let chosen = signals::untracked(now)
     open_menu_under(b, arr_map(speeds, fn(s) {
-        let name = if s == s.floor() { "\{s.to_int()}×" } else { "\{s}×" }
-        Some(MenuEntry::{ label: name, key: if s == chosen { "✓" } else { "" }, act: fn() { set(s) } })
+        Some(MenuEntry::{ label: speed_text(s), key: if s == chosen { "✓" } else { "" }, act: fn() { set(s) } })
       }), above=true)
   }, fn(b) {
     let (hand, _) = answer(b)
@@ -470,12 +478,18 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {
-      let on = if stage { stage_hover } else { c_s3() }
-      mix(clear(on), on, hand.shown(b))
+      if strong() {
+        mix(ui_accent(), ui_accent_hover(), hand.shown(b))
+      } else {
+        let on = if stage { stage_hover } else { c_hover() }
+        mix(clear(on), on, hand.shown(b))
+      }
     }))
     |> ignore
     words(b, label, 12.0, fn() {
-      if stage {
+      if strong() {
+        ui_on_accent()
+      } else if stage {
         mix(stage_muted, stage_text, hand.shown(b))
       } else {
         mix(ui_muted(), ui_text(), hand.shown(b))
@@ -484,7 +498,9 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     |> ignore
     b.box(fn(c) {
       c.width(view::Live::Is(Some(10.0))).height(view::Live::Is(Some(10.0))).picture(view::Live::Is(Some(vector("M2.5 3.75 5 6.25 7.5 3.75", 10.0, 10.0, stroke=1.25)))).tint(view::Live::By(fn() {
-        if stage {
+        if strong() {
+          ui_on_accent()
+        } else if stage {
           mix(stage_subtle, stage_muted, hand.shown(b))
         } else {
           mix(ui_subtle(), ui_muted(), hand.shown(b))
@@ -493,6 +509,9 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     })
     |> ignore
   })
+  if exports {
+    tip(k, fn() { if clipping.get() { t("保存的片段也按这个倍速") } else { t("播放速度") } })
+  }
   key.v = Some(k)}
 
 fn zoom_key(parent : view::View) -> Unit {
@@ -520,14 +539,14 @@ fn zoom_key(parent : view::View) -> Unit {
     .height(view::Live::Is(Some(28.0)))
     .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
-    .ground(view::Live::By(fn() { mix(clear(c_s3()), c_s3(), hand.shown(b)) }))
+    .ground(view::Live::By(fn() { mix(clear(c_hover()), c_hover(), hand.shown(b)) }))
     .laid_nowhere(view::Live::By(fn() { !has_segs() }))
     |> ignore
     b.box(fn(g) {
       g
-      .width(view::Live::Is(Some(14.0)))
-      .height(view::Live::Is(Some(14.0)))
-      .picture(view::Live::Is(Some(vectors(14.0, 14.0, [("M1.8 6a4.2 4.2 0 1 0 8.4 0a4.2 4.2 0 1 0-8.4 0z", 1.5), ("M9.2 9.2 12.5 12.5", 1.5)]))))
+      .width(view::Live::Is(Some(16.0)))
+      .height(view::Live::Is(Some(16.0)))
+      .picture(view::Live::Is(Some(vectors(16.0, 16.0, [("M2.5 7.2a4.7 4.7 0 1 0 9.4 0a4.7 4.7 0 1 0-9.4 0z", 1.5), ("M10.6 10.6 13.5 13.5", 1.5)]))))
       .tint(view::Live::By(ink))
       |> ignore
     })
@@ -545,7 +564,7 @@ fn dock(parent : view::View) -> Unit {
   rule(parent, hair)
   parent.box(fn(d) {
     // Top padding (dock_over) lives inside timeline() so hover preview covers the heatmap and margin above it.
-    d.ground(view::Live::By(c_bg)).padding(view::Live::Is((20.0, 0.0, 20.0, 6.0))) |> ignore
+    d.ground(view::Live::By(c_bg)).padding(view::Live::Is((20.0, 0.0, 20.0, 10.0))) |> ignore
     d.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
     d.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
     controls(d)

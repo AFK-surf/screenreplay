@@ -98,6 +98,7 @@ fn glyph_vector(name : String) -> Option[pixels::Vector] {
           ("M8.12 8.12L12 12", 2.25),
         ]),
       )
+    "to-end" => Option::Some(vectors(24.0, 24.0, [("M17 12H3", 2.25), ("M11 18l6-6-6-6", 2.25), ("M21 5v14", 2.25)]))
     "warn-tri" =>
       Option::Some(
         vectors(16.0, 16.0, [
@@ -185,7 +186,7 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))
     .ground(view::Live::By(fn() {
-      let on = if stage { stage_hover } else { c_s3() }
+      let on = if stage { stage_hover } else { c_hover() }
       mix(clear(on), on, hand.shown(b))
     }))
     |> ignore
@@ -196,6 +197,39 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
         mix(ui_muted(), ui_text(), hand.shown(b))
       }
     })
+  })}
+
+fn capsule(parent : view::View, make : (view::View) -> Unit) -> view::View {
+  parent.box(fn(c) {
+    c
+    .row(view::Live::Is(true))
+    .height(view::Live::Is(Some(36.0)))
+    .padding(view::Live::Is((4.0, 0.0, 4.0, 0.0)))
+    .gap(view::Live::Is(2.0))
+    .radius(view::Live::Is(9.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .ground(view::Live::By(c_s1))
+    .edge(view::Live::By(fn() { (1.0, hair()) }))
+    |> ignore
+    make(c)
+  })}
+
+fn capsule_rule(parent : view::View) -> Unit {
+  parent.box(fn(r) { r.width(view::Live::Is(Some(1.0))).height(view::Live::Is(Some(16.0))).margin(view::Live::Is((3.0, 0.0, 3.0, 0.0))).ground(view::Live::By(hair2)) |> ignore }) |> ignore}
+
+fn solid_icon_button(parent : view::View, icon : String, label : () -> String, press : () -> Unit) -> view::View {
+  pressable(parent, label, press, fn(b) {
+    let (hand, _) = answer(b)
+    b
+    .width(view::Live::Is(Some(36.0)))
+    .height(view::Live::Is(Some(36.0)))
+    .radius(view::Live::Is(9.0))
+    .lines_up(view::Live::Is(Some(view::Along::Middle)))
+    .lies_along(view::Live::Is(view::Lies::Middle))
+    .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
+    .ground(view::Live::By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
+    |> ignore
+    glyph(b, fn() { icon }, 16.0, ui_on_accent)
   })}
 
 fn text_button(parent : view::View, label : () -> String, press : () -> Unit, icon? : String, ghost? : Bool, small? : Bool, danger? : Bool) -> view::View {
@@ -303,7 +337,7 @@ fn play_button(parent : view::View, press : () -> Unit, playing? : () -> Bool, s
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))
     .ground(view::Live::By(fn() {
-      let on = if stage { stage_hover } else { c_s3() }
+      let on = if stage { stage_hover } else { c_hover() }
       mix(clear(on), on, hand.shown(b))
     }))
     |> ignore

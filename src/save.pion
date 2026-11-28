@@ -103,8 +103,17 @@ fn h264_estimate(w : Double, h : Double, fps : Int) -> Double {
     1.5
   dmin(150000000.0, dmax(1000000.0, rate))}
 
+fn export_speed() -> Double {
+  if clipping.get() { speed.get() } else { 1.0 }}
+
+fn clip_out_len() -> Double {
+  clip_kept() / export_speed()}
+
+fn no_copy() -> Bool {
+  cropping() || export_speed() != 1.0}
+
 fn mode() -> Int {
-  if cropping() && export_mode.get() == 0 {
+  if no_copy() && export_mode.get() == 0 {
     2
   } else {
     export_mode.get()
@@ -132,7 +141,7 @@ fn h264_fps(codec : Int, w : Int, h : Int, fps : Int) -> Int {
 
 fn export_plan() -> (Int, Int, Int, Double, Int) {
   let (sw, sh, sfps) = source_format()
-  let secs = dmax(1.0, clip_kept() / 1000.0)
+  let secs = dmax(1.0, clip_out_len() / 1000.0)
   let quality = [0.5, 0.75, 1.0][export_quality.get()]
   let codec = format()
   if codec == 3 {
@@ -247,7 +256,7 @@ fn crop_thumb_key() -> Option[String] {
 
 fn export_bytes() -> Double {
   let (a, b) = (clip_a.get(), clip_b.get())
-  let secs = (b - a) / 1000.0
+  let secs = (b - a) / 1000.0 / export_speed()
   if mode() == 0 {
     data()
     let base = t0()
@@ -290,7 +299,7 @@ fn gif_estimate_key() -> String {
   }
   let (w, h, fps, _, _) = export_plan()
   let (crops, scale) = gif_crops()
-  "\{w}x\{h}@\{fps} \{scale}\n\{crops}\n" + clip_plan(clip_a.get(), clip_b.get())}
+  "\{w}x\{h}@\{fps} \{scale} \{export_speed()}\n\{crops}\n" + clip_plan(clip_a.get(), clip_b.get())}
 
 fn gif_crops() -> (String, Double) {
   if cropping() {
@@ -322,7 +331,7 @@ fn keep_gif_estimate(root : view::View) -> Unit {
         }
         let (w, h, fps, _, _) = signals::untracked(export_plan)
         let (crops, scale) = signals::untracked(gif_crops)
-        rp_gif_estimate_start(cstr(clip_plan(clip_a.untracked(), clip_b.untracked())), w, h, fps, cstr(crops), scale)
+        rp_gif_estimate_start(cstr(clip_plan(clip_a.untracked(), clip_b.untracked())), w, h, fps, cstr(crops), scale, signals::untracked(export_speed))
         follow_gif_estimate(root, key)
       }),
     )
@@ -514,7 +523,7 @@ fn export_now(copy : Bool) -> Unit {
   // For cropped GIFs, scale the source frame first so the cropped region matches target GIF width.
   let scale = if codec == 3 && cw > 0 { gif_scale(cw.to_double()) } else { 1.0 }
   let plan = clip_plan(clip_a.untracked(), clip_b.untracked())
-  let r = rp_export_start(cstr(plan), cstr(out), w, h, fps, rate.to_int(), codec, cstr(crops), scale)
+  let r = rp_export_start(cstr(plan), cstr(out), w, h, fps, rate.to_int(), codec, cstr(crops), scale, signals::untracked(export_speed))
   let said = crops.replace("\t", ",").replace("\n", ";")
   hostapi::log("REPLAY export \{r} \{format_label(codec)} \{w}x\{h}@\{fps} rate=\{rate.to_int()} est=\{signals::untracked(export_bytes).to_int()} crops=\{said} \{out}")
   if r == 0 {
@@ -543,7 +552,7 @@ fn follow_export(root : view::View) -> Unit {
     }
     2 => {
       let copied = export_copy.v && rp_copy_file(cstr(out)) == 1
-      let len = signals::untracked(clip_kept)
+      let len = signals::untracked(clip_out_len)
       saved.set(
         tf(if copied { "已保存并复制 {0} 的片段" } else { "已保存 {0} 的片段" }, [
           clock(len),
@@ -571,7 +580,7 @@ fn follow_export(root : view::View) -> Unit {
   }}
 
 fn gif_too_big() -> Bool {
-  format() == 3 && export_bytes() >= 0.0 && (clip_kept() > 20000.0 || export_bytes() > 25.0 * 1048576.0)}
+  format() == 3 && export_bytes() >= 0.0 && (clip_out_len() > 20000.0 || export_bytes() > 25.0 * 1048576.0)}
 
 fn format_hint(f : Int) -> String {
   match f {
@@ -803,7 +812,7 @@ fn export_dialog(root : view::View) -> Unit {
         facts.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).min_width(view::Live::Is(Some(0.0))).gap(view::Live::Is(10.0)) |> ignore
         facts.box(fn(r) {
           r.row(view::Live::Is(true)).gap(view::Live::Is(28.0)) |> ignore
-          export_fact(r, fn() { t("时长") }, fn() { clock(clip_kept()) })
+          export_fact(r, fn() { t("时长") }, fn() { clock(clip_out_len()) })
           export_fact(r, fn() { t("大小") }, size_text)
         })
         |> ignore
@@ -814,7 +823,9 @@ fn export_dialog(root : view::View) -> Unit {
               "\{sw.to_int()}×\{sh.to_int()} · \{sfps} fps · \{recorded_codec} · " + t("不重新编码")
             } else {
               let (w, h, fps, _, codec) = export_plan()
-              "\{w}×\{h} · \{fps} fps · " + format_label(codec) + " · " + (if codec == 3 { t("没有声音") } else { t("重新编码") })
+              let sped = export_speed()
+              let pace = if sped == 1.0 { "" } else { speed_text(sped) + " · " }
+              "\{w}×\{h} · \{fps} fps · " + pace + format_label(codec) + " · " + (if codec == 3 || sped > 4.0 { t("没有声音") } else { t("重新编码") })
             }
           }, 12.0, ui_muted)
         .min_width(view::Live::Is(Some(0.0)))
@@ -849,14 +860,14 @@ fn export_dialog(root : view::View) -> Unit {
     card.box(fn(modes) {
       modes.alpha(view::Live::By(fn() { if running() { 0.45 } else { 1.0 } })) |> ignore
       segmented(modes, fn() {
-          if cropping() {
+          if no_copy() {
             [t("按大小"), t("自定义")]
           } else {
             [t("原样"), t("按大小"), t("自定义")]
           }
-        }, fn() { if cropping() { mode() - 1 } else { export_mode.get() } }, fn(i) {
+        }, fn() { if no_copy() { mode() - 1 } else { export_mode.get() } }, fn(i) {
           if export_out.untracked() == "" {
-            export_mode.set(if signals::untracked(cropping) { i + 1 } else { i })
+            export_mode.set(if signals::untracked(no_copy) { i + 1 } else { i })
           }
         })
     })
@@ -958,7 +969,7 @@ fn export_dialog(root : view::View) -> Unit {
                 if export_bytes() > 25.0 * 1048576.0 {
                   tf("存成 GIF 约 {0}，太大了；存成视频会小得多，也更清楚", [bytes_text(export_bytes())])
                 } else {
-                  tf("这段有 {0}；GIF 没有声音、不能拖动，长片段存成视频更好", [clock(clip_kept())])
+                  tf("这段有 {0}；GIF 没有声音、不能拖动，长片段存成视频更好", [clock(clip_out_len())])
                 }
               }),
 

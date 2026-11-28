@@ -68,7 +68,7 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
         None
       }
       b
-      .height(view::Live::Is(Some(strip_h)))
+      .height(view::Live::Is(Some(app_h)))
       .ground(view::Live::By(c_s4))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
@@ -170,7 +170,7 @@ fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
         }
         b
         .row(view::Live::Is(true))
-        .height(view::Live::Is(Some(strip_h)))
+        .height(view::Live::Is(Some(app_h)))
         .padding(view::Live::Is((9.0, 0.0, 6.0, 0.0)))
         .gap(view::Live::Is(7.0))
         .lines_up(view::Live::Is(Some(view::Along::Middle)))
@@ -340,11 +340,8 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
           .width(view::Live::Is(Some(16.0)))
           .height(view::Live::Is(Some(21.0)))
           .picture(view::Live::By(fn() { Some(pin_picture(if covered() { pin_covered() } else { ui_text() }, c_bg())) }))
+          .scale(view::Live::By(fn() { pin_scale * (match grow { Option::Some(way) => way.shown(g); Option::None => 1.0 }) }), about=view::Pivot::At(0.5, 0.976))
           |> ignore
-          match grow {
-            Option::Some(way) => g.scale(view::Live::By(fn() { way.shown(g) }), about=view::Pivot::At(0.5, 0.976)) |> ignore
-            Option::None => ()
-          }
         })
         |> ignore
         tip(b, fn() { wall(abs) })
@@ -366,6 +363,7 @@ fn marks_layer(band : view::View, w : () -> Double) -> Unit {
         .laid_nowhere(view::Live::By(fn() { mark_pointed.get() is None || x() < 0.0 || x() > w() }))
         .offset(view::Live::By(fn() { (x() - 8.0, -21.5) }))
         .picture(view::Live::By(fn() { Some(pin_picture(ui_text(), c_bg())) }))
+        .scale(view::Live::Is(pin_scale), about=view::Pivot::At(0.5, 0.976))
         |> ignore
       })
       |> ignore
@@ -420,6 +418,91 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
         |> ignore
       }
     }, at_once=true)
+  })
+  |> ignore}
+
+fn clip_hint(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    let ax = fn() { clamp(x_drawn_of(o, clip_a.get(), w()), 0.0, w()) }
+    let bx = fn() { clamp(x_drawn_of(o, clip_b.get(), w()), 0.0, w()) }
+    let on = fn() {
+      if !clipping.get() || layer_over() {
+        return false
+      }
+      match (grabbed.get(), hover_now()) {
+        (4, _) => true
+        (0, Some(x)) => x > ax() + 10.0 && x < bx() - 10.0
+        _ => false
+      }
+    }
+    o.box(fn(r) {
+      r
+      .row(view::Live::Is(true))
+      .lies_along(view::Live::Is(view::Lies::Middle))
+      .lines_up(view::Live::Is(Some(view::Along::Middle)))
+      .height(view::Live::Is(Some(strip_h)))
+      .width(view::Live::By(fn() { Some(dmax(1.0, bx() - ax())) }))
+      .offset(view::Live::By(fn() { (ax(), 0.0) }))
+      .laid_nowhere(view::Live::By(fn() { !on() }))
+      |> ignore
+      r.box(fn(chip) {
+        chip
+        .row(view::Live::Is(true))
+        .height(view::Live::Is(Some(20.0)))
+        .padding(view::Live::Is((8.0, 0.0, 8.0, 0.5)))
+        .radius(view::Live::Is(6.0))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .ground(view::Live::By(c_s1))
+        .edge(view::Live::By(fn() { (1.0, hair2()) }))
+        |> ignore
+        words(chip, fn() {
+          if grabbed.get() == 4 {
+            t("正在移动选区")
+          } else if is_mac() {
+            t("按住 ⌘ 拖动可移动选区")
+          } else {
+            t("按住 Ctrl 拖动可移动选区")
+          }
+        }, 11.0, ui_muted, weight=500) |> ignore
+      })
+      |> ignore
+    })
+    |> ignore
+  })
+  |> ignore}
+
+fn clip_pace(band : view::View, w : () -> Double) -> Unit {
+  band.box(fn(o) {
+    o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
+    let ax = fn() { clamp(x_drawn_of(o, clip_a.get(), w()), 0.0, w()) }
+    let bx = fn() { clamp(x_drawn_of(o, clip_b.get(), w()), 0.0, w()) }
+    o.box(fn(r) {
+      r
+      .row(view::Live::Is(true))
+      .lies_along(view::Live::Is(view::Lies::Middle))
+      .lines_up(view::Live::Is(Some(view::Along::Middle)))
+      .height(view::Live::Is(Some(19.0)))
+      .width(view::Live::By(fn() { Some(dmax(1.0, bx() - ax())) }))
+      .offset(view::Live::By(fn() { (ax(), -23.0) }))
+      .laid_nowhere(view::Live::By(fn() { !clipping.get() || export_speed() == 1.0 }))
+      |> ignore
+      r.box(fn(chip) {
+        chip
+        .row(view::Live::Is(true))
+        .height(view::Live::Is(Some(19.0)))
+        .padding(view::Live::Is((7.0, 0.0, 7.0, 0.5)))
+        .gap(view::Live::Is(4.0))
+        .radius(view::Live::Is(6.0))
+        .lines_up(view::Live::Is(Some(view::Along::Middle)))
+        .ground(view::Live::By(ui_accent))
+        |> ignore
+        words(chip, fn() { speed_text(export_speed()) }, 11.0, ui_on_accent, weight=700) |> ignore
+        words(chip, fn() { clock(clip_kept()) + " → " + clock(clip_out_len()) }, 11.0, ui_on_accent, weight=500) |> ignore
+      })
+      |> ignore
+    })
+    |> ignore
   })
   |> ignore}
 

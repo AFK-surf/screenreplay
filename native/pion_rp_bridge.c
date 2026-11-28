@@ -45,8 +45,8 @@ extern int32_t rp_aac_open(moonbit_bytes_t asc, int32_t rate, int32_t channels);
 extern moonbit_bytes_t rp_aac_decode(int32_t h, moonbit_bytes_t data);
 extern moonbit_bytes_t rp_ts_feed(int32_t h, moonbit_bytes_t data, int32_t from, int32_t flush);
 extern int32_t rp_frame_copy(moonbit_bytes_t path, double ms);
-extern int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output, int32_t width, int32_t height, int32_t fps, int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale);
-extern void rp_gif_estimate_start(moonbit_bytes_t plan, int32_t width, int32_t height, int32_t fps, moonbit_bytes_t crops, double scale);
+extern int32_t rp_export_start(moonbit_bytes_t plan, moonbit_bytes_t output, int32_t width, int32_t height, int32_t fps, int32_t bitrate, int32_t codec, moonbit_bytes_t crops, double scale, double speed);
+extern void rp_gif_estimate_start(moonbit_bytes_t plan, int32_t width, int32_t height, int32_t fps, moonbit_bytes_t crops, double scale, double speed);
 extern int32_t rp_concat_start(moonbit_bytes_t plan, moonbit_bytes_t output);
 extern int32_t rp_copy_file(moonbit_bytes_t path);
 extern int32_t rp_rename(moonbit_bytes_t from, moonbit_bytes_t to);
@@ -263,21 +263,21 @@ int32_t pion_rp_frame_copy(const uint8_t *path, int64_t path_len, double ms) {
   return out;
 }
 
-int32_t pion_rp_export_start(const uint8_t *plan, int64_t plan_len, const uint8_t *output, int64_t output_len, int32_t width, int32_t height, int32_t fps, int32_t bitrate, int32_t codec, const uint8_t *crops, int64_t crops_len, double scale) {
+int32_t pion_rp_export_start(const uint8_t *plan, int64_t plan_len, const uint8_t *output, int64_t output_len, int32_t width, int32_t height, int32_t fps, int32_t bitrate, int32_t codec, const uint8_t *crops, int64_t crops_len, double scale, double speed) {
   moonbit_bytes_t b_plan = mb_from(plan, plan_len);
   moonbit_bytes_t b_output = mb_from(output, output_len);
   moonbit_bytes_t b_crops = mb_from(crops, crops_len);
-  int32_t out = rp_export_start(b_plan, b_output, width, height, fps, bitrate, codec, b_crops, scale);
+  int32_t out = rp_export_start(b_plan, b_output, width, height, fps, bitrate, codec, b_crops, scale, speed);
   moonbit_decref(b_plan);
   moonbit_decref(b_output);
   moonbit_decref(b_crops);
   return out;
 }
 
-void pion_rp_gif_estimate_start(const uint8_t *plan, int64_t plan_len, int32_t width, int32_t height, int32_t fps, const uint8_t *crops, int64_t crops_len, double scale) {
+void pion_rp_gif_estimate_start(const uint8_t *plan, int64_t plan_len, int32_t width, int32_t height, int32_t fps, const uint8_t *crops, int64_t crops_len, double scale, double speed) {
   moonbit_bytes_t b_plan = mb_from(plan, plan_len);
   moonbit_bytes_t b_crops = mb_from(crops, crops_len);
-  rp_gif_estimate_start(b_plan, width, height, fps, b_crops, scale);
+  rp_gif_estimate_start(b_plan, width, height, fps, b_crops, scale, speed);
   moonbit_decref(b_plan);
   moonbit_decref(b_crops);
 }
