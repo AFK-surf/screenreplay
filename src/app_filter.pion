@@ -148,7 +148,7 @@ fn apps_key(parent : view::View) -> Unit {
     .gap(view::Live::Is(5.0))
     .padding(view::Live::By(fn() { if filter_on() { (8.0, 0.0, 4.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } }))
     .width(view::Live::By(fn() { if filter_on() { None } else { Some(32.0) } }))
-    .height(view::Live::By(fn() { Some(if filter_on() { 28.0 } else { 32.0 }) }))
+    .height(view::Live::Is(Some(28.0)))
     .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
@@ -166,7 +166,7 @@ fn apps_key(parent : view::View) -> Unit {
         g
         .width(view::Live::Is(Some(16.0)))
         .height(view::Live::Is(Some(16.0)))
-        .picture(view::Live::Is(Some(vector("M2 2.8h10L8.2 7.4V11L5.8 12.2V7.4Z", 14.0, 14.0, stroke=1.4))))
+        .picture(view::Live::Is(Some(vector("M2.5 3h11L9.3 8.1v4.1L6.7 13.5V8.1Z", 16.0, 16.0, stroke=1.5))))
         .tint(view::Live::By(ink))
         |> ignore
       })

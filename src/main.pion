@@ -389,7 +389,7 @@ fn controls(parent : view::View) -> Unit {
     row.box(fn(right) {
       right.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)) |> ignore
       right.pick(fn() { clipping.get() }, fn(b, clip) {
-        b.row(view::Live::Is(true)).gap(view::Live::Is(10.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        b.row(view::Live::Is(true)).gap(view::Live::Is(if clip { 10.0 } else { 2.0 })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
         if clip {
           window_options_button(b)
           b.box(fn(h) {
@@ -428,8 +428,9 @@ fn controls(parent : view::View) -> Unit {
           apps_key(b)
           zoom_key(b)
           b.show(fn() { !follow_latest.get() }, fn(x) {
-            icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, h=32.0, size=17.0, shortcut="latest") |> ignore
+            icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, shortcut="latest") |> ignore
           }, at_once=true)
+          b.box(fn(s) { s.width(view::Live::Is(Some(6.0))) |> ignore }) |> ignore
           let clip = solid_icon_button(b, "scissors", fn() { t("剪辑") }, start_clip)
           tip(clip, fn() { t("剪辑") }, shortcut="clip")
         }
@@ -538,9 +539,9 @@ fn zoom_key(parent : view::View) -> Unit {
     |> ignore
     b.box(fn(g) {
       g
-      .width(view::Live::Is(Some(14.0)))
-      .height(view::Live::Is(Some(14.0)))
-      .picture(view::Live::Is(Some(vectors(14.0, 14.0, [("M1.8 6a4.2 4.2 0 1 0 8.4 0a4.2 4.2 0 1 0-8.4 0z", 1.5), ("M9.2 9.2 12.5 12.5", 1.5)]))))
+      .width(view::Live::Is(Some(16.0)))
+      .height(view::Live::Is(Some(16.0)))
+      .picture(view::Live::Is(Some(vectors(16.0, 16.0, [("M2.5 7.2a4.7 4.7 0 1 0 9.4 0a4.7 4.7 0 1 0-9.4 0z", 1.5), ("M10.6 10.6 13.5 13.5", 1.5)]))))
       .tint(view::Live::By(ink))
       |> ignore
     })

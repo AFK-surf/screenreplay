@@ -98,7 +98,7 @@ fn glyph_vector(name : String) -> Option[pixels::Vector] {
           ("M8.12 8.12L12 12", 2.25),
         ]),
       )
-    "to-end" => Option::Some(vectors(24.0, 24.0, [("M17 12H3", 2.1), ("M11 18l6-6-6-6", 2.1), ("M21 5v14", 2.1)]))
+    "to-end" => Option::Some(vectors(24.0, 24.0, [("M17 12H3", 2.25), ("M11 18l6-6-6-6", 2.25), ("M21 5v14", 2.25)]))
     "warn-tri" =>
       Option::Some(
         vectors(16.0, 16.0, [
