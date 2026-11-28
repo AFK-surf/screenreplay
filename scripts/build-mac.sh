@@ -8,6 +8,13 @@ set -euo pipefail
 unset SDKROOT
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${MODE:-release}"
+RUN_TESTS="${RUN_TESTS:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --test) RUN_TESTS=1 ;;
+    *) echo "build-mac.sh: unknown option '$arg'" >&2; exit 1 ;;
+  esac
+done
 VERSION="${VERSION:-$(sed -n 's/^let app_version : String = "\(.*\)"$/\1/p' "$ROOT/src/about.pion")}"
 BUILD_NUM="${BUILD_NUM:-${VERSION##*.}}"
 
@@ -22,13 +29,19 @@ mkdir -p "$OUT"
 SHORT_SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
 printf '%s\n' "$SHORT_SHA" > "$OUT/build.txt"
 
-# 1. Generate crisp AppIcon.icns from assets/svg/icon-rec.svg (fallback site/img/icon.png)
+# 1-3. Run independent builds in parallel: AppIcon.icns, ScreenReplayViewer (Pion), and Swift Helper/Host
 ICNS="$OUT/AppIcon.icns"
-if [ ! -f "$ICNS" ]; then
-  ICONSET="$OUT/AppIcon.iconset"
-  rm -rf "$ICONSET"
-  mkdir -p "$ICONSET"
-  swift - "$ROOT/assets/svg/icon-rec.svg" "$ROOT/site/img/icon.png" "$ICONSET" << 'SWIFT_EOF'
+SWIFT_CFG="release"
+if [ "$MODE" = "debug" ]; then
+  SWIFT_CFG="debug"
+fi
+
+(
+  if [ ! -f "$ICNS" ]; then
+    ICONSET="$OUT/AppIcon.iconset"
+    rm -rf "$ICONSET"
+    mkdir -p "$ICONSET"
+    swift - "$ROOT/assets/svg/icon-rec.svg" "$ROOT/site/img/icon.png" "$ICONSET" << 'SWIFT_EOF'
 import AppKit
 import Foundation
 
@@ -69,24 +82,39 @@ for (name, px) in entries {
   try data.write(to: URL(fileURLWithPath: "\(outDir)/\(name)"))
 }
 SWIFT_EOF
-  iconutil -c icns "$ICONSET" -o "$ICNS"
-  rm -rf "$ICONSET"
-fi
+    iconutil -c icns "$ICONSET" -o "$ICNS"
+    rm -rf "$ICONSET"
+  fi
+) &
+PID_ICON=$!
 
-# 2. Build Pion + Invar macOS viewer (ScreenReplayViewer)
-echo "build-mac.sh: building ScreenReplayViewer ($MODE)..."
-if [ "$MODE" = "release" ]; then
-  (cd "$ROOT" && "$PIONC" build --release . -o "$OUT/ScreenReplayViewer")
-else
-  (cd "$ROOT" && "$PIONC" build . -o "$OUT/ScreenReplayViewer")
-fi
-chmod +x "$OUT/ScreenReplayViewer"
+(
+  if [ "$RUN_TESTS" = "1" ]; then
+    echo "build-mac.sh: running viewer regression tests..."
+    (cd "$ROOT" && "$PIONC" test .)
+  fi
+  echo "build-mac.sh: building ScreenReplayViewer ($MODE)..."
+  if [ "$MODE" = "release" ]; then
+    (cd "$ROOT" && "$PIONC" build --release . -o "$OUT/ScreenReplayViewer")
+  else
+    (cd "$ROOT" && "$PIONC" build . -o "$OUT/ScreenReplayViewer")
+  fi
+  chmod +x "$OUT/ScreenReplayViewer"
+) &
+PID_VIEWER=$!
 
-# 3. Build Swift macOS Helper & Menu Bar Host
-echo "build-mac.sh: building Swift ScreenReplayHelper & ScreenReplayMac ($MODE)..."
-SWIFT_CFG="release"
-[ "$MODE" = "debug" ] && SWIFT_CFG="debug"
-swift build -c "$SWIFT_CFG" --package-path "$ROOT/mac"
+(
+  echo "build-mac.sh: building Swift ScreenReplayHelper & ScreenReplayMac ($MODE)..."
+  swift build -c "$SWIFT_CFG" --package-path "$ROOT/mac"
+) &
+PID_SWIFT=$!
+
+FAIL=0
+wait "$PID_ICON"   || { echo "build-mac.sh: AppIcon generation failed" >&2; FAIL=1; }
+wait "$PID_VIEWER" || { echo "build-mac.sh: ScreenReplayViewer build failed" >&2; FAIL=1; }
+wait "$PID_SWIFT"  || { echo "build-mac.sh: Swift build failed" >&2; FAIL=1; }
+[ "$FAIL" -eq 0 ] || exit 1
+
 SWIFT_BIN_DIR="$(swift build -c "$SWIFT_CFG" --package-path "$ROOT/mac" --show-bin-path)"
 
 # 4. Assemble ScreenReplay.app with nested ScreenReplay Helper.app

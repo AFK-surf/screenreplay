@@ -2,47 +2,70 @@ name: macOS package
 on:
   workflow_dispatch:
   workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - 'mac/**'
+      - 'src/**'
+      - 'native/**'
+      - 'assets/svg/icon-rec.svg'
+      - 'site/img/icon.png'
+      - 'pion.toml'
+      - 'scripts/build-mac.sh'
+      - 'scripts/sign-mac.sh'
+      - '.github/workflows/macos.yml'
   pull_request:
     paths:
       - 'mac/**'
       - 'src/**'
       - 'native/**'
+      - 'assets/svg/icon-rec.svg'
+      - 'site/img/icon.png'
       - 'pion.toml'
       - 'scripts/build-mac.sh'
       - 'scripts/sign-mac.sh'
       - '.github/workflows/macos.yml'
 permissions:
   contents: read
+env:
+  INVAR_SHA: e838c54f3a923794cd6731cabe5468a47798793a
+  PION_PACKAGES_SHA: bae0c3bed1e8078b9cc7f104e1ad1b49bf3c0091
+  PION_SHA: aa55758fb3db593eca12195cec495eaf8a65e329
 jobs:
   package:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 15 || 3 }}
     steps:
+      - name: Record job start
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout ScreenReplay
         uses: actions/checkout@v4
         with:
           path: screenreplay
 
-      - name: Checkout invar
-        uses: actions/checkout@v4
-        with:
-          repository: AFK-surf/invar
-          ref: e838c54f3a923794cd6731cabe5468a47798793a
-          path: invar
-
-      - name: Checkout pion-packages
-        uses: actions/checkout@v4
-        with:
-          repository: AFK-surf/pion-packages
-          ref: bae0c3bed1e8078b9cc7f104e1ad1b49bf3c0091
-          path: pion-packages
-
-      - name: Checkout pion
-        uses: actions/checkout@v4
-        with:
-          repository: AFK-surf/pion
-          ref: aa55758fb3db593eca12195cec495eaf8a65e329
-          path: pion
+      - name: Checkout dependencies (invar, pion-packages, pion)
+        run: |
+          set -eu
+          clone_sha() {
+            local repo="$1" sha="$2" dir="$3"
+            mkdir -p "$dir"
+            git -C "$dir" init -q
+            git -C "$dir" remote add origin "https://github.com/$repo.git"
+            git -C "$dir" fetch --depth 1 -q origin "$sha"
+            git -C "$dir" checkout -q FETCH_HEAD
+          }
+          clone_sha AFK-surf/invar "$INVAR_SHA" invar &
+          PID1=$!
+          clone_sha AFK-surf/pion-packages "$PION_PACKAGES_SHA" pion-packages &
+          PID2=$!
+          clone_sha AFK-surf/pion "$PION_SHA" pion &
+          PID3=$!
+          FAIL=0
+          for pid in "$PID1" "$PID2" "$PID3"; do
+            wait "$pid" || FAIL=1
+          done
+          [ "$FAIL" -eq 0 ] || exit 1
 
       # (vendor/PermissionFlow needs Swift tools 6.2: the newest Xcode on the runner, not its default)
       - name: Select the newest Xcode
@@ -51,15 +74,15 @@ jobs:
           sudo xcode-select -s "$x"
           swift --version
 
-      - name: Cache pion toolchain
+      - name: Restore pion toolchain cache
         id: pion-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             pion/out/pionc2
             pion/out/qbe
             pion/out/libpionrt.a
-          key: pion-macos-arm64-aa55758fb3db593eca12195cec495eaf8a65e329
+          key: pion-macos-arm64-s1-${{ env.PION_SHA }}
 
       - name: Bootstrap pionc2
         if: steps.pion-cache.outputs.cache-hit != 'true'
@@ -73,43 +96,84 @@ jobs:
           export PION_QBE="$OUT_DIR/qbe"
           export PION_RT_LIB="$OUT_DIR/libpionrt.a"
           PION_RT_CLI_LIB="$OUT_DIR/libpionrt_cli.a"
-          sh pion/scripts/build-qbe.sh "$PION_QBE"
+          sh pion/scripts/build-qbe.sh "$PION_QBE" &
+          PID_QBE=$!
           cc -std=c11 -O2 -fno-asynchronous-unwind-tables -Wall -Wextra -Werror \
-            -c pion/runtime/pion_rt.c -o "$OUT_DIR/pion_rt.o"
+            -c pion/runtime/pion_rt.c -o "$OUT_DIR/pion_rt.o" &
+          PID_RT=$!
+          cc -std=c11 -O2 -fno-asynchronous-unwind-tables -Wall -Wextra -Werror \
+            -c pion/runtime/pion_cli.c -o "$OUT_DIR/pion_cli.o" &
+          PID_CLI=$!
+          gzip -dc pion/bootstrap/pionc-seed.ssa.gz > "$TMP_DIR/pionc-seed.ssa" &
+          PID_GZ=$!
+          FAIL=0
+          for pid in "$PID_QBE" "$PID_RT" "$PID_CLI" "$PID_GZ"; do
+            wait "$pid" || FAIL=1
+          done
+          [ "$FAIL" -eq 0 ] || exit 1
           ar rcs "$PION_RT_LIB" "$OUT_DIR/pion_rt.o"
-          cc -std=c11 -O2 -fno-asynchronous-unwind-tables -Wall -Wextra -Werror \
-            -c pion/runtime/pion_cli.c -o "$OUT_DIR/pion_cli.o"
           ar rcs "$PION_RT_CLI_LIB" "$OUT_DIR/pion_rt.o" "$OUT_DIR/pion_cli.o"
-          gzip -dc pion/bootstrap/pionc-seed.ssa.gz > "$TMP_DIR/pionc-seed.ssa"
           "$PION_QBE" -t arm64_apple -o "$TMP_DIR/pionc0.s" "$TMP_DIR/pionc-seed.ssa"
           cc "$TMP_DIR/pionc0.s" "$PION_RT_CLI_LIB" -lm -lpthread -o "$OUT_DIR/pionc0"
-          mkdir -p "$TMP_DIR/cas_s1" "$TMP_DIR/cas_s2"
-          PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s1" "$OUT_DIR/pionc0" build -o "$OUT_DIR/pionc1" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
-          PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s2" "$OUT_DIR/pionc1" build -o "$OUT_DIR/pionc2" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
+          mkdir -p "$TMP_DIR/cas_s1"
+          PION_RT_LIB="$PION_RT_CLI_LIB" PION_CACHE_DIR="$TMP_DIR/cas_s1" \
+            "$OUT_DIR/pionc0" build -o "$OUT_DIR/pionc2" "$COMPILER_DIR/src/core" "$COMPILER_DIR/src/cli/main.pion"
 
-      - name: Run viewer regression tests
+      - name: Save pion toolchain cache
+        if: steps.pion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pion/out/pionc2
+            pion/out/qbe
+            pion/out/libpionrt.a
+          key: pion-macos-arm64-s1-${{ env.PION_SHA }}
+
+      - name: Cache pion CAS
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/pion-cas
+          key: pion-cas-macos-arm64-${{ env.PION_SHA }}-${{ env.INVAR_SHA }}-${{ env.PION_PACKAGES_SHA }}-${{ hashFiles('screenreplay/pion.toml', 'screenreplay/src/**', 'screenreplay/native/**') }}
+          restore-keys: |
+            pion-cas-macos-arm64-${{ env.PION_SHA }}-${{ env.INVAR_SHA }}-${{ env.PION_PACKAGES_SHA }}-
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: screenreplay/mac/.build
+          key: swiftpm-macos-arm64-${{ hashFiles('screenreplay/mac/Package.swift', 'screenreplay/mac/Package.resolved', 'screenreplay/mac/Sources/**', 'screenreplay/mac/vendor/**') }}
+          restore-keys: |
+            swiftpm-macos-arm64-
+
+      - name: Test viewer and build ScreenReplay.app
+        timeout-minutes: 3
         env:
           PIONC: ${{ github.workspace }}/pion/out/pionc2
           PION_QBE: ${{ github.workspace }}/pion/out/qbe
           PION_RT_LIB: ${{ github.workspace }}/pion/out/libpionrt.a
-        run: (cd screenreplay && "$PIONC" test .)
-
-      - name: Build ScreenReplay.app
-        env:
-          PIONC: ${{ github.workspace }}/pion/out/pionc2
-          PION_QBE: ${{ github.workspace }}/pion/out/qbe
-          PION_RT_LIB: ${{ github.workspace }}/pion/out/libpionrt.a
-        run: bash screenreplay/scripts/build-mac.sh
+          PION_CACHE_DIR: ${{ runner.temp }}/pion-cas
+        run: bash screenreplay/scripts/build-mac.sh --test
 
       - name: Sign and notarize ScreenReplay.app
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         env:
           MACOS_DEVELOPER_ID_KEYCHAIN_B64_1: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_1 }}
           MACOS_DEVELOPER_ID_KEYCHAIN_B64_2: ${{ secrets.MACOS_DEVELOPER_ID_KEYCHAIN_B64_2 }}
           KEYCHAIN_PASSWORD_AFK: ${{ secrets.KEYCHAIN_PASSWORD_AFK }}
         run: bash screenreplay/scripts/sign-mac.sh screenreplay/out/mac/ScreenReplay.app
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload signed ScreenReplay-mac
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
         with:
           name: ScreenReplay-mac
           path: screenreplay/out/mac/ScreenReplay-mac.zip
+
+      - name: Check 60s duration target
+        if: always()
+        run: |
+          ELAPSED=$(( $(date +%s) - JOB_START_EPOCH ))
+          echo "Job macos-package duration: ${ELAPSED}s"
+          if [ "$ELAPSED" -gt 60 ]; then
+            echo "::warning title=CI duration > 60s::macos-package took ${ELAPSED}s (target <= 60s, hard timeout 180s)"
+          fi

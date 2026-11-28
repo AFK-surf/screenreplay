@@ -13,8 +13,11 @@ concurrency:
 jobs:
   version:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
+      - name: Record job start
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
       # (the recorder's own, too: left behind, the new version takes itself for an old one and updates again and again)
       - name: The tag is the app's version
@@ -39,6 +42,15 @@ jobs:
           }
           if ($bad) { exit 1 }
 
+      - name: Check 60s duration target
+        if: always()
+        run: |
+          ELAPSED=$(( $(date +%s) - JOB_START_EPOCH ))
+          echo "Job release-version duration: ${ELAPSED}s"
+          if [ "$ELAPSED" -gt 60 ]; then
+            echo "::warning title=CI duration > 60s::release-version took ${ELAPSED}s (target <= 60s, hard timeout 180s)"
+          fi
+
   windows:
     needs: version
     uses: ./.github/workflows/windows.yml
@@ -51,10 +63,13 @@ jobs:
   release:
     needs: [windows, macos]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     permissions:
       contents: write
     steps:
+      - name: Record job start
+        run: echo "JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           path: assets
@@ -74,15 +89,30 @@ jobs:
               "$setup" assets/ScreenReplay-mac.zip
           fi
 
+      - name: Check 60s duration target
+        if: always()
+        run: |
+          ELAPSED=$(( $(date +%s) - JOB_START_EPOCH ))
+          echo "Job release-upload duration: ${ELAPSED}s"
+          if [ "$ELAPSED" -gt 60 ]; then
+            echo "::warning title=CI duration > 60s::release-upload took ${ELAPSED}s (target <= 60s, hard timeout 180s)"
+          fi
+
   # The download site and the updates: latest.json signed with the release key, the installer and the Mac build put in
   # the R2 bucket, the site deployed (packaging/publish-setup.ps1). The key and Cloudflare's token are the `release`
   # environment's alone: a v* tag's run, once its reviewer has approved it.
   publish:
     needs: release
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 3
     environment: release
     steps:
+      - name: Record job start
+        shell: pwsh
+        run: |
+          $epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          "JOB_START_EPOCH=$epoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
@@ -121,3 +151,13 @@ jobs:
           done
           echo "::error::screenreplay.pages.dev/dl/latest.json says '$got', not $want"
           exit 1
+
+      - name: Check 60s duration target
+        if: always()
+        shell: pwsh
+        run: |
+          $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$env:JOB_START_EPOCH
+          Write-Host "Job release-publish duration: ${elapsed}s"
+          if ($elapsed -gt 60) {
+            Write-Host "::warning title=CI duration > 60s::release-publish took ${elapsed}s (target <= 60s, hard timeout 180s)"
+          }
