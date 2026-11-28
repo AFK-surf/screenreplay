@@ -354,7 +354,7 @@ fn controls(parent : view::View) -> Unit {
       mid.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
       let slot_w = 112.0
       mid.box(fn(l) {
-        l.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 6.0, 0.0))) |> ignore
+        l.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 10.0, 0.0))) |> ignore
         l.show(fn() { clipping.get() }, fn(b) {
           words(b, fn() {
             let (a, z) = (clip_a.get(), clip_b.get())
@@ -380,7 +380,7 @@ fn controls(parent : view::View) -> Unit {
       })
       icon_button(mid, fn() { "forward-15" }, fn() { t("前进 15 秒") }, fn() { jump_by(15000.0) }, shortcut="on15") |> ignore
       mid.box(fn(r) {
-        r.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Start)).padding(view::Live::Is((6.0, 0.0, 0.0, 0.0))) |> ignore
+        r.row(view::Live::Is(true)).width(view::Live::Is(Some(slot_w))).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Start)).padding(view::Live::Is((2.0, 0.0, 0.0, 0.0))) |> ignore
         speed_key(r, exports=true)
       })
       |> ignore
@@ -430,7 +430,7 @@ fn controls(parent : view::View) -> Unit {
           b.show(fn() { !follow_latest.get() }, fn(x) {
             icon_button(x, fn() { "to-end" }, fn() { t("回到最新") }, show_latest, shortcut="latest") |> ignore
           }, at_once=true)
-          b.box(fn(s) { s.width(view::Live::Is(Some(6.0))) |> ignore }) |> ignore
+          b.box(fn(s) { s.width(view::Live::Is(Some(8.0))) |> ignore }) |> ignore
           let clip = solid_icon_button(b, "scissors", fn() { t("剪辑") }, start_clip)
           tip(clip, fn() { t("剪辑") }, shortcut="clip")
         }
