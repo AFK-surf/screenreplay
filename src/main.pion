@@ -252,7 +252,7 @@ fn title_bar(parent : view::View) -> Unit {
 fn picture(parent : view::View) -> Unit {
   parent.box(fn(stage) {
     stage
-    .grow(view::Live::Is(1.0))
+    .fill()
     .over(view::Live::By(fn() { full_screen.get() }))
     .ground(view::Live::By(fn() { if full_screen.get() { picture_ground } else { well() } }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
@@ -261,12 +261,20 @@ fn picture(parent : view::View) -> Unit {
     |> ignore
     stage.pick(fn() { has_segs() }, fn(b, any) {
       if any {
-        b.grow(view::Live::Is(1.0)).fills_across(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
-        b.box(fn(pic) {
+        b.fill().fills_across(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
+        b.by_room(fn(held, room) {
+        held.lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+        let fit = fn() {
+          let a = picture_aspect.get()
+          let w = room.width()
+          let h = match room.height() { Some(h) => h, None => w / a }
+          if w / a <= h { (w, w / a, (h - w / a) / 2.0) } else { (h * a, h, 0.0) }
+        }
+        held.box(fn(pic) {
           pic
-          .aspect(view::Live::By(fn() { picture_aspect.get() }))
-          .height_share(view::Live::Is(1.0))
-          .max_width(view::Live::Is(None), within=true)
+          .width(view::Live::By(fn() { Some(fit().0) }))
+          .height(view::Live::By(fn() { Some(fit().1) }))
+          .margin(view::Live::By(fn() { (0.0, fit().2, 0.0, 0.0) }))
           .ground(view::Live::Is(picture_ground))
           .clips(view::Live::Is(true))
           .presses(view::Live::Is(true))
@@ -288,6 +296,10 @@ fn picture(parent : view::View) -> Unit {
           pic_zoom_pill(pic)
           window_picker(pic)
         })
+        |> ignore
+        })
+        .fill()
+        .fills_across(view::Live::Is(true))
         |> ignore
       } else {
         b.show(fn() { !awaiting_first_show.get() }, fn(e) {
