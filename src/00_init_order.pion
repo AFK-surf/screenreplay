@@ -463,6 +463,15 @@ let float_bar : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let chrome_bars : Array[view::View] = []
 
+// The floating controls over the picture: shown as the floating header is, kept while pointed at.
+let float_deck : mbt_compat::Ref[Option[view::View]] = mbt_compat::ref_new(None)
+
+let float_shown : mbt_compat::Ref[() -> Double] = mbt_compat::ref_new(fn() { 1.0 })
+
+let pic_drag_moved : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
+
+let pic_last_click : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0e9)
+
 let saved : signals::Signal[String] = signals::signal("")
 
 let saved_path : signals::Signal[String] = signals::signal("")
@@ -521,9 +530,9 @@ let key_seeking : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let just_marked : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0)
 
-let dock_app_h : Double = 24.0
+let strip_h : Double = 44.0
 
-let float_app_h : Double = 32.0
+let app_h : Double = 24.0
 
 let wave_h : Double = 16.0
 

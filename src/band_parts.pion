@@ -53,7 +53,6 @@ fn x_drawn_of(v : view::View, at : Double, w : Double) -> Double {
   (ax_d(at, view_len()) - from) / len * w}
 
 fn current_piece(parent : view::View, w : () -> Double) -> Unit {
-  let floats = floating_now()
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
     o.box(fn(b) {
@@ -63,21 +62,17 @@ fn current_piece(parent : view::View, w : () -> Double) -> Unit {
           if p >= pc.0 && p < pc.1 {
             let a = clamp(x_drawn_of(b, pc.0, w()), 0.0, w())
             let z = clamp(x_drawn_of(b, pc.1, w()), 0.0, w())
-            if floats {
-              return if z - a >= 8.0 { Some((a + 3.0, z - a - 6.0)) } else { None }
-            }
             return if z - a >= 2.0 { Some((a, z - a - 1.0)) } else { None }
           }
         }
         None
       }
       b
-      .height(view::Live::Is(Some(if floats { app_h() - 6.0 } else { app_h() })))
-      .radius(view::Live::Is(if floats { (app_h() - 6.0) / 2.0 } else { 0.0 }))
-      .ground(view::Live::By(if floats { fn() { tone(0xFFFFFF29L, 0xECECEFFFL) } } else { c_s4 }))
+      .height(view::Live::Is(Some(app_h)))
+      .ground(view::Live::By(c_s4))
       .laid_nowhere(view::Live::By(fn() { rect() is None }))
       .width(view::Live::By(fn() { Some(opt_map(rect(), fn(r) { r.1 }).unwrap_or(0.0)) }))
-      .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), if floats { 3.0 } else { 0.0 }) }))
+      .offset(view::Live::By(fn() { (opt_map(rect(), fn(r) { r.0 }).unwrap_or(0.0), 0.0) }))
       |> ignore
     })
     |> ignore
@@ -126,7 +121,6 @@ fn app_icon(parent : view::View, process : String, size? : Double) -> Unit {
   }}
 
 fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
-  let floats = floating_now()
   parent.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)) |> ignore
     // Quantize visible range and 1.5x zoom buckets so overview drag/resize does not rebuild label nodes every frame.
@@ -176,7 +170,7 @@ fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
         }
         b
         .row(view::Live::Is(true))
-        .height(view::Live::Is(Some(app_h())))
+        .height(view::Live::Is(Some(app_h)))
         .padding(view::Live::Is((9.0, 0.0, 6.0, 0.0)))
         .gap(view::Live::Is(7.0))
         .lines_up(view::Live::Is(Some(view::Along::Middle)))
@@ -191,7 +185,7 @@ fn piece_labels(parent : view::View, w : () -> Double) -> Unit {
           lab.box(fn(n) {
             // Override default text min-width so short stretches can shrink and ellipsize.
             n.laid_nowhere(view::Live::By(fn() { span().1 < 52.0 })).shrink(view::Live::Is(1.0)).cuts(view::Live::Is(true)).min_width(view::Live::Is(Some(0.0))) |> ignore
-            words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { if floats { (0.0, 0L) } else { (name_halo, c_s2()) } })) |> ignore
+            words(n, fn() { app_name(app) }, 12.0, ui_text).words_halo(view::Live::By(fn() { (name_halo, c_s2()) })) |> ignore
           })
           |> ignore
         })
@@ -217,7 +211,7 @@ fn gap_labels(parent : view::View, w : () -> Double) -> Unit {
           (a, z - a - 1.0)
         }
         b
-        .height(view::Live::Is(Some(strip_h())))
+        .height(view::Live::Is(Some(strip_h)))
         .lines_up(view::Live::Is(Some(view::Along::Middle)))
         .lies_along(view::Live::Is(view::Lies::Middle))
         .laid_nowhere(view::Live::By(fn() { span().1 < 72.0 }))
@@ -389,7 +383,7 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
       let bx = fn() { x_drawn_of(c, clip_b.get(), w()) }
       c.box(fn(f) {
         f
-        .height(view::Live::Is(Some(strip_h())))
+        .height(view::Live::Is(Some(strip_h)))
         .ground(view::Live::By(fn() { tone(0xEDEEF033L, 0x17181B1FL) }))
         .width(view::Live::By(fn() { Some(dmax(1.0, clamp(bx(), 0.0, w()) - clamp(ax(), 0.0, w()))) }))
         .offset(view::Live::By(fn() { (clamp(ax(), 0.0, w()), 0.0) }))
@@ -403,10 +397,10 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
         c.box(fn(l) {
           l
           .width(view::Live::Is(Some(2.0)))
-          .height(view::Live::Is(Some(strip_h())))
+          .height(view::Live::Is(Some(strip_h)))
           .ground(view::Live::By(ui_accent))
           .alpha(view::Live::By(seen))
-          .offset(view::Live::By(fn() { (x() - 1.0, -(if end == 0 { strip_h() } else { 2.0 * strip_h() + 22.0 })) }))
+          .offset(view::Live::By(fn() { (x() - 1.0, -(if end == 0 { strip_h } else { 2.0 * strip_h + 22.0 })) }))
           |> ignore
         })
         |> ignore
@@ -418,7 +412,7 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
           .ground(view::Live::By(ui_accent))
           .edge(view::Live::By(fn() { (1.0, tone(0x00000066L, 0xFFFFFF99L)) }))
           .alpha(view::Live::By(seen))
-          .offset(view::Live::By(fn() { (x() - 4.0, (strip_h() - 22.0) / 2.0 - (if end == 0 { 2.0 * strip_h() } else { 3.0 * strip_h() + 22.0 })) }))
+          .offset(view::Live::By(fn() { (x() - 4.0, (strip_h - 22.0) / 2.0 - (if end == 0 { 2.0 * strip_h } else { 3.0 * strip_h + 22.0 })) }))
           |> ignore
         })
         |> ignore
@@ -447,7 +441,7 @@ fn clip_hint(band : view::View, w : () -> Double) -> Unit {
       .row(view::Live::Is(true))
       .lies_along(view::Live::Is(view::Lies::Middle))
       .lines_up(view::Live::Is(Some(view::Along::Middle)))
-      .height(view::Live::Is(Some(strip_h())))
+      .height(view::Live::Is(Some(strip_h)))
       .width(view::Live::By(fn() { Some(dmax(1.0, bx() - ax())) }))
       .offset(view::Live::By(fn() { (ax(), 0.0) }))
       .laid_nowhere(view::Live::By(fn() { !on() }))
@@ -518,7 +512,7 @@ fn hover_line(band : view::View, w : () -> Double) -> Unit {
     o.box(fn(l) {
       l
       .width(view::Live::Is(Some(1.0)))
-      .height(view::Live::Is(Some(strip_h())))
+      .height(view::Live::Is(Some(strip_h)))
       .ground(view::Live::By(fn() { tone(0xA0A4AB99L, 0x4A4E5599L) }))
       .laid_nowhere(view::Live::By(fn() { hover_now() is None || grabbed.get() != 0 || layer_over() }))
       .offset(view::Live::By(fn() { (clamp(hover_now().unwrap_or(0.0), 0.0, w()) - 0.5, 0.0) }))

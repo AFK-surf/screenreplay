@@ -277,6 +277,31 @@ fn title_bar(parent : view::View) -> Unit {
   })
   |> ignore}
 
+// A click on the picture plays or pauses, a second one soon after toggles full screen; floating, a drag on it
+// moves the window once it has gone 4 pt. (A drag handler takes the press, so the clicks are told here too.)
+fn pic_pressed(d : view::Drag) -> Unit {
+  match d.kind {
+    Down => pic_drag_moved.v = false
+    Moved =>
+      if !pic_drag_moved.v && ((d.x - d.ox).abs() > 4.0 || (d.y - d.oy).abs() > 4.0) {
+        pic_drag_moved.v = true
+        if signals::untracked(dock_floats) {
+          hostapi::window_drag()
+        }
+      }
+    Up =>
+      if !pic_drag_moved.v {
+        set_playing(!want_play.untracked())
+        if d.at - pic_last_click.v < 400.0 {
+          pic_last_click.v = -1.0e9
+          set_full_screen(!full_screen.untracked())
+        } else {
+          pic_last_click.v = d.at
+        }
+      }
+    _ => ()
+  }}
+
 fn picture(parent : view::View) -> Unit {
   parent.box(fn(stage) {
     stage
@@ -306,8 +331,7 @@ fn picture(parent : view::View) -> Unit {
           .ground(view::Live::Is(picture_ground))
           .clips(view::Live::Is(true))
           .presses(view::Live::Is(true))
-          .on_press(fn() { set_playing(!want_play.untracked()) })
-          .on_double_press(fn() { set_full_screen(!full_screen.untracked()) })
+          .on_drag(pic_pressed)
           .on_wheel_moves(pic_wheel)
           .on_menu(fn(m) { open_moment_menu(m.wx, m.wy, pos_now(), true) })
           .on_pointer_moved(fn() {
@@ -617,21 +641,29 @@ fn zoom_key(parent : view::View) -> Unit {
 fn dock_floats() -> Bool {
   float_controls.get() && !full_screen.get() && !clipping.get()}
 
+// Floating keeps the timeline docked at the foot; only the controls float, over the picture just above it.
 fn dock(parent : view::View) -> Unit {
-  parent.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(hair)).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore
+  rule(parent, hair)
   parent.box(fn(d) {
     // Top padding (dock_over) lives inside timeline() so hover preview covers the heatmap and margin above it.
-    d
-    .ground(view::Live::By(fn() { if dock_floats() { clear(c_bg()) } else { c_bg() } }))
-    .padding(view::Live::By(fn() { if dock_floats() { (0.0, 0.0, 0.0, 20.0) } else { (20.0, 0.0, 20.0, 10.0) } }))
-    .width_share(view::Live::Is(1.0))
-    .max_width(view::Live::By(fn() { if dock_floats() { Some(980.0) } else { None } }), within=true)
-    |> ignore
+    d.ground(view::Live::By(c_bg)).padding(view::Live::By(fn() { (20.0, 0.0, 20.0, if dock_floats() { 4.0 } else { 10.0 }) })) |> ignore
     d.pick(dock_floats, fn(p, floats) {
-      p.gap(view::Live::Is(if floats { 14.0 } else { 0.0 })) |> ignore
       p.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
       p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
-      controls(p)
+      if floats {
+        p.box(fn(o) {
+          float_deck.v = Some(o)
+          o
+          .over(view::Live::Is(true), edges=(Some(0.0), Some(-52.0), Some(0.0), None))
+          .alpha(view::Live::By(fn() { (float_shown.v)() }))
+          .laid_nowhere(view::Live::By(fn() { (float_shown.v)() <= 0.0 }))
+          |> ignore
+          controls(o)
+        })
+        |> ignore
+      } else {
+        controls(p)
+      }
     }, at_once=true)
   })
   |> ignore}
@@ -918,19 +950,12 @@ fn make_window(root : view::View) -> Unit {
     title_bar(b)
     b.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(fn() { tone(0x00000080L, 0x00000014L) })).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore
   })
-  chrome(root, top, foot=true)
+  chrome(root, top, floats_too=true)
   picture(root)
   // Spacer keeps the dock pinned to the bottom when picture switches to over() in fullscreen.
   root.box(fn(s) { s.grow(view::Live::Is(1.0)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore }) |> ignore
-  let foot = root.box(fn(b) {
-    b
-    .over(view::Live::By(dock_floats), edges=(Some(0.0), None, Some(0.0), Some(0.0)))
-    .lines_up(view::Live::Is(Some(view::Along::Middle)))
-    .padding(view::Live::By(fn() { if dock_floats() { (16.0, 0.0, 16.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } }))
-    |> ignore
-    dock(b)
-  })
-  chrome(root, foot, foot=true)
+  let foot = root.box(fn(b) { dock(b) })
+  chrome(root, foot)
   library_layer(root)
   settings_dialog(root)
   window_options_layer(root)

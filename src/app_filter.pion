@@ -104,13 +104,13 @@ fn filter_dim_picture(w : Double, from : Double, len : Double, f : Array[String]
     let a = x_of(p.0)
     let b = x_of(p.1)
     if b - a >= 1.0 {
-      fill.write_string(rect_d(a, 0.0, b - a, strip_h()))
-      lines.write_string(hatch_d(a, b - a, strip_h()))
+      fill.write_string(rect_d(a, 0.0, b - a, strip_h))
+      lines.write_string(hatch_d(a, b - a, strip_h))
     }
   }
   Option::Some({
     w: w,
-    h: strip_h(),
+    h: strip_h,
     layers: [
       layer(fill.to_string(), tone(0x1B1C1FC0L, 0xF2F3F5C0L)),
       layer(lines.to_string(), 0L, stroke=tone(0xFFFFFF10L, 0x00000012L), width=1.0),

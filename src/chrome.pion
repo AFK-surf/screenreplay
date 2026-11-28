@@ -114,13 +114,19 @@ fn bars_pointed() -> Bool {
       return true
     }
   }
-  false}
+  match float_deck.v {
+    Some(d) => d.pointed_in()
+    None => false
+  }}
 
-fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
-  let foot = match foot { Some(__mbt_v) => __mbt_v, None => false }
-  let floats = fn() { full_screen.get() || (foot && float_controls.get() && !clipping.get()) }
+fn chrome(root : view::View, bar : view::View, floats_too? : Bool) -> Unit {
+  let floats_too = match floats_too { Some(__mbt_v) => __mbt_v, None => false }
+  let floats = fn() { full_screen.get() || (floats_too && dock_floats()) }
   let way = motion::NodeWay::new(1.0)
   chrome_bars.push(bar)
+  if floats_too {
+    float_shown.v = fn() { way.shown(bar) }
+  }
   let wanted = fn() {
     !floats() ||
     (pointer_lately.v)() ||
@@ -135,7 +141,9 @@ fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
     clip_playing.get() != "" ||
     window_options_open.get()
   }
-  bars_wanted.v = wanted
+  if floats_too {
+    bars_wanted.v = wanted
+  }
   root.reacts(wanted, fn(on) {
     way.go_ms(root, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else if on { 120.0 } else { 200.0 })
     if !on && full_screen.untracked() {

@@ -65,11 +65,9 @@ fn overview_drag(d : view::Drag, w : Double) -> Unit {
     }
   }}
 
-// slim: the floating deck's scroll track, the viewport a solid thumb on a thin rail.
-fn overview(parent : view::View, slim? : Bool) -> Unit {
-  let slim = match slim { Some(__mbt_v) => __mbt_v, None => false }
+fn overview(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    row.row(view::Live::Is(true)).margin(view::Live::Is(if slim { (16.0, 5.0, 16.0, 6.0) } else { (0.0, 4.0, 0.0, 0.0) })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    row.row(view::Live::Is(true)).margin(view::Live::Is((0.0, 4.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     row.box(fn(cell) {
       cell.grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))) |> ignore
       cell.by_room(fn(track, room) {
@@ -136,10 +134,6 @@ fn overview(parent : view::View, slim? : Bool) -> Unit {
             if width <= 0.0 {
               return None
             }
-            if slim {
-              let track = layer(rrect_d(0.0, (overview_h - 5.0) / 2.0, width, 5.0, 2.5), tone(0x1E1E218CL, 0xFFFFFF57L), stroke=tone(0xFFFFFF1AL, 0x00000024L), width=0.5)
-              return Some(pixels::Vector::{ w: width, h: overview_h, layers: [track] })
-            }
             let layers : Array[pixels::VectorPath] = [
               layer(hatch_d(0.0, width, 4.0), 0L, stroke=tone(0xFFFFFF17L, 0x00000017L), width=1.0),
             ]
@@ -165,20 +159,18 @@ fn overview(parent : view::View, slim? : Bool) -> Unit {
           o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(f) {
             f
-            .height(view::Live::Is(Some(if slim { 5.0 } else { overview_h })))
+            .height(view::Live::Is(Some(overview_h)))
             .radius(view::Live::Is(2.5))
-            .ground(view::Live::By(fn() { if slim { tone(0xFFFFFFE6L, 0xFFFFFFFFL) } else { tone(0xEDEEF02EL, 0x17181B2EL) } }))
-            .edge(view::Live::By(fn() { if slim { (0.5, 0x00000033L) } else { (1.0, tone(0xEDEEF066L, 0x17181B52L)) } }))
-            .shadow(view::Live::Is(if slim { (4.0, 1.0, 0x00000059L) } else { (0.0, 0.0, 0L) }))
-            .shadow_outside(view::Live::Is(true))
+            .ground(view::Live::By(fn() { tone(0xEDEEF02EL, 0x17181B2EL) }))
+            .edge(view::Live::By(fn() { (1.0, tone(0xEDEEF066L, 0x17181B52L)) }))
             .width(view::Live::By(fn() { Some(finder(w()).1) }))
-            .offset(view::Live::By(fn() { (finder(w()).0, if slim { (overview_h - 5.0) / 2.0 } else { 0.0 }) }))
+            .offset(view::Live::By(fn() { (finder(w()).0, 0.0) }))
             |> ignore
           })
           |> ignore
         })
         |> ignore
-        for end in (if slim { [] } else { [0, 1] }) {
+        for end in [0, 1] {
           track.box(fn(o) {
             o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
             o.box(fn(h) {
@@ -205,7 +197,6 @@ fn overview(parent : view::View, slim? : Bool) -> Unit {
             .height(view::Live::Is(Some(overview_h)))
             .radius(view::Live::Is(1.0))
             .ground(view::Live::By(ui_text))
-            .laid_nowhere(view::Live::Is(slim))
             .drawn_off(
               view::Live::By(fn() { (clamp(ax_d(pos_drawn(p), view_len()) * k(), 1.0, dmax(1.0, w() - 1.0)) - 1.0, 0.0) }),
               exact=true,
@@ -233,7 +224,7 @@ fn overview(parent : view::View, slim? : Bool) -> Unit {
               |> ignore
               b.box(fn(dot) {
                 let r = fn() { if b.pointed() { 6.0 } else { 4.0 } }
-                dot.width(view::Live::By(fn() { Some(r()) })).height(view::Live::By(fn() { Some(r()) })).radius(view::Live::Is(3.0)).ground(view::Live::By(if slim { fn() { tone(0xFFFFFFB3L, 0x1D1D1FBFL) } } else { ui_text })) |> ignore
+                dot.width(view::Live::By(fn() { Some(r()) })).height(view::Live::By(fn() { Some(r()) })).radius(view::Live::Is(3.0)).ground(view::Live::By(ui_text)) |> ignore
               })
               |> ignore
               tip(b, fn() { wall(abs) })
