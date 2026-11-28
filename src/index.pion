@@ -44,13 +44,15 @@ fn thumb_key(at : Double) -> String {
         return ""
       }
       let key = "ix:\{s.path}:\{ms}"
-      if !ui::image_bytes_for(key).is_some() {
+      if ui::image_bytes_for(key).is_some() {
+        thumb_images.touch(key)
+      } else {
         let jpeg = rp_idx_jpeg(p, inside)
         if jpeg.length() == 0 {
           return ""
         }
         ui::add_image(key, jpeg)
-        seg_image_kept(s.path, key)
+        thumb_images.keep(key)
       }
       key
     }

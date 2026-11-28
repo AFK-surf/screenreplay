@@ -122,6 +122,8 @@ let seg_images : mbt_compat::OrderedMap[String, Array[String]] = mbt_compat::ord
 
 let hover_images : Newest = Newest::{ cap: 400, keys: [] }
 
+let thumb_images : Newest = Newest::{ cap: 200, keys: [] }
+
 let crop_images : Newest = Newest::{ cap: 6, keys: [] }
 
 let clip_thumb_keys : mbt_compat::OrderedMap[String, String] = mbt_compat::ordered_map_new()

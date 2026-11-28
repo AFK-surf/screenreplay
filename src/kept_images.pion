@@ -9,6 +9,7 @@ fn seg_image_kept(path : String, key : String) -> Unit {
 }
 
 fn seg_images_forget(path : String) -> Unit {
+  thumb_images.forget_prefix("ix:\{path}:")
   match seg_images.get(path) {
     Option::Some(keys) => {
       for k in keys {
@@ -21,6 +22,7 @@ fn seg_images_forget(path : String) -> Unit {
 }
 
 fn seg_images_forget_all() -> Unit {
+  thumb_images.forget_all()
   seg_images.each(fn(_path, keys) {
     for k in keys {
       ui::forget_image(k)
@@ -34,7 +36,27 @@ struct Newest {
   keys : Array[String]
 }
 
+fn Newest::touch(self : Newest, key : String) -> Unit {
+  let n = self.keys.length()
+  if n > 0 && self.keys[n - 1] == key {
+    return
+  }
+  for i in 0..<n {
+    if self.keys[i] == key {
+      arr_remove(self.keys, i) |> ignore
+      self.keys.push(key)
+      return
+    }
+  }
+}
+
 fn Newest::keep(self : Newest, key : String) -> Unit {
+  for i in 0..<self.keys.length() {
+    if self.keys[i] == key {
+      arr_remove(self.keys, i) |> ignore
+      break
+    }
+  }
   self.keys.push(key)
   if self.keys.length() > self.cap {
     let drop = self.keys.length() - self.cap
@@ -45,6 +67,19 @@ fn Newest::keep(self : Newest, key : String) -> Unit {
     self.keys.clear()
     arr_append(self.keys, rest)
   }
+}
+
+fn Newest::forget_prefix(self : Newest, prefix : String) -> Unit {
+  let kept : Array[String] = []
+  for k in self.keys {
+    if k.starts_with(prefix) {
+      ui::forget_image(k)
+    } else {
+      kept.push(k)
+    }
+  }
+  self.keys.clear()
+  arr_append(self.keys, kept)
 }
 
 fn Newest::forget_all(self : Newest) -> Unit {

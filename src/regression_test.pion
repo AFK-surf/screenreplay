@@ -395,3 +395,19 @@ test "hover_live_active tolerance tracks view_len and closes cleanly" {
   hover_deck_close()
   assert_true(!hover_live_active(10000.0), "inactive after hover_deck_close")
 }
+
+test "Newest LRU keeps bounded keys, promotes on touch, and forgets by prefix" {
+  let lru = Newest::{ cap: 3, keys: [] }
+  lru.keep("ix:a.mp4:0")
+  lru.keep("ix:a.mp4:500")
+  lru.keep("ix:b.mp4:0")
+  lru.touch("ix:a.mp4:0")
+  lru.keep("ix:b.mp4:500")
+  assert_eq_int(lru.keys.length(), 3, "bounded to cap")
+  assert_eq_str(lru.keys[0], "ix:b.mp4:0", "oldest untouched stays first")
+  assert_eq_str(lru.keys[1], "ix:a.mp4:0", "touched key promoted")
+  assert_eq_str(lru.keys[2], "ix:b.mp4:500", "newest key last")
+  lru.forget_prefix("ix:b.mp4:")
+  assert_eq_int(lru.keys.length(), 1, "prefix removed")
+  assert_eq_str(lru.keys[0], "ix:a.mp4:0", "unrelated segment kept")
+}
