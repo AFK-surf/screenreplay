@@ -71,6 +71,7 @@ pub struct Deck {
   stops : (Double) -> Bool
   ended : () -> Unit
   went : () -> Unit
+  on_shown : (Double) -> Unit
   shape : signals::Signal[Double]
   mut stream : Option[ui::Stream]
   mut seg : Int
@@ -86,6 +87,11 @@ pub struct Deck {
   mut waiting : Double
   mut waited_at : Double
   mut drained : Bool
+  mut scrub_at : Double
+  mut scrub_frames : Int
+  mut scrub_frame_ms : Double
+  mut scrub_no_drain : Bool
+  mut scrub_watchdog : Option[() -> Unit]
   mut warm : Double
   mut warm_pos : Double
   mut warm_since : Double
@@ -97,11 +103,12 @@ pub struct Deck {
   sound : Sound
 }
 
-fn Deck::new(count~ : () -> Int, file~ : (Int) -> String, start~ : (Int) -> Double, dur~ : (Int) -> Double, span~ : () -> Double, play~ : signals::Signal[Play], speed? : () -> Double, wants~ : () -> Bool, held? : () -> Bool, stops? : (Double) -> Bool, ended~ : () -> Unit, went? : () -> Unit, shape~ : signals::Signal[Double]) -> Deck {
+fn Deck::new(count~ : () -> Int, file~ : (Int) -> String, start~ : (Int) -> Double, dur~ : (Int) -> Double, span~ : () -> Double, play~ : signals::Signal[Play], speed? : () -> Double, wants~ : () -> Bool, held? : () -> Bool, stops? : (Double) -> Bool, ended~ : () -> Unit, went? : () -> Unit, on_shown? : (Double) -> Unit, shape~ : signals::Signal[Double]) -> Deck {
   let speed = match speed { Some(__mbt_v) => __mbt_v, None => fn() { 1.0 } }
   let held = match held { Some(__mbt_v) => __mbt_v, None => fn() { false } }
   let stops = match stops { Some(__mbt_v) => __mbt_v, None => fn(_) { false } }
   let went = match went { Some(__mbt_v) => __mbt_v, None => fn() {  } }
+  let on_shown = match on_shown { Some(__mbt_v) => __mbt_v, None => fn(_) {  } }
 
   Deck::{
     count: count,
@@ -116,6 +123,7 @@ fn Deck::new(count~ : () -> Int, file~ : (Int) -> String, start~ : (Int) -> Doub
     stops: stops,
     ended: ended,
     went: went,
+    on_shown: on_shown,
     shape: shape,
     stream: Option::None,
     seg: -1,
@@ -131,6 +139,11 @@ fn Deck::new(count~ : () -> Int, file~ : (Int) -> String, start~ : (Int) -> Doub
     waiting: -1.0,
     waited_at: 0.0,
     drained: false,
+    scrub_at: -1.0,
+    scrub_frames: 0,
+    scrub_frame_ms: 0.8,
+    scrub_no_drain: true,
+    scrub_watchdog: Option::None,
     warm: -1.0,
     warm_pos: 0.0,
     warm_since: 0.0,
@@ -228,6 +241,9 @@ fn Deck::stream(self : Deck) -> ui::Stream {
           if fps_log() {
             fps_drawn(ts, d.play.untracked().going)
           }
+          if d.stream is Some(st) && st.at == Some(ts) {
+            (d.on_shown)(ts)
+          }
           // Settle this frame and any older frames from the same flush epoch.
           for i in 0..<d.in_flight.length() {
             if (d.in_flight[i] - ts).abs() < 1.0 {
@@ -243,6 +259,13 @@ fn Deck::stream(self : Deck) -> ui::Stream {
           }
           if ts == d.waiting {
             d.waiting = -1.0
+            d.cancel_scrub_watchdog()
+            if d.scrub_frames >= 4 {
+              let dt = dmax(1.0, now() - d.waited_at - 6.0)
+              let per = clamp(dt / d.scrub_frames.to_double(), 0.2, 25.0)
+              d.scrub_frame_ms = d.scrub_frame_ms * 0.7 + per * 0.3
+            }
+            d.scrub_frames = 0
             match (d.step_to, d.later) {
               (Some((at, near)), _) => {
                 d.step_to = Option::None
@@ -424,6 +447,8 @@ fn Deck::open(self : Deck, i : Int) -> Bool {
         }
         self.config = t.config
         self.configured = true
+        self.drained = true
+        self.scrub_no_drain = true
       }
       if t.shown_h > 0 {
         self.shape.set(t.shown_w.to_double() / t.shown_h.to_double())
@@ -481,9 +506,38 @@ fn Deck::cancel_rest(self : Deck) -> Unit {
   }
   self.rest = Option::None}
 
+fn Deck::cancel_scrub_watchdog(self : Deck) -> Unit {
+  match self.scrub_watchdog {
+    Option::Some(stop) => stop()
+    Option::None => ()
+  }
+  self.scrub_watchdog = Option::None}
+
+fn Deck::arm_scrub_watchdog(self : Deck, w : Double, frames : Int) -> Unit {
+  self.cancel_scrub_watchdog()
+  match the_root.v {
+    Some(r) => {
+      let d = self
+      let patience = dmax(120.0, frames.to_double() * 5.0)
+      self.scrub_watchdog = Option::Some(
+        r.at_moment(now() + patience, fn() {
+          d.scrub_watchdog = Option::None
+          if d.waiting == w && !d.drained {
+            d.scrub_no_drain = false
+            d.stream().flush(drain=true)
+            d.drained = true
+          }
+        }),
+      )
+    }
+    None => ()
+  }}
+
 fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
   self.cancel()
   self.cancel_rest()
+  self.cancel_scrub_watchdog()
+  self.scrub_frames = 0
   self.later = Option::None
   let n = (self.count)()
   if n == 0 {
@@ -495,6 +549,7 @@ fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
   self.play.set(Play::{ pos: pos, at: now(), rate: (self.speed)(), going: going })
   self.sound_stop()
   self.step_to = Option::None
+  self.scrub_at = pos
   // While paused, coalesce rapid seeks until current decode completes to prevent decoder queue backlog.
   if !going && self.waiting >= 0.0 && now() - self.waited_at < 300.0 {
     self.step_to = Option::Some((at, near))
@@ -525,6 +580,10 @@ fn Deck::go(self : Deck, at : Double, near : Bool) -> Unit {
   ntrace("go seg=\{i} inside=\{inside} k=\{k} near=\{near}")
   let key = key_before(t, k)
   let last = if near { key } else { k }
+  if !going && self.waiting < 0.0 && self.shown_path == self.path && self.shown_k == last {
+    self.next = last + 1
+    return
+  }
   // Drain decoder when paused so the target frame isn't held back in its reorder/output queue.
   let s = self.stream()
   s.flush()
@@ -596,19 +655,69 @@ fn Deck::show_near(self : Deck, at : Double) -> Unit {
     return
   }
   guard self.track is Some(t) else { return }
-  let key = key_before(t, imax(0, sample_at(t, inside + 0.5)))
-  if self.shown_path == self.path && self.shown_k >= 0 && key_before(t, self.shown_k) == key {
+  let k = imax(0, sample_at(t, inside + 0.5))
+  let key = key_before(t, k)
+  let jump_ms = if self.scrub_at >= 0.0 { (at - self.scrub_at).abs() } else { 0.0 }
+  self.scrub_at = at
+  if self.shown_path == self.path && self.shown_k == k {
+    return
+  }
+  if t.codec == "gif" {
+    self.hand(t, k) |> ignore
+    self.next = k + 1
+    return
+  }
+  let same_gop_live = !self.drained && self.shown_path == self.path && self.next > 0 && key_before(t, self.next - 1) == key
+  let same_gop_shown = self.shown_path == self.path && self.shown_k >= 0 && key_before(t, self.shown_k) == key
+  let budget = imax(4, imin(60, (32.0 / dmax(0.2, self.scrub_frame_ms)).to_int()))
+  if same_gop_live && k >= self.next && self.scrub_no_drain {
+    let n = k - self.next + 1
+    if n <= budget * 2 {
+      for j in self.next..=k {
+        let ts = self.hand(t, j, show=j == k)
+        if j == k {
+          self.waiting = ts
+          self.waited_at = now()
+        }
+      }
+      self.scrub_frames = n
+      self.next = k + 1
+      self.arm_scrub_watchdog(self.waiting, n)
+      return
+    }
+  }
+  let dist = k - key
+  let target = if same_gop_shown && (dist <= budget * 2 || (jump_ms <= 600.0 && dist <= 120)) {
+    k
+  } else if jump_ms <= 600.0 && dist <= budget {
+    k
+  } else {
+    key
+  }
+  if self.shown_path == self.path && self.shown_k == target {
     return
   }
   let s = self.stream()
   s.flush()
   self.in_flight.clear()
   self.stalled_pump = false
-  self.waiting = self.hand(t, key)
-  self.waited_at = now()
-  s.flush(drain=true)
-  self.drained = true
-  self.next = key + 1}
+  let n = target - key + 1
+  for j in key..=target {
+    let ts = self.hand(t, j, show=j == target)
+    if j == target {
+      self.waiting = ts
+      self.waited_at = now()
+    }
+  }
+  self.scrub_frames = n
+  self.next = target + 1
+  if self.scrub_no_drain {
+    self.drained = false
+    self.arm_scrub_watchdog(self.waiting, n)
+  } else {
+    s.flush(drain=true)
+    self.drained = true
+  }}
 
 fn Deck::pump(self : Deck) -> Unit {
   self.cancel()
@@ -752,6 +861,9 @@ fn Deck::close(self : Deck) -> Unit {
   self.in_flight.clear()
   self.cancel()
   self.cancel_rest()
+  self.cancel_scrub_watchdog()
+  self.scrub_frames = 0
+  self.scrub_at = -1.0
   self.sound_stop()
   if self.sound.dec != 0 {
     rp_aac_close(self.sound.dec)
@@ -766,6 +878,8 @@ fn Deck::close(self : Deck) -> Unit {
 fn Deck::rest(self : Deck) -> Unit {
   self.cancel()
   self.cancel_rest()
+  self.cancel_scrub_watchdog()
+  self.scrub_frames = 0
   self.sound_stop()
   if self.sound.dec != 0 {
     rp_aac_close(self.sound.dec)
@@ -1052,6 +1166,61 @@ fn native() -> Deck {
       d
     }
   }}
+
+fn hover_deck() -> Deck {
+  match hover_deck_made.v {
+    Some(d) => d
+    None => {
+      let d = Deck::new(
+        count=fn() { segs.length() },
+        file=fn(i) { segs[i].path },
+        start=fn(i) { segs[i].start - t0() },
+        dur=fn(i) { segs[i].dur },
+        span=span,
+        play=hover_play,
+        wants=fn() { false },
+        held=fn() { true },
+        ended=fn() { () },
+        on_shown=fn(ts) { hover_shown_at.set(ts / 1000.0) },
+        shape=hover_aspect,
+      )
+      hover_deck_made.v = Some(d)
+      d
+    }
+  }}
+
+fn hover_scrub(at : Double) -> Unit {
+  if segs.is_empty() {
+    return
+  }
+  hover_deck().scrub(at)}
+
+fn hover_scrub_stop() -> Unit {
+  match hover_deck_made.v {
+    Some(d) => {
+      d.cancel_rest()
+      d.later = Option::None
+    }
+    None => ()
+  }}
+
+fn hover_deck_close() -> Unit {
+  match hover_deck_made.v {
+    Some(d) => {
+      d.close()
+      hover_deck_made.v = None
+    }
+    None => ()
+  }
+  hover_shown_at.set(-1.0e18)}
+
+fn hover_live_active(a : Double) -> Bool {
+  let shown = hover_shown_at.get()
+  if shown < -1.0e17 {
+    return false
+  }
+  let tol = dmax(2500.0, signals::untracked(view_len) * 0.04)
+  (shown - a).abs() <= tol}
 
 fn native_deck() -> Deck {
   Deck::new(count=fn() { segs.length() }, file=fn(i) { segs[i].path }, start=fn(i) { segs[i].start - t0() }, dur=fn(i) { segs[i].dur }, span=span, play=play, speed=fn() { speed.untracked() }, wants=fn() { want_play.untracked() }, held=fn() { (grabbed.untracked() == 3 && scrub_dragged.untracked()) || key_seeking.v }, stops=fn(p) {
