@@ -211,7 +211,7 @@ fn gap_labels(parent : view::View, w : () -> Double) -> Unit {
           (a, z - a - 1.0)
         }
         b
-        .height(view::Live::Is(Some(strip_h)))
+        .height(view::Live::Is(Some(strip_h())))
         .lines_up(view::Live::Is(Some(view::Along::Middle)))
         .lies_along(view::Live::Is(view::Lies::Middle))
         .laid_nowhere(view::Live::By(fn() { span().1 < 72.0 }))
@@ -383,7 +383,7 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
       let bx = fn() { x_drawn_of(c, clip_b.get(), w()) }
       c.box(fn(f) {
         f
-        .height(view::Live::Is(Some(strip_h)))
+        .height(view::Live::Is(Some(strip_h())))
         .ground(view::Live::By(fn() { tone(0xEDEEF033L, 0x17181B1FL) }))
         .width(view::Live::By(fn() { Some(dmax(1.0, clamp(bx(), 0.0, w()) - clamp(ax(), 0.0, w()))) }))
         .offset(view::Live::By(fn() { (clamp(ax(), 0.0, w()), 0.0) }))
@@ -397,10 +397,10 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
         c.box(fn(l) {
           l
           .width(view::Live::Is(Some(2.0)))
-          .height(view::Live::Is(Some(strip_h)))
+          .height(view::Live::Is(Some(strip_h())))
           .ground(view::Live::By(ui_accent))
           .alpha(view::Live::By(seen))
-          .offset(view::Live::By(fn() { (x() - 1.0, -(if end == 0 { strip_h } else { 2.0 * strip_h + 22.0 })) }))
+          .offset(view::Live::By(fn() { (x() - 1.0, -(if end == 0 { strip_h() } else { 2.0 * strip_h() + 22.0 })) }))
           |> ignore
         })
         |> ignore
@@ -412,7 +412,7 @@ fn clip_layer(band : view::View, w : () -> Double) -> Unit {
           .ground(view::Live::By(ui_accent))
           .edge(view::Live::By(fn() { (1.0, tone(0x00000066L, 0xFFFFFF99L)) }))
           .alpha(view::Live::By(seen))
-          .offset(view::Live::By(fn() { (x() - 4.0, (strip_h - 22.0) / 2.0 - (if end == 0 { 2.0 * strip_h } else { 3.0 * strip_h + 22.0 })) }))
+          .offset(view::Live::By(fn() { (x() - 4.0, (strip_h() - 22.0) / 2.0 - (if end == 0 { 2.0 * strip_h() } else { 3.0 * strip_h() + 22.0 })) }))
           |> ignore
         })
         |> ignore
@@ -441,7 +441,7 @@ fn clip_hint(band : view::View, w : () -> Double) -> Unit {
       .row(view::Live::Is(true))
       .lies_along(view::Live::Is(view::Lies::Middle))
       .lines_up(view::Live::Is(Some(view::Along::Middle)))
-      .height(view::Live::Is(Some(strip_h)))
+      .height(view::Live::Is(Some(strip_h())))
       .width(view::Live::By(fn() { Some(dmax(1.0, bx() - ax())) }))
       .offset(view::Live::By(fn() { (ax(), 0.0) }))
       .laid_nowhere(view::Live::By(fn() { !on() }))
@@ -512,7 +512,7 @@ fn hover_line(band : view::View, w : () -> Double) -> Unit {
     o.box(fn(l) {
       l
       .width(view::Live::Is(Some(1.0)))
-      .height(view::Live::Is(Some(strip_h)))
+      .height(view::Live::Is(Some(strip_h())))
       .ground(view::Live::By(fn() { tone(0xA0A4AB99L, 0x4A4E5599L) }))
       .laid_nowhere(view::Live::By(fn() { hover_now() is None || grabbed.get() != 0 || layer_over() }))
       .offset(view::Live::By(fn() { (clamp(hover_now().unwrap_or(0.0), 0.0, w()) - 0.5, 0.0) }))

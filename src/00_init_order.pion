@@ -516,7 +516,6 @@ let key_seeking : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
 let just_marked : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0)
 
-let strip_h : Double = 44.0
 
 let app_h : Double = 24.0
 

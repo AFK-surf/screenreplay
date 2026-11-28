@@ -316,7 +316,7 @@ fn set_full_screen(on : Bool) -> Unit {
 
 fn controls(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    row.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    row.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).margin(view::Live::Is((0.0, if signals::untracked(dock_floats) { 0.0 } else { 6.0 }, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     let play_key = fn(b : view::View, press : () -> Unit) { play_button(b, press) }
     row.box(fn(left) {
       left.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).clips(view::Live::Is(true)) |> ignore
@@ -480,7 +480,7 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     .row(view::Live::Is(true))
     .gap(view::Live::Is(2.0))
     .padding(view::Live::Is((8.0, 0.0, 5.0, 0.0)))
-    .height(view::Live::Is(Some(28.0)))
+    .height(view::Live::Is(Some(bar_h(28.0))))
     .radius(view::Live::By(fn() { hover_r(28.0) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
@@ -543,7 +543,7 @@ fn zoom_key(parent : view::View) -> Unit {
     .row(view::Live::Is(true))
     .gap(view::Live::Is(5.0))
     .padding(view::Live::Is((8.0, 0.0, 8.0, 0.0)))
-    .height(view::Live::Is(Some(28.0)))
+    .height(view::Live::Is(Some(bar_h(28.0))))
     .radius(view::Live::By(fn() { hover_r(28.0) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .ground(view::Live::By(fn() { mix(clear(c_hover()), c_hover(), hand.shown(b)) }))
@@ -579,17 +579,16 @@ fn dock(parent : view::View) -> Unit {
     .padding(view::Live::By(fn() { if dock_floats() { (16.0, 0.0, 16.0, 16.0) } else { (20.0, 0.0, 20.0, 10.0) } }))
     |> ignore
     d.pick(dock_floats, fn(p, floats) {
-      p.gap(view::Live::Is(if floats { 10.0 } else { 0.0 })) |> ignore
+      p.gap(view::Live::Is(if floats { 8.0 } else { 0.0 })) |> ignore
       if floats {
-        lg::liquid_panel_node(p, fn(panel) {
-          panel.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
-          panel.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
-          controls(panel)
-        }, radius=16.0, pad=12.0)
-        .padding(view::Live::Is((12.0, 0.0, 12.0, 10.0)))
-        .shadow(view::Live::By(fn() { (28.0, 8.0, sheet_shadow()) }))
-        .shadow_outside(view::Live::Is(true))
-        |> ignore
+        controls(p)
+        p.show(fn() { has_segs() }, fn(b) {
+          lg::liquid_panel_node(b, fn(panel) { timeline(panel) }, radius=lg::r_card, pad=12.0)
+          .padding(view::Live::Is((14.0, 6.0, 14.0, 8.0)))
+          .shadow(view::Live::By(float_shadow))
+          .shadow_outside(view::Live::Is(true))
+          |> ignore
+        }, at_once=true)
       } else {
         p.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
         p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)

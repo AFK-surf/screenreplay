@@ -6,6 +6,9 @@ import "signals"
 import "ui"
 import "view"
 
+fn strip_h() -> Double {
+  if signals::untracked(dock_floats) { app_h } else { app_h + 4.0 + wave_h }}
+
 fn app_name_usable(text : String) -> Bool {
   text != "" && !text.contains(" - ") && !text.contains(" — ") && !text.contains(" – ") && !text.contains(" | ") &&
   (text.contains(" ") || !text.contains(":"))
@@ -196,8 +199,8 @@ fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Ve
     let a = x_of(g.0)
     let b = x_of(g.1)
     if b - a >= 2.0 {
-      hatches.write_string(hatch_d(a, b - a - 1.0, strip_h))
-      boxes.write_string(rect_d(a + 0.5, 0.5, b - a - 2.0, strip_h - 1.0))
+      hatches.write_string(hatch_d(a, b - a - 1.0, strip_h()))
+      boxes.write_string(rect_d(a + 0.5, 0.5, b - a - 2.0, strip_h() - 1.0))
     }
   }
   let layers : Array[pixels::VectorPath] = []
@@ -213,10 +216,13 @@ fn grounds_picture(w : Double, from : Double, len : Double) -> Option[pixels::Ve
   if bd != "" {
     layers.push(layer(bd, 0L, stroke=hair(), width=1.0))
   }
-  Option::Some({ w: w, h: strip_h, layers: layers })}
+  Option::Some({ w: w, h: strip_h(), layers: layers })}
 
 // Sample peaks on a time-aligned grid so panning translates without reshaping the waveform.
 fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[pixels::Vector] {
+  if signals::untracked(dock_floats) {
+    return Option::None
+  }
   if w <= 0.0 || len <= 0.0 || segs.is_empty() {
     return Option::None
   }
@@ -233,14 +239,14 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
   }
   let r = fn(v : Double) { (v * 10.0).round() / 10.0 }
   let xs = mbt_compat::arr_makei(n, fn(i) { ((k0 + i.to_double()) * cell - from) / len * w })
-  let top_y = Array::make(n, strip_h)
+  let top_y = Array::make(n, strip_h())
   let mut any = false
   for i in 0..<n {
     let s = (raw[imax(0, i - 1)] + 4 * raw[i] + raw[imin(n - 1, i + 1)]).to_double() / 6.0
     if s >= 26.0 {
       any = true
       // Input is -50..0 dB mapped to 0..255; gamma 1.6 prevents typical -20 dB audio from pegging the top.
-      top_y[i] = r(strip_h - mbt_compat::math_pow(s / 255.0, 1.6) * (wave_h - 1.0))
+      top_y[i] = r(strip_h() - mbt_compat::math_pow(s / 255.0, 1.6) * (wave_h - 1.0))
     }
   }
   if !any {
@@ -260,7 +266,7 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
     }
     let mut piece_any = false
     for i in i0..=i1 {
-      if top_y[i] < strip_h {
+      if top_y[i] < strip_h() {
         piece_any = true
         break
       }
@@ -268,15 +274,15 @@ fn loud_picture(w : Double, from : Double, len : Double, ink : Int64) -> Option[
     if !piece_any {
       continue
     }
-    all_d.write_string("M\{r(clamp(xs[i0], a, b))} \{strip_h}")
+    all_d.write_string("M\{r(clamp(xs[i0], a, b))} \{strip_h()}")
     for i in i0..=i1 {
       all_d.write_string("L\{r(clamp(xs[i], a, b))} \{top_y[i]}")
     }
-    all_d.write_string("L\{r(clamp(xs[i1], a, b))} \{strip_h}Z")
+    all_d.write_string("L\{r(clamp(xs[i1], a, b))} \{strip_h()}Z")
   }
   let d = all_d.to_string()
   let layers : Array[pixels::VectorPath] = if d == "" { [] } else { [layer(d, ink)] }
-  Option::Some({ w: w, h: strip_h, layers: layers })}
+  Option::Some({ w: w, h: strip_h(), layers: layers })}
 
 fn heat_ink(v : Double) -> Int64 {
   let stops : Array[(Double, Int64)] = [(0.0, 0xFFC44000L), (0.3, 0xFFC4405CL), (0.65, 0xFF8C28A6L), (1.0, 0xEB3232D9L)]
@@ -388,7 +394,7 @@ fn playhead(band : view::View, w : () -> Double) -> Unit {
   }
   let cap_x = fn(v : view::View, x : Double) { clamp(x - cw(v) / 2.0, 0.0, dmax(0.0, w() - cw(v))) }
   let cap_h = 19.0
-  let total_h = 23.0 + strip_h
+  let total_h = 23.0 + strip_h()
   // Lift 0.5 pt to optically center digits (no descenders).
   let time = fn(b : view::View) {
     b.lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::Middle)) |> ignore
@@ -700,7 +706,7 @@ fn timeline(parent : view::View) -> Unit {
     held.box(fn(band) {
       band_node.v = Some(band)
       band
-      .height(view::Live::Is(Some(strip_h + tick_lane)))
+      .height(view::Live::Is(Some(strip_h() + tick_lane)))
       .presses(view::Live::Is(true))
       .cursor(view::Live::By(fn() {
         Some(
@@ -758,14 +764,14 @@ fn timeline(parent : view::View) -> Unit {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(g) {
             g
-            .height(view::Live::Is(Some(strip_h)))
+            .height(view::Live::Is(Some(strip_h())))
             .width(view::Live::By(fn() { Some(cover.get().2) }))
             .drawn_off(view::Live::By(fn() { slid(g) }), exact=true)
             .picture(view::Live::By(fn() {
               data()
               let (at, len, cw) = cover.get()
               let g = ax_picture(cw, at, len, grounds_picture)
-              match (g, seams_picture(cw, at, len, strip_h)) {
+              match (g, seams_picture(cw, at, len, strip_h())) {
                 (Some(p), Some(s)) => {
                   let ls = p.layers.copy()
                   arr_append(ls, s.layers)
@@ -860,7 +866,7 @@ fn timeline(parent : view::View) -> Unit {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(l) {
             l
-            .height(view::Live::Is(Some(strip_h)))
+            .height(view::Live::Is(Some(strip_h())))
             .width(view::Live::By(fn() { Some(loud_cover.get().2) }))
             .drawn_off(view::Live::By(fn() { loud_slid(l) }), exact=true)
             .picture(view::Live::By(fn() { loud.get() }))
@@ -881,7 +887,7 @@ fn timeline(parent : view::View) -> Unit {
           }
           cut.box(fn(c) {
             c
-            .height(view::Live::Is(Some(strip_h)))
+            .height(view::Live::Is(Some(strip_h())))
             .clips(view::Live::Is(true))
             .width(view::Live::By(fn() { Some(w()) }))
             .drawn_off(view::Live::By(fn() { (played(c) - w(), 0.0) }), exact=true)
@@ -889,7 +895,7 @@ fn timeline(parent : view::View) -> Unit {
             c.box(fn(l) {
               l
               .width(view::Live::By(fn() { Some(loud_cover.get().2) }))
-              .height(view::Live::Is(Some(strip_h)))
+              .height(view::Live::Is(Some(strip_h())))
               .drawn_off(view::Live::By(fn() { (w() - played(l) + loud_slid(l).0, 0.0) }), exact=true)
               .picture(view::Live::By(fn() { loud.get() }))
               .tint(view::Live::By(fn() { tone(0xEDEEF046L, 0x17181B37L) }))
@@ -907,7 +913,7 @@ fn timeline(parent : view::View) -> Unit {
           o.over(view::Live::Is(true)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
           o.box(fn(g) {
             g
-            .height(view::Live::Is(Some(strip_h)))
+            .height(view::Live::Is(Some(strip_h())))
             .width(view::Live::By(fn() { Some(cover.get().2) }))
             .drawn_off(view::Live::By(fn() { slid(g) }), exact=true)
             .picture(view::Live::By(fn() {
@@ -938,7 +944,9 @@ fn timeline(parent : view::View) -> Unit {
     })
     |> ignore
     window_strip(held, w)
-    overview(held)
+    if !signals::untracked(dock_floats) {
+      overview(held)
+    }
   })
   |> ignore}
 fn __mbt_local_edge_scroll_step_12(band : view::View, w : Double, last : Double) -> Unit {
