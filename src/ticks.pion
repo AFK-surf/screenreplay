@@ -163,7 +163,7 @@ fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
         .height(view::Live::Is(Some(tick_h)))
         .ground(view::Live::By(fn() { if tick.major { tone(0xFFFFFF99L, 0x00000099L) } else { tone(0xFFFFFF66L, 0x00000066L) } }))
         .laid_nowhere(view::Live::By(fn() { place(l) is None }))
-        .offset(view::Live::By(fn() { (x(l) - 0.5, strip_h()) }))
+        .offset(view::Live::By(fn() { (x(l) - 0.5, strip_h) }))
         |> ignore
       })
       |> ignore
@@ -171,7 +171,7 @@ fn time_ticks(parent : view::View, w : () -> Double) -> Unit {
         b
         .over(view::Live::Is(true))
         .laid_nowhere(view::Live::By(fn() { place(b) is None }))
-        .offset(view::Live::By(fn() { (place(b).unwrap_or(0.0), strip_h() + 2.0) }))
+        .offset(view::Live::By(fn() { (place(b).unwrap_or(0.0), strip_h + 2.0) }))
         |> ignore
         words(b, fn() { tick.text }, tick_size, if tick.major { ui_text } else { ui_muted }, weight=if tick.major {
           600

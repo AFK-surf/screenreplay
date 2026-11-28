@@ -98,8 +98,6 @@ fn glyph_vector(name : String) -> Option[pixels::Vector] {
           ("M8.12 8.12L12 12", 2.25),
         ]),
       )
-    "panel-float" => Option::Some(vectors(16.0, 16.0, [("M3 2.75h10a1.25 1.25 0 0 1 1.25 1.25v8a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12V4A1.25 1.25 0 0 1 3 2.75z", 1.4), ("M4.75 10.25h6.5", 1.6)]))
-    "panel-dock" => Option::Some(vectors(16.0, 16.0, [("M3 2.75h10a1.25 1.25 0 0 1 1.25 1.25v8a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12V4A1.25 1.25 0 0 1 3 2.75z", 1.4), ("M1.75 10h12.5", 1.4)]))
     "to-end" => Option::Some(vectors(24.0, 24.0, [("M17 12H3", 2.25), ("M11 18l6-6-6-6", 2.25), ("M21 5v14", 2.25)]))
     "warn-tri" =>
       Option::Some(
@@ -181,9 +179,9 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
   pressable(parent, label, press, fn(b) {
     let (hand, _) = answer(b)
     b
-    .width(view::Live::Is(Some(if signals::untracked(dock_floats) { 30.0 } else { w })))
-    .height(view::Live::Is(Some(bar_h(h))))
-    .radius(view::Live::By(fn() { hover_r(h) }))
+    .width(view::Live::Is(Some(w)))
+    .height(view::Live::Is(Some(h)))
+    .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))
@@ -201,32 +199,17 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
     })
   })}
 
-fn hover_r(h : Double) -> Double {
-  if dock_floats() { 15.0 } else { 6.0 }}
-
-fn bar_h(h : Double) -> Double {
-  if signals::untracked(dock_floats) { 30.0 } else { h }}
-
-fn float_shadow() -> (Double, Double, Int64) {
-  (22.0, 6.0, tone(0x00000066L, 0x0000002EL))}
-
 fn capsule(parent : view::View, make : (view::View) -> Unit) -> view::View {
-  let floats = signals::untracked(dock_floats)
-  if floats {
-    return lg::liquid_toolbar_node(parent, make, height=36.0, pad=3.0, gap=2.0)
-  }
   parent.box(fn(c) {
     c
     .row(view::Live::Is(true))
-    .height(view::Live::Is(Some(if floats { 40.0 } else { 36.0 })))
-    .padding(view::Live::Is(if floats { (6.0, 0.0, 6.0, 0.0) } else { (4.0, 0.0, 4.0, 0.0) }))
+    .height(view::Live::Is(Some(36.0)))
+    .padding(view::Live::Is((4.0, 0.0, 4.0, 0.0)))
     .gap(view::Live::Is(2.0))
-    .radius(view::Live::Is(if floats { 20.0 } else { 9.0 }))
+    .radius(view::Live::Is(9.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .ground(view::Live::By(c_s1))
     .edge(view::Live::By(fn() { (1.0, hair()) }))
-    .shadow(view::Live::By(fn() { if floats { float_shadow() } else { (0.0, 0.0, 0L) } }))
-    .shadow_outside(view::Live::Is(true))
     |> ignore
     make(c)
   })}
@@ -235,15 +218,12 @@ fn capsule_rule(parent : view::View) -> Unit {
   parent.box(fn(r) { r.width(view::Live::Is(Some(1.0))).height(view::Live::Is(Some(16.0))).margin(view::Live::Is((3.0, 0.0, 3.0, 0.0))).ground(view::Live::By(hair2)) |> ignore }) |> ignore}
 
 fn solid_icon_button(parent : view::View, icon : String, label : () -> String, press : () -> Unit) -> view::View {
-  let floats = signals::untracked(dock_floats)
   pressable(parent, label, press, fn(b) {
     let (hand, _) = answer(b)
     b
     .width(view::Live::Is(Some(36.0)))
     .height(view::Live::Is(Some(36.0)))
-    .radius(view::Live::Is(if floats { 18.0 } else { 9.0 }))
-    .shadow(view::Live::By(fn() { if floats { float_shadow() } else { (0.0, 0.0, 0L) } }))
-    .shadow_outside(view::Live::Is(true))
+    .radius(view::Live::Is(9.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
@@ -351,8 +331,8 @@ fn play_button(parent : view::View, press : () -> Unit, playing? : () -> Bool, s
     b.reacts(playing, fn(on) { morph.go_ms(b, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else { 180.0 }) })
     b
     .width(view::Live::Is(Some(36.0)))
-    .height(view::Live::Is(Some(bar_h(32.0))))
-    .radius(view::Live::By(fn() { hover_r(32.0) }))
+    .height(view::Live::Is(Some(32.0)))
+    .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))

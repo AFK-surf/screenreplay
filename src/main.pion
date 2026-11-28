@@ -1,6 +1,5 @@
 import "hostapi"
 import "host"
-import "lg"
 import "mbt_compat"
 import "signals"
 import "ui"
@@ -204,12 +203,6 @@ fn title_bar(parent : view::View) -> Unit {
         content.box(fn(tools) {
           tools.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).padding(view::Live::Is((0.0, 0.0, if mac { 14.0 } else { 6.0 }, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
           recorder_chip(tools)
-          icon_button(tools, fn() { if float_controls.get() { "panel-dock" } else { "panel-float" } }, fn() { if float_controls.get() { t("停靠控制条") } else { t("浮动控制条") } }, fn() {
-            float_controls.set(!float_controls.untracked())
-            save_prefs()
-          }, side=view::Side::Bottom)
-          .laid_nowhere(view::Live::By(fn() { library_open.get() || !has_segs() }))
-          |> ignore
           icon_button(tools, fn() { if library_open.get() { "folder" } else { "clips" } }, fn() { if library_open.get() { t("打开文件夹") } else { t("已保存片段") } }, fn() {
             if library_open.untracked() {
               rp_mkdirs(cstr(clips_dir())) |> ignore
@@ -316,7 +309,7 @@ fn set_full_screen(on : Bool) -> Unit {
 
 fn controls(parent : view::View) -> Unit {
   parent.box(fn(row) {
-    row.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).margin(view::Live::Is((0.0, if signals::untracked(dock_floats) { 0.0 } else { 6.0 }, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
+    row.row(view::Live::Is(true)).height(view::Live::Is(Some(36.0))).margin(view::Live::Is((0.0, 6.0, 0.0, 0.0))).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
     let play_key = fn(b : view::View, press : () -> Unit) { play_button(b, press) }
     row.box(fn(left) {
       left.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).clips(view::Live::Is(true)) |> ignore
@@ -480,8 +473,8 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     .row(view::Live::Is(true))
     .gap(view::Live::Is(2.0))
     .padding(view::Live::Is((8.0, 0.0, 5.0, 0.0)))
-    .height(view::Live::Is(Some(bar_h(28.0))))
-    .radius(view::Live::By(fn() { hover_r(28.0) }))
+    .height(view::Live::Is(Some(28.0)))
+    .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {
@@ -543,8 +536,8 @@ fn zoom_key(parent : view::View) -> Unit {
     .row(view::Live::Is(true))
     .gap(view::Live::Is(5.0))
     .padding(view::Live::Is((8.0, 0.0, 8.0, 0.0)))
-    .height(view::Live::Is(Some(bar_h(28.0))))
-    .radius(view::Live::By(fn() { hover_r(28.0) }))
+    .height(view::Live::Is(Some(28.0)))
+    .radius(view::Live::Is(6.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .ground(view::Live::By(fn() { mix(clear(c_hover()), c_hover(), hand.shown(b)) }))
     .laid_nowhere(view::Live::By(fn() { !has_segs() }))
@@ -567,34 +560,14 @@ fn zoom_key(parent : view::View) -> Unit {
   tip(k, zoom_tip)
   key.v = Some(k)}
 
-fn dock_floats() -> Bool {
-  float_controls.get() && !full_screen.get()}
-
 fn dock(parent : view::View) -> Unit {
-  parent.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(hair)).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore
+  rule(parent, hair)
   parent.box(fn(d) {
     // Top padding (dock_over) lives inside timeline() so hover preview covers the heatmap and margin above it.
-    d
-    .ground(view::Live::By(fn() { if dock_floats() { clear(c_bg()) } else { c_bg() } }))
-    .padding(view::Live::By(fn() { if dock_floats() { (16.0, 0.0, 16.0, 16.0) } else { (20.0, 0.0, 20.0, 10.0) } }))
-    |> ignore
-    d.pick(dock_floats, fn(p, floats) {
-      p.gap(view::Live::Is(if floats { 8.0 } else { 0.0 })) |> ignore
-      if floats {
-        controls(p)
-        p.show(fn() { has_segs() }, fn(b) {
-          lg::liquid_panel_node(b, fn(panel) { timeline(panel) }, radius=lg::r_card, pad=12.0)
-          .padding(view::Live::Is((14.0, 6.0, 14.0, 8.0)))
-          .shadow(view::Live::By(float_shadow))
-          .shadow_outside(view::Live::Is(true))
-          |> ignore
-        }, at_once=true)
-      } else {
-        p.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
-        p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
-        controls(p)
-      }
-    }, at_once=true)
+    d.ground(view::Live::By(c_bg)).padding(view::Live::Is((20.0, 0.0, 20.0, 10.0))) |> ignore
+    d.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
+    d.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
+    controls(d)
   })
   |> ignore}
 
@@ -880,11 +853,8 @@ fn make_window(root : view::View) -> Unit {
   picture(root)
   // Spacer keeps the dock pinned to the bottom when picture switches to over() in fullscreen.
   root.box(fn(s) { s.grow(view::Live::Is(1.0)).laid_nowhere(view::Live::By(fn() { !full_screen.get() })) |> ignore }) |> ignore
-  let foot = root.box(fn(b) {
-    b.over(view::Live::By(dock_floats), edges=(Some(0.0), None, Some(0.0), Some(0.0))) |> ignore
-    dock(b)
-  })
-  chrome(root, foot, foot=true)
+  let foot = root.box(fn(b) { dock(b) })
+  chrome(root, foot)
   library_layer(root)
   settings_dialog(root)
   window_options_layer(root)

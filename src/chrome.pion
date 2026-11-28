@@ -108,12 +108,10 @@ fn volume_control(parent : view::View, stage? : Bool, rate? : () -> Double) -> U
   })
   |> ignore}
 
-fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
-  let foot = match foot { Some(__mbt_v) => __mbt_v, None => false }
-  let floats = fn() { full_screen.get() || (foot && float_controls.get()) }
+fn chrome(root : view::View, bar : view::View) -> Unit {
   let way = motion::NodeWay::new(1.0)
   let wanted = fn() {
-    !floats() ||
+    !full_screen.get() ||
     (pointer_lately.v)() ||
     clipping.get() ||
     menu_up.get() ||
@@ -127,7 +125,7 @@ fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
   bars_wanted.v = wanted
   root.reacts(wanted, fn(on) {
     way.go_ms(root, if on { 1.0 } else { 0.0 }, if motion_off() { 1.0 } else if on { 120.0 } else { 200.0 })
-    if !on && full_screen.untracked() {
+    if !on {
       rp_hide_cursor()
     }
   })
@@ -135,7 +133,7 @@ fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
   .on_pointer_moved(fn() { (pointer_moved.v)() })
   .alpha(view::Live::By(fn() { way.shown(bar) }))
   .over_all(view::Live::By(fn() { full_screen.get() }))
-  .laid_nowhere(view::Live::By(fn() { floats() && way.shown(bar) <= 0.0 }))
+  .laid_nowhere(view::Live::By(fn() { full_screen.get() && way.shown(bar) <= 0.0 }))
   |> ignore}
 
 fn watch_pointer(root : view::View) -> Unit {
