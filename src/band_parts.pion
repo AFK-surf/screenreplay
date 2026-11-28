@@ -2,6 +2,7 @@ import "mbt_compat"
 import "motion"
 import "pixels"
 import "signals"
+import "ui"
 import "view"
 
 fn hover_now() -> Option[Double] {
@@ -567,9 +568,12 @@ fn away_chip(band : view::View, w : () -> Double) -> Unit {
 
 fn hover_card(band : view::View, w : () -> Double) -> Unit {
   let card_w = 288.0
-  let pic_h = (card_w - 8.0) * 9.0 / 16.0
+  let pic_w = card_w - 8.0
+  let pic_h = pic_w * 9.0 / 16.0
   let card_h = pic_h + 40.0
   let last_key : mbt_compat::Ref[String] = mbt_compat::ref_new("")
+  let recent_keys : Array[String] = []
+  let last_hover_at : mbt_compat::Ref[Double] = mbt_compat::ref_new(-1.0)
   band.box(fn(o) {
     o.over(view::Live::Is(true)).presses(view::Live::Is(false)).lines_up(view::Live::Is(Some(view::Along::Start))) |> ignore
     // Hold hover 120 ms on leave to prevent card flicker during transient pointer-leave events.
@@ -594,6 +598,42 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
         Option::None => signals::untracked(fn() { shown_now_at.v })
       }
     }
+    let live_mode = fn() -> Int {
+      data()
+      if !shown_now() {
+        return 0
+      }
+      let a = at()
+      if seg_at(t0() + a) is None {
+        return 0
+      }
+      let g = grabbed.get()
+      if g == 3 {
+        1
+      } else if g == 0 && hover_live_active(a) {
+        2
+      } else {
+        0
+      }
+    }
+    o.reacts(fn() {
+      data()
+      if !shown_now() || grabbed.get() != 0 {
+        return -1.0
+      }
+      let a = at()
+      if seg_at(t0() + a) is None {
+        -1.0
+      } else {
+        a
+      }
+    }, fn(a) {
+      if a >= 0.0 {
+        hover_scrub(a)
+      } else {
+        hover_scrub_stop()
+      }
+    })
     o.box(fn(card) {
       card
       .width(view::Live::Is(Some(card_w)))
@@ -612,7 +652,9 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
           Some(x) => x
           None => {
             let x = clamp(x_drawn_of(card, a, w()) - card_w / 2.0, 0.0, dmax(0.0, w() - card_w))
-            placed.v = Some(x)
+            if signals::untracked(shown_now) && w() > 0.0 {
+              placed.v = Some(x)
+            }
             x
           }
         }
@@ -634,19 +676,20 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
           let a = at()
           if seg_at(t0() + a) is None {
             last_key.v = ""
+            recent_keys.clear()
             return None
           }
           let want = thumb_key(a)
-          // Prefetch nearby 500 ms index thumbs while hovering; skip while scrubbing to avoid decode contention.
-          if grabbed.get() == 0 {
-            let sec = (a / 500.0).floor().to_int()
-            if sec != last_prefetch_sec.v {
-              last_prefetch_sec.v = sec
-              for d in [500.0, -500.0, 1000.0, -1000.0, 1500.0, -1500.0, 2000.0, -2000.0, 3000.0, -3000.0] {
-                let k = thumb_key(a + d)
-                if k != "" {
-                  pic.image_ask(k, card_px)
-                }
+          let step = dmax(500.0, signals::untracked(view_len) / 48.0)
+          let dir = if last_hover_at.v >= 0.0 && a < last_hover_at.v { -1.0 } else { 1.0 }
+          last_hover_at.v = a
+          let bucket = (a / step).floor().to_int()
+          if bucket != last_prefetch_sec.v {
+            last_prefetch_sec.v = bucket
+            for d in [step * dir, step * 2.0 * dir, step * 3.0 * dir, -step * dir] {
+              let k = thumb_key(a + d)
+              if k != "" {
+                pic.image_ask(k, card_px)
               }
             }
           }
@@ -656,21 +699,46 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
             }
             return if last_key.v == "" { None } else { Some((last_key.v, "", card_px.to_int())) }
           }
+          if recent_keys.is_empty() || recent_keys[recent_keys.length() - 1] != want {
+            recent_keys.push(want)
+            if recent_keys.length() > 6 {
+              arr_remove(recent_keys, 0) |> ignore
+            }
+          }
           let ready = pic.image_ready(want, 1.0)
-          let stand_in = last_key.v
           if ready {
             last_key.v = want
+          } else {
+            let mut j = recent_keys.length() - 1
+            while j >= 0 {
+              let rk = recent_keys[j]
+              if rk != want && pic.image_ready(rk, 1.0) {
+                last_key.v = rk
+                break
+              }
+              j -= 1
+            }
           }
+          let stand_in = last_key.v
           Some((want, if ready { "" } else { stand_in }, card_px.to_int()))
         }))
         .image_contains(view::Live::Is(true))
         |> ignore
+        pic.pick(live_mode, fn(ov, mode) {
+          if mode == 1 {
+            ov.over(view::Live::Is(true)).width(view::Live::Is(Some(pic_w))).height(view::Live::Is(Some(pic_h))).presses(view::Live::Is(false)) |> ignore
+            ui::stream(ov, native().stream(), fit=ui::FitContain, closes=false).grow(view::Live::Is(1.0)) |> ignore
+          } else if mode == 2 {
+            ov.over(view::Live::Is(true)).width(view::Live::Is(Some(pic_w))).height(view::Live::Is(Some(pic_h))).presses(view::Live::Is(false)) |> ignore
+            ui::stream(ov, hover_deck().stream(), fit=ui::FitContain, closes=false).grow(view::Live::Is(1.0)) |> ignore
+          }
+        }, at_once=true)
         let missing_due : mbt_compat::Ref[() -> Unit] = mbt_compat::ref_new(fn() {  })
         pic.reacts(fn() {
           data()
           idx_tick.get() |> ignore
           let a = at()
-          seg_at(t0() + a) is Some(_) && thumb_key(a) == ""
+          seg_at(t0() + a) is Some(_) && thumb_key(a) == "" && live_mode() == 0
         }, fn(missing) {
           (missing_due.v)()
           missing_long.set(false)
@@ -685,7 +753,7 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
             idx_tick.get() |> ignore
             if seg_at(t0() + at()) is None {
               t("这段时间没有录制")
-            } else if missing_long.get() {
+            } else if missing_long.get() && live_mode() == 0 {
               if thumb_failed(at()) {
                 t("这一段没法生成预览")
               } else {
@@ -700,7 +768,18 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
       |> ignore
       card.box(fn(foot) {
         foot.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).padding(view::Live::Is((6.0, 0.0, 6.0, 0.0))).gap(view::Live::Is(8.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
-        words(foot, fn() { wall(t0() + picture_time(last_key.v, at())) }, 12.0, ui_text, weight=500) |> ignore
+        words(foot, fn() {
+          let a = at()
+          let m = live_mode()
+          let t_shown = if m == 1 {
+            a
+          } else if m == 2 {
+            hover_shown_at.get()
+          } else {
+            picture_time(last_key.v, a)
+          }
+          wall(t0() + t_shown)
+        }, 12.0, ui_text, weight=500) |> ignore
         words(foot, fn() { ago(t0() + at()) }, 12.0, ui_subtle) |> ignore
         spring(foot)
         foot.box(fn(app) {

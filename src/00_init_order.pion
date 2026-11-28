@@ -226,6 +226,15 @@ let tracks_read : mbt_compat::OrderedMap[String, Array[Mp4Track]] = mbt_compat::
 
 let native_made : mbt_compat::Ref[Option[Deck]] = mbt_compat::ref_new(None)
 
+let hover_deck_made : mbt_compat::Ref[Option[Deck]] = mbt_compat::ref_new(None)
+
+let hover_play : signals::Signal[Play] = signals::signal_by(Play::{ pos: 0.0, at: 0.0, rate: 1.0, going: false }, fn(a, b) {
+  a == b})
+
+let hover_aspect : signals::Signal[Double] = signals::signal_by(16.0 / 9.0, fn(a, b) { a == b })
+
+let hover_shown_at : signals::Signal[Double] = signals::signal_by(-1.0e18, fn(a, b) { a == b })
+
 let step_flushed : mbt_compat::Ref[Double] = mbt_compat::ref_new(0.0)
 
 let note_w : Double = 360.0

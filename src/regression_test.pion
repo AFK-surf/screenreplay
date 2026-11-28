@@ -382,3 +382,16 @@ test "tip uses upstream kit::tip_node with 400ms delay, Esc priority, and menu d
   close_menu()
   t.dispose()
 }
+
+test "hover_live_active tolerance tracks view_len and closes cleanly" {
+  test_reset_fixture()
+  view_duration.set(60000.0)
+  hover_deck_close()
+  assert_true(!hover_live_active(10000.0), "inactive when uninitialized")
+  hover_shown_at.set(10000.0)
+  assert_true(hover_live_active(11000.0), "active within 2.5s tolerance")
+  assert_true(!hover_live_active(15000.0), "inactive past tolerance on 60s view")
+  hover_scrub_stop()
+  hover_deck_close()
+  assert_true(!hover_live_active(10000.0), "inactive after hover_deck_close")
+}

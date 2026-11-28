@@ -131,6 +131,7 @@ fn let_go_while_hidden() -> Unit {
     Some(d) => d.rest()
     None => ()
   }
+  hover_deck_close()
   rp_play_release()
   rp_thumb_release()
   rp_frame_release()
