@@ -104,13 +104,13 @@ fn filter_dim_picture(w : Double, from : Double, len : Double, f : Array[String]
     let a = x_of(p.0)
     let b = x_of(p.1)
     if b - a >= 1.0 {
-      fill.write_string(rect_d(a, 0.0, b - a, strip_h))
-      lines.write_string(hatch_d(a, b - a, strip_h))
+      fill.write_string(rect_d(a, 0.0, b - a, strip_h()))
+      lines.write_string(hatch_d(a, b - a, strip_h()))
     }
   }
   Option::Some({
     w: w,
-    h: strip_h,
+    h: strip_h(),
     layers: [
       layer(fill.to_string(), tone(0x1B1C1FC0L, 0xF2F3F5C0L)),
       layer(lines.to_string(), 0L, stroke=tone(0xFFFFFF10L, 0x00000012L), width=1.0),
@@ -137,6 +137,7 @@ fn front_words(ms : Double) -> String {
   }}
 
 fn apps_key(parent : view::View) -> Unit {
+  let fl = float_bar.v
   let k = pressable(parent, fn() { t("按应用统计和过滤") }, fn() {
     apps_more.set(false)
     apps_open.set(true)
@@ -148,8 +149,8 @@ fn apps_key(parent : view::View) -> Unit {
     .gap(view::Live::Is(5.0))
     .padding(view::Live::By(fn() { if filter_on() { (8.0, 0.0, 4.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } }))
     .width(view::Live::By(fn() { if filter_on() { None } else { Some(32.0) } }))
-    .height(view::Live::Is(Some(28.0)))
-    .radius(view::Live::Is(6.0))
+    .height(view::Live::Is(Some(if fl { 32.0 } else { 28.0 })))
+    .radius(view::Live::Is(if fl { 16.0 } else { 6.0 }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {

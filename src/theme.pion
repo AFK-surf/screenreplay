@@ -29,6 +29,7 @@ fn load_prefs() -> Unit {
       }
       muted.set(o.get("muted") is Some(True))
       fold_gaps.set(!(o.get("fold_gaps") is Some(False)))
+      float_controls.set(o.get("float_controls") is Some(True))
       hidden_from_capture.set(!(o.get("hide_from_capture") is Some(False)))
       match o.get("appearance") {
         Option::Some(String(v)) => appearance.set(v)
@@ -52,7 +53,7 @@ fn load_prefs() -> Unit {
 
 fn save_prefs() -> Unit {
   signals::untracked(fn() {
-    rp_write(cstr(viewer_path()), mbt_compat::utf8_encode("{\"volume\":\{volume.get()},\"muted\":\{muted.get()},\"appearance\":\"\{appearance.get()}\",\"language\":\"\{language.get()}\",\"export_format\":\"\{format_names[export_format.get()]}\",\"gif_fps\":\{gif_fps.get()},\"hide_from_capture\":\{hidden_from_capture.get()},\"fold_gaps\":\{fold_gaps.get()}}"))
+    rp_write(cstr(viewer_path()), mbt_compat::utf8_encode("{\"volume\":\{volume.get()},\"muted\":\{muted.get()},\"appearance\":\"\{appearance.get()}\",\"language\":\"\{language.get()}\",\"export_format\":\"\{format_names[export_format.get()]}\",\"gif_fps\":\{gif_fps.get()},\"hide_from_capture\":\{hidden_from_capture.get()},\"fold_gaps\":\{fold_gaps.get()},\"float_controls\":\{float_controls.get()}}"))
   })
   |> ignore}
 
