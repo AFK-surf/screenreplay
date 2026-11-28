@@ -481,7 +481,7 @@ fn speed_key(parent : view::View, now? : () -> Double, set? : (Double) -> Unit, 
     .gap(view::Live::Is(2.0))
     .padding(view::Live::Is((8.0, 0.0, 5.0, 0.0)))
     .height(view::Live::Is(Some(28.0)))
-    .radius(view::Live::Is(6.0))
+    .radius(view::Live::By(fn() { hover_r(28.0) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {
@@ -544,7 +544,7 @@ fn zoom_key(parent : view::View) -> Unit {
     .gap(view::Live::Is(5.0))
     .padding(view::Live::Is((8.0, 0.0, 8.0, 0.0)))
     .height(view::Live::Is(Some(28.0)))
-    .radius(view::Live::Is(6.0))
+    .radius(view::Live::By(fn() { hover_r(28.0) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .ground(view::Live::By(fn() { mix(clear(c_hover()), c_hover(), hand.shown(b)) }))
     .laid_nowhere(view::Live::By(fn() { !has_segs() }))
@@ -580,18 +580,21 @@ fn dock(parent : view::View) -> Unit {
     |> ignore
     d.pick(dock_floats, fn(p, floats) {
       p.gap(view::Live::Is(if floats { 10.0 } else { 0.0 })) |> ignore
-      p.show(fn() { has_segs() }, fn(b) {
-        if floats {
-          lg::liquid_panel_node(b, fn(panel) { timeline(panel) }, radius=16.0, pad=10.0)
-          .shadow(view::Live::By(fn() { (28.0, 8.0, sheet_shadow()) }))
-          .shadow_outside(view::Live::Is(true))
-          |> ignore
-        } else {
-          timeline(b)
-        }
-      }, at_once=true)
-      p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
-      controls(p)
+      if floats {
+        lg::liquid_panel_node(p, fn(panel) {
+          panel.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
+          panel.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
+          controls(panel)
+        }, radius=16.0, pad=12.0)
+        .padding(view::Live::Is((12.0, 0.0, 12.0, 10.0)))
+        .shadow(view::Live::By(fn() { (28.0, 8.0, sheet_shadow()) }))
+        .shadow_outside(view::Live::Is(true))
+        |> ignore
+      } else {
+        p.show(fn() { has_segs() }, fn(b) { timeline(b) }, at_once=true)
+        p.show(fn() { !has_segs() }, fn(b) { b.height(view::Live::Is(Some(dock_over))) |> ignore }, at_once=true)
+        controls(p)
+      }
     }, at_once=true)
   })
   |> ignore}

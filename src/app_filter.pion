@@ -149,7 +149,7 @@ fn apps_key(parent : view::View) -> Unit {
     .padding(view::Live::By(fn() { if filter_on() { (8.0, 0.0, 4.0, 0.0) } else { (0.0, 0.0, 0.0, 0.0) } }))
     .width(view::Live::By(fn() { if filter_on() { None } else { Some(32.0) } }))
     .height(view::Live::Is(Some(28.0)))
-    .radius(view::Live::Is(6.0))
+    .radius(view::Live::By(fn() { hover_r(28.0) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .ground(view::Live::By(fn() {

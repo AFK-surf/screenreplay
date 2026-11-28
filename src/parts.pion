@@ -183,7 +183,7 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
     b
     .width(view::Live::Is(Some(w)))
     .height(view::Live::Is(Some(h)))
-    .radius(view::Live::Is(6.0))
+    .radius(view::Live::By(fn() { hover_r(h) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))
@@ -201,10 +201,10 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
     })
   })}
 
+fn hover_r(h : Double) -> Double {
+  if dock_floats() { h / 2.0 } else { 6.0 }}
+
 fn capsule(parent : view::View, make : (view::View) -> Unit) -> view::View {
-  if signals::untracked(dock_floats) {
-    return lg::liquid_toolbar_node(parent, make, height=40.0, pad=4.0, gap=2.0)
-  }
   parent.box(fn(c) {
     c
     .row(view::Live::Is(true))
@@ -213,8 +213,8 @@ fn capsule(parent : view::View, make : (view::View) -> Unit) -> view::View {
     .gap(view::Live::Is(2.0))
     .radius(view::Live::Is(9.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
-    .ground(view::Live::By(c_s1))
-    .edge(view::Live::By(fn() { (1.0, hair()) }))
+    .ground(view::Live::By(fn() { if dock_floats() { clear(c_s1()) } else { c_s1() } }))
+    .edge(view::Live::By(fn() { if dock_floats() { (0.0, 0L) } else { (1.0, hair()) } }))
     |> ignore
     make(c)
   })}
@@ -233,8 +233,6 @@ fn solid_icon_button(parent : view::View, icon : String, label : () -> String, p
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
     .ground(view::Live::By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
-    .shadow(view::Live::By(fn() { if dock_floats() { (24.0, 6.0, 0x00000040L) } else { (0.0, 0.0, 0L) } }))
-    .shadow_outside(view::Live::Is(true))
     |> ignore
     glyph(b, fn() { icon }, 16.0, ui_on_accent)
   })}
@@ -339,7 +337,7 @@ fn play_button(parent : view::View, press : () -> Unit, playing? : () -> Bool, s
     b
     .width(view::Live::Is(Some(36.0)))
     .height(view::Live::Is(Some(32.0)))
-    .radius(view::Live::Is(6.0))
+    .radius(view::Live::By(fn() { hover_r(32.0) }))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, if stage { 0xFFFFFFB3L } else { focus_ring() }) } else { (0.0, 0L) } }))

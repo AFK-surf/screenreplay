@@ -37,7 +37,7 @@ fn volume_control(parent : view::View, stage? : Bool, rate? : () -> Double) -> U
       (close_later.v)()
       close_later.v = fn() {  }
       if on {
-        open.go_ms(area, 72.0, if motion_off() { 1.0 } else { 140.0 })
+        open.go_ms(area, 80.0, if motion_off() { 1.0 } else { 140.0 })
       } else {
         close_later.v = area.at_moment(now() + 400.0, fn() {
             open.go_ms(area, 0.0, if motion_off() { 1.0 } else { 140.0 })
@@ -49,7 +49,7 @@ fn volume_control(parent : view::View, stage? : Bool, rate? : () -> Double) -> U
       clip.box(fn(s) {
         let k = fn() { if muted.get() { 0.0 } else { volume.get() } }
         s
-        .width(view::Live::Is(Some(72.0)))
+        .width(view::Live::Is(Some(80.0)))
         .height(view::Live::Is(Some(20.0)))
         .presses(view::Live::Is(true))
         .cursor(view::Live::Is(Some(view::Cursor::Arrow)))
