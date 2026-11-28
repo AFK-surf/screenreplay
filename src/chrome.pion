@@ -118,7 +118,7 @@ fn bars_pointed() -> Bool {
 
 fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
   let foot = match foot { Some(__mbt_v) => __mbt_v, None => false }
-  let floats = fn() { full_screen.get() || (foot && float_controls.get()) }
+  let floats = fn() { full_screen.get() || (foot && float_controls.get() && !clipping.get()) }
   let way = motion::NodeWay::new(1.0)
   chrome_bars.push(bar)
   let wanted = fn() {

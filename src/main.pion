@@ -356,9 +356,7 @@ fn controls(parent : view::View) -> Unit {
       left.row(view::Live::Is(true)).grow(view::Live::Is(1.0)).basis(view::Live::Is(Some(0.0))).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))).clips(view::Live::Is(true)) |> ignore
       left.pick(fn() { clipping.get() }, fn(b, clip) {
         b.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
-        if clip && floats {
-          capsule(b, fn(c) { window_bar(c) }) |> ignore
-        } else if clip {
+        if clip {
           window_bar(b)
         } else {
           capsule(b, fn(b) {
@@ -397,24 +395,16 @@ fn controls(parent : view::View) -> Unit {
     |> ignore
     row.box(fn(mid) {
       mid.row(view::Live::Is(true)).gap(view::Live::Is(6.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
-      let slot_w = if floats { 132.0 } else { 112.0 }
+      let slot_w = 112.0
       mid.box(fn(l) {
         l.row(view::Live::Is(true)).width(view::Live::By(fn() { Some(if clipping.get() { slot_w } else { 0.0 }) })).lines_up(view::Live::Is(Some(view::Along::Middle))).lies_along(view::Live::Is(view::Lies::End)).padding(view::Live::Is((0.0, 0.0, 10.0, 0.0))) |> ignore
         l.show(fn() { clipping.get() }, fn(b) {
-          let time = fn(b : view::View) {
-            words(b, fn() {
-              let (a, z) = (clip_a.get(), clip_b.get())
-              let at = clip_time(clamp(pos_drawn(b), a, z))
-              let pace = export_speed()
-              clock(at / pace) + " / " + clock(clip_out_len())
-            }, 13.0, if floats { ui_text } else { ui_muted }, weight=500) |> ignore
-          }
-          if floats {
-            capsule(b, fn(c) { c.box(fn(t) { t.padding(view::Live::Is((10.0, 0.0, 10.0, 0.0))) |> ignore
-              time(t) }) |> ignore }) |> ignore
-          } else {
-            time(b)
-          }
+          words(b, fn() {
+            let (a, z) = (clip_a.get(), clip_b.get())
+            let at = clip_time(clamp(pos_drawn(b), a, z))
+            let pace = export_speed()
+            clock(at / pace) + " / " + clock(clip_out_len())
+          }, 13.0, ui_muted, weight=500) |> ignore
         }, at_once=true)
         |> ignore
       })
@@ -444,7 +434,6 @@ fn controls(parent : view::View) -> Unit {
       right.pick(fn() { clipping.get() }, fn(b, clip) {
         b.row(view::Live::Is(true)).gap(view::Live::Is(if clip { 10.0 } else { 2.0 })).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
         if clip {
-          let tools = fn(b : view::View) {
           window_options_button(b)
           b.box(fn(h) {
             h.row(view::Live::Is(true)).gap(view::Live::Is(2.0)).lines_up(view::Live::Is(Some(view::Along::Middle))) |> ignore
@@ -465,13 +454,7 @@ fn controls(parent : view::View) -> Unit {
           })
           |> ignore
           text_button(b, fn() { t("取消") }, fn() { clipping.set(false) }, ghost=true) |> ignore
-          }
-          if floats {
-            capsule(b, tools) |> ignore
-          } else {
-            tools(b)
-          }
-          let save_k = solid_button(b, fn() { t("保存…") }, open_export, icon="download", pill=floats, small=fn() {
+          let save_k = solid_button(b, fn() { t("保存…") }, open_export, icon="download", small=fn() {
             if cropping() {
               let (w, h, _, _, _) = export_plan()
               "\{w}×\{h} · " + size_text()
@@ -630,8 +613,9 @@ fn zoom_key(parent : view::View) -> Unit {
   tip(k, zoom_tip)
   key.v = Some(k)}
 
+// Clipping always docks: the floating deck is for watching.
 fn dock_floats() -> Bool {
-  float_controls.get() && !full_screen.get()}
+  float_controls.get() && !full_screen.get() && !clipping.get()}
 
 fn dock(parent : view::View) -> Unit {
   parent.box(fn(r) { r.height(view::Live::Is(Some(1.0))).fills_across(view::Live::Is(true)).ground(view::Live::By(hair)).laid_nowhere(view::Live::By(dock_floats)) |> ignore }) |> ignore

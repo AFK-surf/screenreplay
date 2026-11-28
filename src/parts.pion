@@ -288,20 +288,17 @@ fn text_button(parent : view::View, label : () -> String, press : () -> Unit, ic
     words(b, label, if small { 12.0 } else { 13.0 }, ink, weight=500) |> ignore
   })}
 
-fn solid_button(parent : view::View, label : () -> String, press : () -> Unit, icon? : String, small? : () -> String, pill? : Bool) -> view::View {
+fn solid_button(parent : view::View, label : () -> String, press : () -> Unit, icon? : String, small? : () -> String) -> view::View {
   let icon = match icon { Some(__mbt_v) => __mbt_v, None => "" }
-  let pill = match pill { Some(__mbt_v) => __mbt_v, None => false }
 
   pressable(parent, label, press, fn(b) {
     let (hand, _) = answer(b)
     b
     .row(view::Live::Is(true))
-    .height(view::Live::Is(Some(if pill { 40.0 } else { 32.0 })))
-    .padding(view::Live::Is(if pill { (16.0, 0.0, 16.0, 0.0) } else { (12.0, 0.0, 12.0, 0.0) }))
+    .height(view::Live::Is(Some(32.0)))
+    .padding(view::Live::Is((12.0, 0.0, 12.0, 0.0)))
     .gap(view::Live::Is(7.0))
-    .radius(view::Live::Is(if pill { 20.0 } else { 8.0 }))
-    .shadow(view::Live::Is(if pill { (22.0, 6.0, 0x00000040L) } else { (0.0, 0.0, 0L) }))
-    .shadow_outside(view::Live::Is(true))
+    .radius(view::Live::Is(8.0))
     .lines_up(view::Live::Is(Some(view::Along::Middle)))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, ui_subtle()) } else { (0.0, 0L) } }))
     .ground(view::Live::By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
