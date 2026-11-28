@@ -656,7 +656,7 @@ fn hover_card(band : view::View, w : () -> Double) -> Unit {
             }
             return if last_key.v == "" { None } else { Some((last_key.v, "", card_px.to_int())) }
           }
-          let ready = pic.image_ready(want, card_px)
+          let ready = pic.image_ready(want, 1.0)
           let stand_in = last_key.v
           if ready {
             last_key.v = want
