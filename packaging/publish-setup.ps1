@@ -28,7 +28,9 @@ if ($MacZip) {
   if ((git -C $repo rev-parse "origin/$branch").Trim() -ne $commit) { throw "push $branch first: the macOS build is made from GitHub's copy of $commit" }
   $run = $null
   for ($i = 0; $i -lt 120; $i++) {
-    $runs = gh run list -R $gh -w macos.yml --commit $commit --json databaseId,status,conclusion | ConvertFrom-Json
+    $allRuns = gh run list -R $gh -w macos.yml --commit $commit --json databaseId,status,conclusion,event | ConvertFrom-Json
+    # Only signed/notarized runs (workflow_dispatch or release workflow_call) upload ScreenReplay-mac; ignore push/PR runs.
+    $runs = @($allRuns | Where-Object { $_.event -in @("workflow_dispatch", "workflow_call") })
     $done = @($runs | Where-Object { $_.conclusion -eq "success" })
     if ($done.Count) { $run = $done[0].databaseId; break }
     if (-not @($runs | Where-Object { $_.status -ne "completed" }).Count) {

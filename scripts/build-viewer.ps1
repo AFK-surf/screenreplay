@@ -5,7 +5,8 @@ param(
     [string]$PionQbe = $env:PION_QBE,
     [string]$PionRtLib = $env:PION_RT_LIB,
     [string]$ClangBin = $env:CLANG_BIN,
-    [switch]$Test
+    [switch]$Test,
+    [switch]$TestOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,8 +54,27 @@ $wv2Dir = Join-Path (Split-Path -Parent $root) "invar\packages\host\native\webvi
 if (-not (Test-Path (Join-Path $wv2Dir "build\native\include\WebView2.h"))) {
     New-Item -ItemType Directory -Force $wv2Dir | Out-Null
     $nupkg = Join-Path $outDir "webview2-$wv2Ver.zip"
-    Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$wv2Ver" -OutFile $nupkg
-    Expand-Archive -Path $nupkg -DestinationPath $wv2Dir -Force
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = "SilentlyContinue"
+    try {
+        Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$wv2Ver" -OutFile $nupkg
+    } finally {
+        $ProgressPreference = $prevProgress
+    }
+    if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
+        $prevNativePref = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+        $tarExit = 1
+        try {
+            & tar.exe -xf $nupkg -C $wv2Dir
+            $tarExit = $LASTEXITCODE
+        } finally {
+            $PSNativeCommandUseErrorActionPreference = $prevNativePref
+        }
+        if ($tarExit -ne 0) { Expand-Archive -Path $nupkg -DestinationPath $wv2Dir -Force }
+    } else {
+        Expand-Archive -Path $nupkg -DestinationPath $wv2Dir -Force
+    }
     Remove-Item -Force $nupkg
 }
 
@@ -111,12 +131,13 @@ $buildLog = Join-Path $outDir "build-app.log"
 $relFlag = if ($Configuration -eq "Release") { "--release" } else { "" }
 $qbeLine = if ($PionQbe) { "@set `"PION_QBE=$PionQbe`"" } else { "" }
 $rtLine = if ($PionRtLib) { "@set `"PION_RT_LIB=$PionRtLib`"" } else { "" }
-$testLine = if ($Test) { "@`"$Pionc`" test . >> `"$buildLog`" 2>&1`r`n@if errorlevel 1 exit /b %ERRORLEVEL%" } else { "" }
+$buildLine = if ($TestOnly) { "" } else { "@`"$Pionc`" build $relFlag . -o `"$exeOut`" >> `"$buildLog`" 2>&1`r`n@if errorlevel 1 exit /b %ERRORLEVEL%" }
+$testLine = if ($Test -or $TestOnly) { "@`"$Pionc`" test . >> `"$buildLog`" 2>&1`r`n@if errorlevel 1 exit /b %ERRORLEVEL%" } else { "" }
 @"
 @call "$vcvars" >nul
-@"$ClangBin" -O2 "$wrapSrc" -o "$ccWrap" > "$buildLog" 2>&1
+@"$ClangBin" "$wrapSrc" -o "$ccWrap" > "$buildLog" 2>&1
 @if errorlevel 1 exit /b %ERRORLEVEL%
-@"$ClangBin" -O2 -DIS_CXX "$wrapSrc" -o "$cxxWrap" >> "$buildLog" 2>&1
+@"$ClangBin" -DIS_CXX "$wrapSrc" -o "$cxxWrap" >> "$buildLog" 2>&1
 @if errorlevel 1 exit /b %ERRORLEVEL%
 @set "CC=$ccWrap"
 @set "CXX=$cxxWrap"
@@ -124,8 +145,7 @@ $testLine = if ($Test) { "@`"$Pionc`" test . >> `"$buildLog`" 2>&1`r`n@if errorl
 $qbeLine
 $rtLine
 @cd /d "$root"
-@"$Pionc" build $relFlag . -o "$exeOut" >> "$buildLog" 2>&1
-@if errorlevel 1 exit /b %ERRORLEVEL%
+$buildLine
 $testLine
 @exit /b 0
 "@ | Set-Content -Encoding ASCII $cmdFile
@@ -137,6 +157,11 @@ if ($p.ExitCode -ne 0) {
     if (Test-Path $buildLog) { Get-Content $buildLog | Select-Object -Last 80 }
     throw "ScreenReplayViewer build failed (exit $($p.ExitCode)); full log in $buildLog"
 }
-git -C $root rev-parse --short HEAD 2>$null | Set-Content -Encoding ASCII (Join-Path $outDir "build.txt")
-$size = (Get-Item $exeOut).Length
-Write-Host "build-viewer.ps1: $exeOut ($size bytes)"
+if (($Test -or $TestOnly) -and (Test-Path $buildLog)) {
+    Select-String -Path $buildLog -Pattern '^(test |test result:)' | ForEach-Object { Write-Host $_.Line }
+}
+if (-not $TestOnly) {
+    git -C $root rev-parse --short HEAD 2>$null | Set-Content -Encoding ASCII (Join-Path $outDir "build.txt")
+    $size = (Get-Item $exeOut).Length
+    Write-Host "build-viewer.ps1: $exeOut ($size bytes)"
+}

@@ -2,6 +2,20 @@ name: Windows package
 on:
   workflow_dispatch:
   workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'native/**'
+      - 'pion.toml'
+      - 'recorder/**'
+      - 'recording/**'
+      - 'assets/**'
+      - 'scripts/build.ps1'
+      - 'scripts/build-viewer.ps1'
+      - 'packaging/pack-setup.ps1'
+      - 'packaging/ScreenReplay.iss'
+      - '.github/workflows/windows.yml'
   pull_request:
     paths:
       - 'src/**'
@@ -17,99 +31,170 @@ on:
       - '.github/workflows/windows.yml'
 permissions:
   contents: read
+env:
+  INVAR_SHA: e838c54f3a923794cd6731cabe5468a47798793a
+  PION_PACKAGES_SHA: bae0c3bed1e8078b9cc7f104e1ad1b49bf3c0091
+  PION_SHA: aa55758fb3db593eca12195cec495eaf8a65e329
 jobs:
   package:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 3
     steps:
+      - name: Record job start
+        shell: pwsh
+        run: |
+          $epoch = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          "JOB_START_EPOCH=$epoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Checkout ScreenReplay
         uses: actions/checkout@v4
         with:
           path: screenreplay
 
-      - name: Checkout invar
-        uses: actions/checkout@v4
-        with:
-          repository: AFK-surf/invar
-          ref: e838c54f3a923794cd6731cabe5468a47798793a
-          path: invar
-
-      - name: Checkout pion-packages
-        uses: actions/checkout@v4
-        with:
-          repository: AFK-surf/pion-packages
-          ref: bae0c3bed1e8078b9cc7f104e1ad1b49bf3c0091
-          path: pion-packages
-
-      - name: Checkout pion
-        uses: actions/checkout@v4
-        with:
-          repository: AFK-surf/pion
-          ref: aa55758fb3db593eca12195cec495eaf8a65e329
-          path: pion
+      - name: Checkout dependencies (invar, pion-packages, pion)
+        shell: bash
+        run: |
+          set -eu
+          clone_sha() {
+            local repo="$1" sha="$2" dir="$3"
+            mkdir -p "$dir"
+            git -C "$dir" init -q
+            git -C "$dir" remote add origin "https://github.com/$repo.git"
+            git -C "$dir" fetch --depth 1 -q origin "$sha"
+            git -C "$dir" checkout -q FETCH_HEAD
+          }
+          clone_sha AFK-surf/invar "$INVAR_SHA" invar &
+          PID1=$!
+          clone_sha AFK-surf/pion-packages "$PION_PACKAGES_SHA" pion-packages &
+          PID2=$!
+          clone_sha AFK-surf/pion "$PION_SHA" pion &
+          PID3=$!
+          FAIL=0
+          for pid in "$PID1" "$PID2" "$PID3"; do
+            wait "$pid" || FAIL=1
+          done
+          [ "$FAIL" -eq 0 ] || exit 1
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
-      - name: Cache pion toolchain
+      - name: Restore pion toolchain cache
         id: pion-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             pion/out/pionc_release.exe
             pion/out/qbe.exe
-          key: pion-win-x64-aa55758fb3db593eca12195cec495eaf8a65e329
+          key: pion-win-x64-${{ env.PION_SHA }}
 
-      - name: Setup MSYS2 for pion bootstrap
-        if: steps.pion-cache.outputs.cache-hit != 'true'
-        uses: msys2/setup-msys2@v2
+      - name: Restore WebView2 SDK cache
+        id: wv2-cache
+        uses: actions/cache/restore@v4
         with:
-          msystem: UCRT64
-          update: false
-          install: >-
-            mingw-w64-ucrt-x86_64-gcc
-            gzip
+          path: invar/packages/host/native/webview2
+          key: webview2-1.0.4258.31
 
-      - name: Bootstrap pionc (Windows x64)
-        if: steps.pion-cache.outputs.cache-hit != 'true'
-        shell: msys2 {0}
+      - name: Cache pion CAS
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\pion-cas
+          key: pion-cas-win-x64-${{ env.PION_SHA }}-${{ env.INVAR_SHA }}-${{ env.PION_PACKAGES_SHA }}-${{ hashFiles('screenreplay/pion.toml', 'screenreplay/src/**', 'screenreplay/native/**', 'screenreplay/assets/**') }}
+          restore-keys: |
+            pion-cas-win-x64-${{ env.PION_SHA }}-${{ env.INVAR_SHA }}-${{ env.PION_PACKAGES_SHA }}-
+
+      - name: Bootstrap pionc and fetch WebView2 (if needed)
+        if: steps.pion-cache.outputs.cache-hit != 'true' || steps.wv2-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           set -eu
-          cd pion
-          OUT_DIR="$PWD/out"
+          WS="$PWD"
           TMP_DIR="$(mktemp -d)"
           trap 'rm -rf "$TMP_DIR"' EXIT
-          mkdir -p "$OUT_DIR" "$TMP_DIR/qbe/amd64" "$TMP_DIR/qbe/arm64" "$TMP_DIR/qbe/rv64"
-          printf '#define Deftgt T_amd64_win\n' > "$TMP_DIR/qbe/config.h"
-          QBE_SRCS="main util parse abi cfg mem ssa alias load copy fold gvn gcm simpl ifopt live spill rega emit amd64/targ amd64/sysv amd64/isel amd64/emit amd64/winabi amd64/elf arm64/targ arm64/abi arm64/isel arm64/emit arm64/macho rv64/targ rv64/abi rv64/isel rv64/emit"
-          QBE_OBJS=""
-          QBE_PIDS=""
-          for s in $QBE_SRCS; do
-            obj="$TMP_DIR/qbe/$s.o"
-            QBE_OBJS="$QBE_OBJS $obj"
-            gcc -std=c99 -O2 -I"$TMP_DIR/qbe" -Ivendor/qbe -c "vendor/qbe/$s.c" -o "$obj" &
-            QBE_PIDS="$QBE_PIDS $!"
-          done
-          for pid in $QBE_PIDS; do wait "$pid"; done
-          gcc -O2 $QBE_OBJS -o "$OUT_DIR/qbe.exe"
-          gcc -std=c11 -O2 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
-            -Wall -Wextra -Werror -c runtime/pion_rt.c -o "$TMP_DIR/pion_rt.o"
-          gcc -std=c11 -O2 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
-            -Wall -Wextra -Werror -c runtime/pion_cli.c -o "$TMP_DIR/pion_cli.o"
-          ar rcs "$TMP_DIR/libpionrt_cli.a" "$TMP_DIR/pion_rt.o" "$TMP_DIR/pion_cli.o"
-          gzip -dc bootstrap/pionc-seed.ssa.gz > "$TMP_DIR/seed.ssa"
-          "$OUT_DIR/qbe.exe" -t amd64_win -o "$TMP_DIR/pionc0.s" "$TMP_DIR/seed.ssa"
-          gcc -Wa,-mbig-obj -c "$TMP_DIR/pionc0.s" -o "$TMP_DIR/pionc0.o"
-          gcc "$TMP_DIR/pionc0.o" "$TMP_DIR/libpionrt_cli.a" -lm -lws2_32 -Wl,--stack,16777216 -o "$TMP_DIR/pionc0.exe"
-          mkdir -p "$TMP_DIR/cas_s1"
-          CC="$(cygpath -w "$(command -v gcc)")" PION_QBE="$(cygpath -w "$OUT_DIR/qbe.exe")" \
-            PION_RT_LIB="$(cygpath -w "$TMP_DIR/libpionrt_cli.a")" \
-            PION_TARGET=amd64_win PION_CACHE_DIR="$(cygpath -w "$TMP_DIR/cas_s1")" \
-            "$TMP_DIR/pionc0.exe" build --release --emit-obj "$(cygpath -w "$TMP_DIR/pionc1.o")" \
-            compiler/src/core compiler/src/cli/main.pion
-          gcc "$TMP_DIR/pionc1.o" "$TMP_DIR/libpionrt_cli.a" -lm -lws2_32 -Wl,--stack,16777216 -o "$OUT_DIR/pionc_release.exe"
-          "$OUT_DIR/pionc_release.exe" --version
+
+          WV2_DIR="$WS/invar/packages/host/native/webview2/1.0.4258.31"
+          PID_WV2=""
+          if [ ! -f "$WV2_DIR/build/native/include/WebView2.h" ]; then
+            (
+              mkdir -p "$WV2_DIR"
+              curl -fsSL "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.4258.31" -o "$TMP_DIR/wv2.zip"
+              unzip -oq "$TMP_DIR/wv2.zip" -d "$WV2_DIR"
+            ) &
+            PID_WV2=$!
+          fi
+
+          PID_PION=""
+          if [ ! -f "$WS/pion/out/pionc_release.exe" ] || [ ! -f "$WS/pion/out/qbe.exe" ]; then
+            (
+              set -eu
+              export PATH="/c/msys64/ucrt64/bin:/c/msys64/mingw64/bin:/c/ProgramData/mingw64/mingw64/bin:$PATH"
+              command -v gcc ar gzip
+              cd "$WS/pion"
+              OUT_DIR="$PWD/out"
+              mkdir -p "$OUT_DIR" "$TMP_DIR/qbe/amd64" "$TMP_DIR/qbe/arm64" "$TMP_DIR/qbe/rv64"
+              printf '#define Deftgt T_amd64_win\n' > "$TMP_DIR/qbe/config.h"
+              QBE_SRCS="main util parse abi cfg mem ssa alias load copy fold gvn gcm simpl ifopt live spill rega emit amd64/targ amd64/sysv amd64/isel amd64/emit amd64/winabi amd64/elf arm64/targ arm64/abi arm64/isel arm64/emit arm64/macho rv64/targ rv64/abi rv64/isel rv64/emit"
+              QBE_OBJS=""
+              for s in $QBE_SRCS; do
+                QBE_OBJS="$QBE_OBJS $TMP_DIR/qbe/$s.o"
+              done
+              printf '%s\n' $QBE_SRCS | xargs -P4 -I{} \
+                sh -c 'gcc -std=c99 -O1 -I"$1" -Ivendor/qbe -c "vendor/qbe/$2.c" -o "$1/$2.o" || exit 255' _ "$TMP_DIR/qbe" {}
+              gcc -std=c11 -O2 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
+                -Wall -Wextra -Werror -c runtime/pion_rt.c -o "$TMP_DIR/pion_rt.o" &
+              PID_RT=$!
+              gcc -std=c11 -O2 -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
+                -Wall -Wextra -Werror -c runtime/pion_cli.c -o "$TMP_DIR/pion_cli.o" &
+              PID_CLI=$!
+              gzip -dc bootstrap/pionc-seed.ssa.gz > "$TMP_DIR/seed.ssa" &
+              PID_GZ=$!
+              gcc -O1 $QBE_OBJS -o "$OUT_DIR/qbe.exe" &
+              PID_QBE=$!
+              FAIL=0
+              for pid in "$PID_RT" "$PID_CLI" "$PID_GZ" "$PID_QBE"; do
+                wait "$pid" || FAIL=1
+              done
+              [ "$FAIL" -eq 0 ] || exit 1
+              ar rcs "$TMP_DIR/libpionrt_cli.a" "$TMP_DIR/pion_rt.o" "$TMP_DIR/pion_cli.o"
+              "$OUT_DIR/qbe.exe" -t amd64_win -o "$TMP_DIR/pionc0.s" "$TMP_DIR/seed.ssa"
+              gcc -Wa,-mbig-obj -c "$TMP_DIR/pionc0.s" -o "$TMP_DIR/pionc0.o"
+              gcc "$TMP_DIR/pionc0.o" "$TMP_DIR/libpionrt_cli.a" -lm -lws2_32 -Wl,--stack,16777216 -o "$TMP_DIR/pionc0.exe"
+              mkdir -p "$TMP_DIR/cas_s1"
+              CC="$(cygpath -w "$(command -v gcc)")" PION_QBE="$(cygpath -w "$OUT_DIR/qbe.exe")" \
+                PION_RT_LIB="$(cygpath -w "$TMP_DIR/libpionrt_cli.a")" \
+                PION_TARGET=amd64_win PION_CACHE_DIR="$(cygpath -w "$TMP_DIR/cas_s1")" \
+                "$TMP_DIR/pionc0.exe" build --release --emit-obj "$(cygpath -w "$TMP_DIR/pionc1.o")" \
+                compiler/src/core compiler/src/cli/main.pion
+              gcc "$TMP_DIR/pionc1.o" "$TMP_DIR/libpionrt_cli.a" -lm -lws2_32 -Wl,--stack,16777216 -o "$OUT_DIR/pionc_release.exe"
+              "$OUT_DIR/pionc_release.exe" --version
+            ) &
+            PID_PION=$!
+          fi
+
+          STEP_FAIL=0
+          if [ -n "$PID_PION" ]; then
+            wait "$PID_PION" || STEP_FAIL=1
+          fi
+          if [ -n "$PID_WV2" ]; then
+            wait "$PID_WV2" || STEP_FAIL=1
+          fi
+          [ "$STEP_FAIL" -eq 0 ] || exit 1
+
+      - name: Save pion toolchain cache
+        if: steps.pion-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            pion/out/pionc_release.exe
+            pion/out/qbe.exe
+          key: pion-win-x64-${{ env.PION_SHA }}
+
+      - name: Save WebView2 SDK cache
+        if: steps.wv2-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: invar/packages/host/native/webview2
+          key: webview2-1.0.4258.31
 
       - name: Install Inno Setup
         shell: pwsh
@@ -119,22 +204,16 @@ jobs:
             if ($LASTEXITCODE) { throw "Inno Setup did not install" }
           }
 
-      - name: Build ScreenReplay
+      - name: Build ScreenReplay and run viewer regression tests
         shell: pwsh
         env:
           PIONC: ${{ github.workspace }}\pion\out\pionc_release.exe
           PION_QBE: ${{ github.workspace }}\pion\out\qbe.exe
-        run: .\screenreplay\scripts\build.ps1
-
-      - name: Run viewer regression tests
-        shell: pwsh
-        env:
-          PIONC: ${{ github.workspace }}\pion\out\pionc_release.exe
-          PION_QBE: ${{ github.workspace }}\pion\out\qbe.exe
-        run: .\screenreplay\scripts\build-viewer.ps1 -Test
+          PION_CACHE_DIR: ${{ runner.temp }}\pion-cas
+        run: .\screenreplay\scripts\build.ps1 -Test -StageDir screenreplay\out-setup-stage\stage
 
       - name: The replay window's build log
-        if: failure()
+        if: failure() || cancelled()
         shell: pwsh
         run: if (Test-Path screenreplay\out\build-app.log) { Get-Content screenreplay\out\build-app.log -Tail 200 }
 
@@ -142,7 +221,11 @@ jobs:
         shell: pwsh
         run: |
           $ver = (Select-String -Path screenreplay\src\about.pion -Pattern '^let app_version : String = "([^"]+)"').Matches[0].Groups[1].Value
-          $setup = .\screenreplay\packaging\pack-setup.ps1 -Version $ver | Select-Object -Last 1
+          $stage = "screenreplay\out-setup-stage\stage"
+          Copy-Item "screenreplay\out\ScreenReplayViewer.exe" $stage -Force
+          $git = (git -C screenreplay rev-parse --short HEAD).Trim()
+          Set-Content -Path "$stage\build.txt" -Value "$ver $git" -Encoding ascii
+          $setup = .\screenreplay\packaging\pack-setup.ps1 -Version $ver -Stage $stage | Select-Object -Last 1
           "$($setup.Name): $($setup.Length) bytes, sha256 $((Get-FileHash -Algorithm SHA256 $setup).Hash.ToLower())"
 
       - uses: actions/upload-artifact@v4
@@ -150,3 +233,13 @@ jobs:
           name: ScreenReplay-windows
           path: screenreplay/out/setup/ScreenReplay-Setup-*.exe
           if-no-files-found: error
+
+      - name: Check 60s duration target
+        if: always()
+        shell: pwsh
+        run: |
+          $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$env:JOB_START_EPOCH
+          Write-Host "Job windows-package duration: ${elapsed}s"
+          if ($elapsed -gt 60) {
+            Write-Host "::warning title=CI duration > 60s::windows-package took ${elapsed}s (target <= 60s, hard timeout 180s)"
+          }
