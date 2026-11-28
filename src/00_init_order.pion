@@ -461,6 +461,8 @@ let float_controls : signals::Signal[Bool] = signals::signal(false)
 // Set while a floating capsule builds what it holds: its buttons take the capsule's concentric 32 pt pill shape.
 let float_bar : mbt_compat::Ref[Bool] = mbt_compat::ref_new(false)
 
+let chrome_bars : Array[view::View] = []
+
 let saved : signals::Signal[String] = signals::signal("")
 
 let saved_path : signals::Signal[String] = signals::signal("")

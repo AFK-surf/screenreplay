@@ -108,13 +108,24 @@ fn volume_control(parent : view::View, stage? : Bool, rate? : () -> Double) -> U
   })
   |> ignore}
 
+fn bars_pointed() -> Bool {
+  for b in chrome_bars {
+    if b.pointed_in() {
+      return true
+    }
+  }
+  false}
+
 fn chrome(root : view::View, bar : view::View, foot? : Bool) -> Unit {
   let foot = match foot { Some(__mbt_v) => __mbt_v, None => false }
   let floats = fn() { full_screen.get() || (foot && float_controls.get()) }
   let way = motion::NodeWay::new(1.0)
+  chrome_bars.push(bar)
   let wanted = fn() {
     !floats() ||
     (pointer_lately.v)() ||
+    bars_pointed() ||
+    view_dragging.get() ||
     clipping.get() ||
     menu_up.get() ||
     grabbed.get() != 0 ||
