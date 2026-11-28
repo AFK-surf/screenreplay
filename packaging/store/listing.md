@@ -78,7 +78,7 @@ Completely free, every feature, no time limit. If it helps you, you can support 
 
 **Search terms (≤ 7):** screen recorder, instant replay, rewind, screen capture, clip, game recording, background recording
 
-**What's new in this version (0.1.26):** Global shortcuts (open replay, mark this moment, save the last moments) can each be changed or removed in Settings › Shortcuts, which now lists global shortcuts and those inside the replay window separately; a shortcut another app already holds is flagged there. Fixed Settings… and Open replay in the tray panel sometimes doing nothing. Fixed the first character of Chinese app names on the timeline badges.
+**What's new in this version (0.1.27):** A cleaner bottom bar: icon buttons in three groups, and a timeline whose app lane, sound wave and time marks no longer overlap. While clipping, the playback speed is the export speed (“Export 2×”), with the sound kept at its pitch up to 4×; hold Ctrl (⌘ on Mac) to move the selection, a plain drag in it moves the playhead. Drag the picture to move the window. New-style menus. Fixed the picture being squeezed in windows narrower than the recording, and the timeline preview flashing black while scrubbing.
 
 **Copyright:** © 2026 pengx17 · **Privacy policy URL:** https://screenreplay.hisenxpress.workers.dev/privacy ·
 **Website:** https://screenreplay.hisenxpress.workers.dev · **Support contact:** the site's feedback link.
@@ -122,7 +122,7 @@ ScreenReplay 用显卡的硬件编码器在后台安静地录屏，只保留最�
 
 **搜索词：** 录屏, 即时回放, 回放, 屏幕录制, 剪辑, 游戏录制, 后台录制
 
-**此版本新增内容（0.1.26）：** 全局快捷键（打开回放、标记此刻、保存最近一段）可以在「设置 › 快捷键」里逐个更换或移除，快捷键列表分成全局和回放窗口内两组，被其他程序占用的会直接标出；修复托盘面板里点「设置…」「打开回放」有时没有反应的问题；修复时间轴上中文应用名首字显示不全的问题。
+**此版本新增内容（0.1.27）：** 底栏重新整理：按钮改成图标、分成三组，时间轴上的应用条、声音波形和时间刻度不再互相压着；剪辑时预览倍速就是导出倍速（「导出 2×」），4× 以内声音保持原音高；剪辑时按住 Ctrl（Mac 上是 ⌘）拖动才移动选区，直接拖是拖播放头；按住画面拖动可以移动窗口；菜单换成新样式；修复窗口比录像窄时画面被横向挤扁、拖动时间轴时预览小图闪黑的问题。
 
 ## Screenshots (1920×1080 or larger, English and Chinese sets, fixture recordings only)
 
