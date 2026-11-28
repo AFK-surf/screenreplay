@@ -98,6 +98,8 @@ fn glyph_vector(name : String) -> Option[pixels::Vector] {
           ("M8.12 8.12L12 12", 2.25),
         ]),
       )
+    "panel-float" => Option::Some(vectors(16.0, 16.0, [("M3 2.75h10a1.25 1.25 0 0 1 1.25 1.25v8a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12V4A1.25 1.25 0 0 1 3 2.75z", 1.4), ("M4.75 10.25h6.5", 1.6)]))
+    "panel-dock" => Option::Some(vectors(16.0, 16.0, [("M3 2.75h10a1.25 1.25 0 0 1 1.25 1.25v8a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12V4A1.25 1.25 0 0 1 3 2.75z", 1.4), ("M1.75 10h12.5", 1.4)]))
     "to-end" => Option::Some(vectors(24.0, 24.0, [("M17 12H3", 2.25), ("M11 18l6-6-6-6", 2.25), ("M21 5v14", 2.25)]))
     "warn-tri" =>
       Option::Some(
@@ -200,6 +202,9 @@ fn icon_button_bare(parent : view::View, name : () -> String, label : () -> Stri
   })}
 
 fn capsule(parent : view::View, make : (view::View) -> Unit) -> view::View {
+  if signals::untracked(dock_floats) {
+    return lg::liquid_toolbar_node(parent, make, height=40.0, pad=4.0, gap=2.0)
+  }
   parent.box(fn(c) {
     c
     .row(view::Live::Is(true))
@@ -228,6 +233,8 @@ fn solid_icon_button(parent : view::View, icon : String, label : () -> String, p
     .lies_along(view::Live::Is(view::Lies::Middle))
     .edge(view::Live::By(fn() { if b.focus_shown() { (1.5, focus_ring()) } else { (0.0, 0L) } }))
     .ground(view::Live::By(fn() { mix(ui_accent(), ui_accent_hover(), hand.shown(b)) }))
+    .shadow(view::Live::By(fn() { if dock_floats() { (24.0, 6.0, 0x00000040L) } else { (0.0, 0.0, 0L) } }))
+    .shadow_outside(view::Live::Is(true))
     |> ignore
     glyph(b, fn() { icon }, 16.0, ui_on_accent)
   })}
